@@ -23,6 +23,7 @@ export class CsvEditorProvider implements vscode.CustomTextEditorProvider {
         webviewPanel.webview.options = { enableScripts: true };
 
         const delimiter = this.detectDelimiter(document.fileName, document.getText());
+        let suppressExternalUpdate = false;
 
         webviewPanel.webview.html = getWebviewContent(
             webviewPanel.webview,
@@ -31,9 +32,24 @@ export class CsvEditorProvider implements vscode.CustomTextEditorProvider {
             delimiter
         );
 
-        // Update webview when document changes
+        // Handle messages from webview (cell edits)
+        webviewPanel.webview.onDidReceiveMessage(async (msg) => {
+            if (msg.type === 'edit') {
+                const edit = new vscode.WorkspaceEdit();
+                edit.replace(
+                    document.uri,
+                    new vscode.Range(0, 0, document.lineCount, 0),
+                    msg.text
+                );
+                suppressExternalUpdate = true;
+                await vscode.workspace.applyEdit(edit);
+                suppressExternalUpdate = false;
+            }
+        });
+
+        // Update webview when document changes externally
         const changeSubscription = vscode.workspace.onDidChangeTextDocument(e => {
-            if (e.document.uri.toString() === document.uri.toString()) {
+            if (e.document.uri.toString() === document.uri.toString() && !suppressExternalUpdate) {
                 webviewPanel.webview.postMessage({
                     type: 'update',
                     text: document.getText(),

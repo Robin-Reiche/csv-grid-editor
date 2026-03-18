@@ -1,0 +1,16 @@
+.vscode/**
+.claude/**
+src/**
+docs/**
+test_data/**
+media/**
+node_modules/**
+.vscode-test/**
+*.vsix
+*.ts
+!out/**
+tsconfig.json
+feature_ideen.txt
+test.csv
+.gitignore
+package-lock.json

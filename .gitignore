@@ -1,4 +1,11 @@
-out/
 node_modules/
+out/
 *.vsix
 .vscode-test/
+.vscode/
+.claude/
+test_data/
+docs/
+media/
+feature_ideen.txt
+test.csv

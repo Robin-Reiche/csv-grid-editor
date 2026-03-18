@@ -1,14 +1,28 @@
 {
   "name": "csv-viewer",
   "displayName": "CSV Viewer",
-  "description": "View CSV files in a sortable, filterable grid powered by AG Grid",
+  "description": "View and edit CSV/TSV files in a sortable, filterable grid with auto-fit columns, zoom, and theme integration",
   "version": "0.1.0",
   "publisher": "robin",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Robin-Reiche/csv-viewer-extension"
+  },
   "engines": {
     "vscode": "^1.80.0"
   },
   "categories": [
-    "Visualization"
+    "Visualization",
+    "Other"
+  ],
+  "keywords": [
+    "csv",
+    "tsv",
+    "viewer",
+    "grid",
+    "spreadsheet",
+    "table"
   ],
   "activationEvents": [],
   "main": "./out/extension.js",
