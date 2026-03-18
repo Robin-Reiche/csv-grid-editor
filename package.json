@@ -1,10 +1,11 @@
 {
-  "name": "csv-viewer",
-  "displayName": "CSV Viewer",
+  "name": "csv-grid-viewer",
+  "displayName": "CSV Grid Viewer",
   "description": "View and edit CSV/TSV files in a sortable, filterable grid with auto-fit columns, zoom, and theme integration",
   "version": "0.1.0",
-  "publisher": "robin",
+  "publisher": "RobinReiche",
   "license": "MIT",
+  "icon": "icon.png",
   "repository": {
     "type": "git",
     "url": "https://github.com/Robin-Reiche/csv-viewer-extension"
