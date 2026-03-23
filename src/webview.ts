@@ -481,11 +481,25 @@ export function getWebviewContent(
 
             const columnDefs = [];
 
+            // Detect which columns are numeric (sample up to 100 rows)
+            function isColumnNumeric(colIndex) {
+                var sampleSize = Math.min(bodyRows.length, 100);
+                var numCount = 0;
+                var nonEmpty = 0;
+                for (var r = 0; r < sampleSize; r++) {
+                    var val = bodyRows[r] && bodyRows[r][colIndex] ? bodyRows[r][colIndex] : '';
+                    if (val === '') continue;
+                    nonEmpty++;
+                    if (!isNaN(Number(val))) numCount++;
+                }
+                return nonEmpty > 0 && numCount / nonEmpty > 0.8;
+            }
+
             for (let c = 0; c < numCols; c++) {
                 const headerName = headerRow[c] !== undefined
                     ? headerRow[c]
                     : '';
-                columnDefs.push({
+                const colDef = {
                     headerName: headerName,
                     field: 'col_' + c,
                     minWidth: 60,
@@ -494,7 +508,15 @@ export function getWebviewContent(
                     filter: true,
                     resizable: true,
                     suppressMovable: false,
-                });
+                };
+                if (isColumnNumeric(c)) {
+                    colDef.comparator = function(a, b) {
+                        var numA = a === '' || a == null ? -Infinity : Number(a);
+                        var numB = b === '' || b == null ? -Infinity : Number(b);
+                        return numA - numB;
+                    };
+                }
+                columnDefs.push(colDef);
             }
 
             // Convert body data to row objects (skip header row)
