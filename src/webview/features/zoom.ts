@@ -63,10 +63,15 @@ export function applyZoom(): void {
     }
 }
 
+function persistZoom(): void {
+    vscodeApi.postMessage({ type: 'zoomChanged', zoomIndex: state.zoomIndex });
+}
+
 export function zoomIn(): void {
     if (state.zoomIndex < state.ZOOM_STEPS.length - 1) {
         state.zoomIndex++;
         applyZoom();
+        persistZoom();
     }
 }
 
@@ -74,6 +79,7 @@ export function zoomOut(): void {
     if (state.zoomIndex > 0) {
         state.zoomIndex--;
         applyZoom();
+        persistZoom();
     }
 }
 

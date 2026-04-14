@@ -11,6 +11,10 @@ function initWithData(text: string, delimiter: string): void {
     state.rawCsvText      = text;
     state.currentDelimiter = delimiter;
     state.data = parseCsv(text, delimiter);
+    state.isAutoFitted     = false;
+    state.autoFitCache     = null;
+    state.autoFitCacheZoom = -1;
+    state.zoomIndex        = Math.max(0, Math.min(INITIAL_ZOOM_INDEX, state.ZOOM_STEPS.length - 1));
 
     updateDelimiterBadge(delimiter);
 

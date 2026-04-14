@@ -9,7 +9,8 @@ export function getWebviewContent(
     totalLineCount: number = 0,
     fileName: string = '',
     isChunked: boolean = false,
-    isMac: boolean = false
+    isMac: boolean = false,
+    zoomIndex: number = 4
 ): string {
     const nonce = getNonce();
     const mod   = isMac ? '⌘' : 'Ctrl+';
@@ -104,7 +105,7 @@ export function getWebviewContent(
         <div    class="separator"                                 ${isPreview ? 'style="display:none;"' : ''}></div>
         <button id="btn-autofit" title="Auto-fit column widths"><i class="codicon codicon-arrow-both"></i></button>
         <div    class="separator"></div>
-        <button id="btn-clear-filters" title="Clear all filters" style="display:none;" class="text-btn"><i class="codicon codicon-filter-filled"></i> Filters</button>
+        <button id="btn-clear-filters" title="Clear all filters" style="display:none;"><i class="codicon codicon-filter-filled"></i><span class="filter-clear-label">Clear</span></button>
         <div    class="separator" id="sep-filters" style="display:none;"></div>
         <button id="btn-zoom-out" title="Decrease size (${mod}-)"><i class="codicon codicon-zoom-out"></i></button>
         <span   id="zoom-level"  style="font-size:11px;min-width:28px;text-align:center;opacity:0.6;">100%</span>
@@ -179,10 +180,17 @@ export function getWebviewContent(
         </div>
     </div><!-- /#content-row -->
 
-    <!-- Column freeze context menu [F5] -->
+    <!-- Column context menu [F5] -->
     <div id="col-context-menu" class="col-context-menu hidden">
         <div id="col-ctx-freeze"   class="col-ctx-item">&#x1F4CC; Freeze column</div>
         <div id="col-ctx-unfreeze" class="col-ctx-item" style="display:none;">&#x1F4CC; Unfreeze column</div>
+        <div class="col-ctx-separator"></div>
+        <div id="col-ctx-delete"   class="col-ctx-item danger">&#x2715; Delete column</div>
+    </div>
+
+    <!-- Row context menu -->
+    <div id="row-context-menu" class="row-context-menu hidden">
+        <div id="row-ctx-delete" class="row-ctx-item danger">&#x2715; Delete row</div>
     </div>
 
     <!-- Pagination bar [F7] -->
@@ -210,7 +218,8 @@ export function getWebviewContent(
         const TOTAL_LINE_COUNT = ${totalLineCount};
         const DELIMITER      = '${escapedDelimiter}';
         const FILENAME       = '${fileName.replace(/'/g, "\\'")}';
-        const IS_CHUNKED     = ${isChunked ? 'true' : 'false'};
+        const IS_CHUNKED          = ${isChunked ? 'true' : 'false'};
+        const INITIAL_ZOOM_INDEX  = ${zoomIndex};
     </script>
 
     <!-- Bundled webview logic -->

@@ -2,7 +2,7 @@
   "name": "csv-grid-editor",
   "displayName": "CSV Grid Editor",
   "description": "View and edit CSV/TSV files in a sortable, filterable grid with auto-fit columns, zoom, and theme integration",
-  "version": "1.2.0",
+  "version": "1.2.2",
   "publisher": "RobinReiche",
   "license": "MIT",
   "icon": "icon.png",

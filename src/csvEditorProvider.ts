@@ -147,7 +147,8 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         this._webviews.set(document.uri.toString(), webviewPanel);
         webviewPanel.onDidDispose(() => this._webviews.delete(document.uri.toString()));
 
-        const fileName = path.basename(document.uri.fsPath);
+        const fileName  = path.basename(document.uri.fsPath);
+        const zoomIndex = this.context.globalState.get<number>('csvGridEditor.zoomIndex', 4);
 
         webviewPanel.webview.html = getWebviewContent(
             webviewPanel.webview,
@@ -158,7 +159,8 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             document.totalLineCount,
             fileName,
             document.isChunked,
-            process.platform === 'darwin'
+            process.platform === 'darwin',
+            zoomIndex
         );
 
         // F3: File System Watcher — auto-reload on external changes (non-preview only)
@@ -203,6 +205,9 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
                         delimiter: document.delimiter
                     });
                 }
+            } else if (msg.type === 'zoomChanged') {
+                this.context.globalState.update('csvGridEditor.zoomIndex', msg.zoomIndex);
+
             } else if (msg.type === 'edit' && !document.isPreview) {
                 document.content = msg.text;
                 this._onDidChangeCustomDocument.fire({ document });
