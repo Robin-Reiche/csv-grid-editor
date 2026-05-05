@@ -6,7 +6,11 @@ out/
 .claude/
 test_data/
 docs/
-media/
+# media/ holds the committed static stylesheet (webview.css) AND build output.
+# Ignore only the generated parts so CI ends up with a complete folder.
+media/webview.js
+media/codicon.css
+media/codicon.ttf
 feature_ideen.txt
 test.csv
 clearView_code_example

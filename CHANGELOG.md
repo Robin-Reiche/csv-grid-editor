@@ -2,6 +2,11 @@
 
 All notable changes to CSV Grid Editor are documented here.
 
+## [1.3.4] - 2026-05-05
+
+### Fixed
+- **Critical:** Webview CSS and codicon font were missing from the published package because `media/` was gitignored in its entirety. The CI build only generated `media/webview.js` via esbuild — the static stylesheet and codicon assets were never produced, leaving the grid unstyled in the Marketplace install. `media/webview.css` is now tracked, and a new `copy-codicons` build step copies `codicon.css` / `codicon.ttf` from `node_modules/@vscode/codicons` on every compile.
+
 ## [1.3.3] - 2026-05-03
 
 ### Fixed
