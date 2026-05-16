@@ -1,6 +1,9 @@
 import type { ColType } from '../types';
 
-type Condition = { type: string; value: string };
+// `join` is the operator linking this condition to the previous one in the
+// list (unused on the first condition). Conditions with join 'or' start a new
+// OR-group; AND binds tighter than OR.
+type Condition = { type: string; value: string; join: 'and' | 'or' };
 
 export function createCombinedFilter(colType: ColType): any {
     return class {
@@ -8,7 +11,7 @@ export function createCombinedFilter(colType: ColType): any {
         allValues: string[] = [];
         hasBlank = false;
         checkedValues = new Set<string>();
-        conditions: Condition[] = [{ type: 'none', value: '' }];
+        conditions: Condition[] = [{ type: 'none', value: '', join: 'and' }];
         eGui!: HTMLElement;
         _searchQuery = '';
         truncated = false;
@@ -129,16 +132,26 @@ export function createCombinedFilter(colType: ColType): any {
             return true;
         }
 
-        _passesAllConditions(valStr: string): boolean {
-            return this.conditions.every(c => this._passesSingleCondition(valStr, c));
+        _passesConditions(valStr: string): boolean {
+            // Active conditions are split into OR-groups: a new group begins at
+            // each condition whose join is 'or'. AND binds tighter than OR, so
+            // the value passes when every condition of any one group passes.
+            const active = this.conditions.filter(c => c.type !== 'none');
+            if (active.length === 0) return true;
+            const groups: Condition[][] = [[]];
+            active.forEach((c, idx) => {
+                if (idx > 0 && c.join === 'or') groups.push([]);
+                groups[groups.length - 1].push(c);
+            });
+            return groups.some(g => g.every(c => this._passesSingleCondition(valStr, c)));
         }
 
         _valuesPassingCondition(): string[] {
-            return this.allValues.filter(v => this._passesAllConditions(v));
+            return this.allValues.filter(v => this._passesConditions(v));
         }
 
         _showBlankInList(): boolean {
-            return this.hasBlank && this._passesAllConditions('');
+            return this.hasBlank && this._passesConditions('');
         }
 
         _hasAnyActiveCondition(): boolean {
@@ -166,12 +179,23 @@ export function createCombinedFilter(colType: ColType): any {
             const rebuildCondRows = () => {
                 condRowsDiv.innerHTML = '';
                 this.conditions.forEach((cond, i) => {
-                    // AND label between rows
+                    // AND/OR join toggle between rows — click to flip the operator
                     if (i > 0) {
-                        const andLbl = document.createElement('div');
-                        andLbl.className = 'csv-filter-and-label';
-                        andLbl.textContent = 'AND';
-                        condRowsDiv.appendChild(andLbl);
+                        if (cond.join !== 'or') cond.join = 'and';
+                        const joinBtn = document.createElement('button');
+                        joinBtn.type = 'button';
+                        joinBtn.className = 'csv-filter-join-toggle';
+                        joinBtn.title = 'Toggle AND / OR';
+                        joinBtn.textContent = cond.join === 'or' ? 'OR' : 'AND';
+                        joinBtn.dataset.join = cond.join;
+                        joinBtn.addEventListener('click', () => {
+                            cond.join = cond.join === 'or' ? 'and' : 'or';
+                            joinBtn.textContent = cond.join === 'or' ? 'OR' : 'AND';
+                            joinBtn.dataset.join = cond.join;
+                            this._renderValuesList?.();
+                            this.params.filterChangedCallback();
+                        });
+                        condRowsDiv.appendChild(joinBtn);
                     }
 
                     const row = document.createElement('div');
@@ -221,7 +245,7 @@ export function createCombinedFilter(colType: ColType): any {
                     removeBtn.addEventListener('click', () => {
                         if (this.conditions.length === 1) {
                             // Reset instead of removing
-                            this.conditions[0] = { type: 'none', value: '' };
+                            this.conditions[0] = { type: 'none', value: '', join: 'and' };
                         } else {
                             this.conditions.splice(i, 1);
                         }
@@ -241,7 +265,7 @@ export function createCombinedFilter(colType: ColType): any {
                 const lastCond = this.conditions[this.conditions.length - 1];
                 addBtn.disabled = lastCond.type === 'none';
                 addBtn.addEventListener('click', () => {
-                    this.conditions.push({ type: 'none', value: '' });
+                    this.conditions.push({ type: 'none', value: '', join: 'and' });
                     rebuildCondRows();
                     this.params.filterChangedCallback();
                 });
@@ -371,34 +395,38 @@ export function createCombinedFilter(colType: ColType): any {
                 if (!this.checkedValues.has(key)) return false;
             }
 
-            // 2. All conditions (AND)
-            return this._passesAllConditions(valStr);
+            // 2. Conditions (AND/OR groups)
+            return this._passesConditions(valStr);
         }
 
         getModel() {
             if (!this.isFilterActive()) return null;
             return {
-                conditions: this.conditions.map(c => ({ type: c.type, value: c.value })),
+                conditions: this.conditions.map(c => ({ type: c.type, value: c.value, join: c.join })),
                 checkedValues: Array.from(this.checkedValues),
             };
         }
 
         setModel(model: any) {
             if (model == null) {
-                this.conditions = [{ type: 'none', value: '' }];
+                this.conditions = [{ type: 'none', value: '', join: 'and' }];
                 this._searchQuery = '';
                 this.checkedValues = new Set(this.allValues);
                 if (this.hasBlank) this.checkedValues.add('__blank__');
             } else {
-                // Support legacy single-condition format
+                // Support legacy single-condition format and models without `join`
                 if (Array.isArray(model.conditions)) {
-                    this.conditions = model.conditions.map((c: any) => ({ type: c.type || 'none', value: c.value || '' }));
+                    this.conditions = model.conditions.map((c: any) => ({
+                        type: c.type || 'none',
+                        value: c.value || '',
+                        join: c.join === 'or' ? 'or' : 'and',
+                    }));
                 } else if (model.condType) {
-                    this.conditions = [{ type: model.condType, value: model.condValue || '' }];
+                    this.conditions = [{ type: model.condType, value: model.condValue || '', join: 'and' }];
                 } else {
-                    this.conditions = [{ type: 'none', value: '' }];
+                    this.conditions = [{ type: 'none', value: '', join: 'and' }];
                 }
-                if (this.conditions.length === 0) this.conditions = [{ type: 'none', value: '' }];
+                if (this.conditions.length === 0) this.conditions = [{ type: 'none', value: '', join: 'and' }];
                 this.checkedValues = new Set(model.checkedValues || this.allValues);
             }
             this._render();

@@ -1,5 +1,7 @@
 .vscode/**
 .claude/**
+.superpowers/**
+clearView_code_example/**
 src/**
 docs/**
 test_data/**

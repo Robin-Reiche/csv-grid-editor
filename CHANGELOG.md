@@ -2,6 +2,20 @@
 
 All notable changes to CSV Grid Editor are documented here.
 
+## [1.5.0] - 2026-05-16
+
+### Added
+- **Inline range selection** — Excel-style cell selection directly in the grid. Click and drag to select a rectangular range, drag the row-number (`#`) column to select whole rows, or right-click a column header → **Select column**. `Shift`+click and `Shift`+arrow keys extend the selection; `Ctrl+A` selects everything. `Ctrl+C` copies the selection as tab-separated values; right-click → **Copy with header** to include column headers. `Delete` / `Backspace` clears the selected cells. The status bar shows the selection size plus live Count / Sum / Avg / Min / Max.
+- **Paste** — paste tab- or comma-separated clipboard data straight into the grid, starting at the focused cell. Integrates with the undo stack.
+- **AND / OR filter conditions** — each condition in a column filter can now be joined with AND *or* OR (previously AND-only). Click the operator pill between two conditions to toggle it; AND binds tighter than OR.
+
+### Changed
+- **Unified iconography** — every icon (column headers, toolbar, profile panel, banners) now comes from a single VS Code Codicon family, replacing the previous mix of hand-drawn SVG, Unicode glyphs and emoji. Header sort and filter glyphs are sized and centred consistently.
+- A column's filter funnel now fills solid white while a filter is active on that column, making filtered columns easy to spot.
+
+### Removed
+- The standalone **Select & Copy** mode (a separate read-only view) — superseded by the inline range selection above.
+
 ## [1.3.4] - 2026-05-05
 
 ### Fixed

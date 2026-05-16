@@ -6,27 +6,97 @@ import { getFindCellClassRules } from '../features/find-replace';
 import { attachHeaderContextMenus } from '../features/freeze-columns';
 import { applyZoom } from '../features/zoom';
 import { applyGridTheme } from '../features/theme';
+import {
+    getRangeCellClassRules,
+    onCellMouseDownHandler,
+    onCellMouseOverHandler,
+    clearRangeSelection,
+} from '../features/range-select';
 
 const TYPE_LABELS: Record<string, string> = {
     integer: 'Integer', float: 'Float / Decimal', string: 'Text',
     boolean: 'Boolean', date: 'Date', datetime: 'Date & Time', time: 'Time'
 };
 
-// ── Row-index highlight via a dynamic <style> tag ─────────────────────────────
-// Using a CSS [row-index="N"] selector instead of AG Grid's class/selection APIs
-// makes the highlight immune to virtual-scroll re-renders and AG Grid version quirks.
-export function applyRowIndexHighlight(): void {
-    let el = document.getElementById('_row-hl') as HTMLStyleElement | null;
-    if (!el) {
-        el = document.createElement('style');
-        el.id = '_row-hl';
-        document.head.appendChild(el);
-    }
-    const n = state.rowIndexSelected;
-    el.textContent = n === null ? '' : `
-#grid-container .ag-row[row-index="${n}"] .ag-cell{background:var(--vscode-list-inactiveSelectionBackground,rgba(55,148,255,.18))!important;border-top-color:var(--vscode-focusBorder,#007fd4)!important;border-bottom-color:var(--vscode-focusBorder,#007fd4)!important}
-#grid-container .ag-row[row-index="${n}"] .row-index-cell{background:rgba(55,148,255,.35)!important;color:var(--vscode-focusBorder,#007fd4)!important;font-weight:700!important}
-    `;
+// ── Grid icons ───────────────────────────────────────────────────────────
+// AG Grid header icons are rendered as inline SVG built from the official
+// VS Code Codicon path data (16×16 viewBox) so the grid shares the toolbar's
+// icon family. SVG is used rather than the Codicon font because it sizes and
+// centres predictably inside AG Grid's nested header layout — the font glyphs
+// do not. CSS sizes and centres these (see media/webview.css → .ag-icon).
+// Explicit width/height on the <svg> element itself — an SVG with only a
+// viewBox falls back to the 300×150 default size and gets clipped to nothing.
+const codiconSvg = (inner: string, cls = ''): string =>
+    `<svg width="12" height="12" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" fill="currentColor"`
+    + `${cls ? ` class="${cls}"` : ''}>${inner}</svg>`;
+
+const CHEVRON_UP    = '<path d="M3.14603 9.85423C3.34103 10.0492 3.65803 10.0492 3.85303 9.85423L7.99903 5.70823L12.145 9.85423C12.34 10.0492 12.657 10.0492 12.852 9.85423C13.047 9.65923 13.047 9.34223 12.852 9.14723L8.35203 4.64723C8.15703 4.45223 7.84003 4.45223 7.64503 4.64723L3.14503 9.14723C2.95003 9.34223 2.95103 9.65923 3.14603 9.85423Z"/>';
+const CHEVRON_DOWN  = '<path d="M3.14598 5.85423L7.64598 10.3542C7.84098 10.5492 8.15798 10.5492 8.35298 10.3542L12.853 5.85423C13.048 5.65923 13.048 5.34223 12.853 5.14723C12.658 4.95223 12.341 4.95223 12.146 5.14723L7.99998 9.29323L3.85398 5.14723C3.65898 4.95223 3.34198 4.95223 3.14698 5.14723C2.95198 5.34223 2.95098 5.65923 3.14598 5.85423Z"/>';
+const CHEVRON_LEFT  = '<path d="M9.14601 3.14623L4.64601 7.64623C4.45101 7.84123 4.45101 8.15823 4.64601 8.35323L9.14601 12.8532C9.34101 13.0482 9.65801 13.0482 9.85301 12.8532C10.048 12.6582 10.048 12.3412 9.85301 12.1462L5.70701 8.00023L9.85301 3.85423C10.048 3.65923 10.048 3.34223 9.85301 3.14723C9.65801 2.95223 9.34101 2.95223 9.14601 3.14723V3.14623Z"/>';
+const CHEVRON_RIGHT = '<path d="M6.14601 3.14579C5.95101 3.34079 5.95101 3.65779 6.14601 3.85279L10.292 7.99879L6.14601 12.1448C5.95101 12.3398 5.95101 12.6568 6.14601 12.8518C6.34101 13.0468 6.65801 13.0468 6.85301 12.8518L11.353 8.35179C11.548 8.15679 11.548 7.83979 11.353 7.64478L6.85301 3.14479C6.65801 2.94979 6.34101 2.95079 6.14601 3.14579Z"/>';
+
+const GRID_ICONS = {
+    sortAscending:  codiconSvg('<path d="M4.95693 10.9989C4.14924 10.9989 3.67479 10.0909 4.13603 9.42784L6.76866 5.64342C7.36545 4.78555 8.6346 4.78555 9.23138 5.64342L11.864 9.42784C12.3253 10.0909 11.8508 10.9989 11.0431 10.9989H4.95693Z"/>'),
+    sortDescending: codiconSvg('<path d="M4.95693 5C4.14924 5 3.67479 5.90803 4.13603 6.57107L6.76866 10.3555C7.36545 11.2134 8.6346 11.2133 9.23138 10.3555L11.864 6.57106C12.3253 5.90803 11.8508 5 11.0431 5H4.95693Z"/>'),
+    // No unsort indicator — the sort glyph appears only once a column is sorted.
+    sortUnSort:     '',
+    // Single funnel-silhouette path. CSS (webview.css → .ag-icon-filter path)
+    // strokes it as a thin outline by default and fills it solid white when
+    // the column is filtered.
+    filter:         codiconSvg('<path d="M9.5 14H6.5C6.224 14 6 13.776 6 13.5V9.329C6 8.928 5.844 8.552 5.561 8.268L1.561 4.268C1.205 3.911 1 3.418 1 2.914C1 1.858 1.858 1 2.914 1H13.086C14.142 1 15 1.858 15 2.914C15 3.417 14.796 3.911 14.439 4.267L10.439 8.267C10.156 8.551 10 8.927 10 9.328V13.499C10 13.775 9.776 13.999 9.5 13.999V14Z"/>'),
+    menu:           codiconSvg('<path d="M8 5C7.44772 5 7 4.55228 7 4C7 3.44772 7.44772 3 8 3C8.55228 3 9 3.44772 9 4C9 4.55228 8.55228 5 8 5ZM8 9C7.44771 9 7 8.55229 7 8C7 7.44772 7.44771 7 8 7C8.55228 7 9 7.44772 9 8C9 8.55229 8.55228 9 8 9ZM7 12C7 12.5523 7.44771 13 8 13C8.55228 13 9 12.5523 9 12C9 11.4477 8.55228 11 8 11C7.44771 11 7 11.4477 7 12Z"/>'),
+    columns:        codiconSvg('<path d="M2 3.5C2 3.224 2.224 3 2.5 3H10.5C10.776 3 11 3.224 11 3.5C11 3.776 10.776 4 10.5 4H2.5C2.224 4 2 3.776 2 3.5ZM13.5 6H2.5C2.224 6 2 6.224 2 6.5C2 6.776 2.224 7 2.5 7H13.5C13.776 7 14 6.776 14 6.5C14 6.224 13.776 6 13.5 6ZM9.5 9H2.5C2.224 9 2 9.224 2 9.5C2 9.776 2.224 10 2.5 10H9.5C9.776 10 10 9.776 10 9.5C10 9.224 9.776 9 9.5 9Z"/><path d="M2.5 12H11.5C11.776 12 12 12.224 12 12.5C12 12.776 11.776 13 11.5 13H2.5C2.224 13 2 12.776 2 12.5C2 12.224 2.224 12 2.5 12Z"/>'),
+    cancel:         codiconSvg('<path d="M8.70701 8.00001L12.353 4.35401C12.548 4.15901 12.548 3.84201 12.353 3.64701C12.158 3.45201 11.841 3.45201 11.646 3.64701L8.00001 7.29301L4.35401 3.64701C4.15901 3.45201 3.84201 3.45201 3.64701 3.64701C3.45201 3.84201 3.45201 4.15901 3.64701 4.35401L7.29301 8.00001L3.64701 11.646C3.45201 11.841 3.45201 12.158 3.64701 12.353C3.74501 12.451 3.87301 12.499 4.00101 12.499C4.12901 12.499 4.25701 12.45 4.35501 12.353L8.00101 8.70701L11.647 12.353C11.745 12.451 11.873 12.499 12.001 12.499C12.129 12.499 12.257 12.45 12.355 12.353C12.55 12.158 12.55 11.841 12.355 11.646L8.70901 8.00001H8.70701Z"/>'),
+    check:          codiconSvg('<path d="M13.6572 3.13573C13.8583 2.9465 14.175 2.95614 14.3643 3.15722C14.5535 3.35831 14.5438 3.675 14.3428 3.86425L5.84277 11.8642C5.64597 12.0494 5.33756 12.0446 5.14648 11.8535L1.64648 8.35351C1.45121 8.15824 1.45121 7.84174 1.64648 7.64647C1.84174 7.45121 2.15825 7.45121 2.35351 7.64647L5.50976 10.8027L13.6572 3.13573Z"/>'),
+    first:          codiconSvg(CHEVRON_LEFT),
+    last:           codiconSvg(CHEVRON_RIGHT),
+    previous:       codiconSvg(CHEVRON_LEFT),
+    next:           codiconSvg(CHEVRON_RIGHT),
+    loading:        codiconSvg('<path d="M13.5 8.5C13.224 8.5 13 8.276 13 8C13 5.243 10.757 3 8 3C5.243 3 3 5.243 3 8C3 8.276 2.776 8.5 2.5 8.5C2.224 8.5 2 8.276 2 8C2 4.691 4.691 2 8 2C11.309 2 14 4.691 14 8C14 8.276 13.776 8.5 13.5 8.5Z"/>', 'csv-icon-spin'),
+    smallUp:        codiconSvg(CHEVRON_UP),
+    smallDown:      codiconSvg(CHEVRON_DOWN),
+    smallLeft:      codiconSvg(CHEVRON_LEFT),
+    smallRight:     codiconSvg(CHEVRON_RIGHT),
+};
+
+// ── Type-aware sort comparators ───────────────────────────────────────────────
+// AG Grid's default comparator compares raw string values, which sorts dates,
+// times and numbers-stored-as-text incorrectly. Every column gets an explicit
+// comparator matching its detected type. Excel-style ordering: ascending sorts
+// the valid typed values first, then any value that doesn't parse as that type
+// (stray text, blanks) afterwards, compared as natural-order text.
+
+function parseTimeToSeconds(s: string): number {
+    const m = s.trim().match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+    if (!m) return NaN;
+    return (+m[1]) * 3600 + (+m[2]) * 60 + (+(m[3] ?? 0));
+}
+
+function textCompare(a: string, b: string): number {
+    return String(a ?? '').localeCompare(String(b ?? ''), undefined, {
+        numeric: true, sensitivity: 'base',
+    });
+}
+
+// Builds a comparator that parses each value to a number via `parse`. Parseable
+// values sort numerically and come first; unparseable ones sort as text after.
+function typedComparator(parse: (s: string) => number): (a: string, b: string) => number {
+    return (a, b) => {
+        const va = a ? parse(a) : NaN;
+        const vb = b ? parse(b) : NaN;
+        const aOk = !isNaN(va), bOk = !isNaN(vb);
+        if (aOk && bOk) return va - vb;
+        if (aOk !== bOk) return aOk ? -1 : 1;
+        return textCompare(a, b);
+    };
+}
+
+function makeComparator(colType: string): (a: string, b: string) => number {
+    if (colType === 'integer' || colType === 'float') return typedComparator(s => Number(s));
+    if (colType === 'date' || colType === 'datetime') return typedComparator(s => Date.parse(s));
+    if (colType === 'time') return typedComparator(parseTimeToSeconds);
+    // string / boolean — natural order so "10" sorts after "2"
+    return textCompare;
 }
 
 export function buildGrid(): void {
@@ -70,13 +140,7 @@ export function buildGrid(): void {
             resizable:    true,
             suppressMovable: false,
         };
-        if (colType === 'integer' || colType === 'float') {
-            colDef.comparator = (a: string, b: string) => {
-                const na = a === '' || a == null ? -Infinity : Number(a);
-                const nb = b === '' || b == null ? -Infinity : Number(b);
-                return na - nb;
-            };
-        }
+        colDef.comparator = makeComparator(colType);
         columnDefs.push(colDef);
     }
 
@@ -100,6 +164,7 @@ export function buildGrid(): void {
     // Both rule sets must coexist on the same defaultColDef.
     const cellClassRules = {
         ...getFindCellClassRules(),
+        ...getRangeCellClassRules(),
         'cell-dup-row': (p: any) =>
             state.dupRowSet.size > 0
             && p.data?._origIndex != null
@@ -122,28 +187,12 @@ export function buildGrid(): void {
             !!node.data
             && node.data._origIndex != null
             && state.dupRowSet.has(node.data._origIndex as number),
-        // Replace AG Grid icon-font glyphs with inline SVG so no font
-        // download is needed (web-font loading is blocked in VS Code webviews).
-        icons: {
-            sortAscending:  '<svg xmlns="http://www.w3.org/2000/svg" width="9" height="9" viewBox="0 0 9 9" style="display:inline-block;vertical-align:middle"><polygon points="4.5,0.5 8.5,8.5 0.5,8.5" fill="currentColor"/></svg>',
-            sortDescending: '<svg xmlns="http://www.w3.org/2000/svg" width="9" height="9" viewBox="0 0 9 9" style="display:inline-block;vertical-align:middle"><polygon points="4.5,8.5 8.5,0.5 0.5,0.5" fill="currentColor"/></svg>',
-            sortUnSort:     '<svg xmlns="http://www.w3.org/2000/svg" width="9" height="13" viewBox="0 0 9 13" style="display:inline-block;vertical-align:middle;opacity:0.35"><polygon points="4.5,0.5 8.5,5.5 0.5,5.5" fill="currentColor"/><polygon points="4.5,12.5 8.5,7.5 0.5,7.5" fill="currentColor"/></svg>',
-            filter:         '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 10 10" style="display:inline-block;vertical-align:middle"><path d="M0.5,1 L9.5,1 L6,5 L6,9 L4,8 L4,5 Z" fill="currentColor"/></svg>',
-            menu:           '<span>⋮</span>',
-            columns:        '<span>☰</span>',
-            cancel:         '<span>✕</span>',
-            check:          '<span>✓</span>',
-            first:          '<span>⇤</span>',
-            last:           '<span>⇥</span>',
-            previous:       '<span>‹</span>',
-            next:           '<span>›</span>',
-            loading:        '<span>…</span>',
-            smallDown:      '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" viewBox="0 0 8 8" style="display:inline-block;vertical-align:middle"><polygon points="4,7.5 7.5,0.5 0.5,0.5" fill="currentColor"/></svg>',
-            smallLeft:      '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" viewBox="0 0 8 8" style="display:inline-block;vertical-align:middle"><polygon points="0.5,4 7.5,0.5 7.5,7.5" fill="currentColor"/></svg>',
-            smallRight:     '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" viewBox="0 0 8 8" style="display:inline-block;vertical-align:middle"><polygon points="7.5,4 0.5,0.5 0.5,7.5" fill="currentColor"/></svg>',
-            smallUp:        '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" viewBox="0 0 8 8" style="display:inline-block;vertical-align:middle"><polygon points="4,0.5 7.5,7.5 0.5,7.5" fill="currentColor"/></svg>',
-        },
+        // Codicon glyphs as inline SVG — defined in GRID_ICONS at the top of
+        // this file. AG Grid's own icon font is blocked in VS Code webviews.
+        icons: GRID_ICONS,
         animateRows: false,
+        // Ctrl+click a second/third header to sort by multiple columns.
+        multiSortKey: 'ctrl',
         tooltipShowDelay: 400,
         tooltipHideDelay: 3000,
         suppressFieldDotNotation: true,
@@ -153,12 +202,9 @@ export function buildGrid(): void {
 
         onCellClicked: (event: any) => {
             const colId = event.column?.getColId?.() ?? event.column;
-            if (colId === 'row-index') {
-                const isAlreadySelected = state.rowIndexSelected === event.rowIndex;
-                state.rowIndexSelected    = isAlreadySelected ? null : event.rowIndex;
-                state.focusedCellColId    = 'row-index';
+            if (colId != null && event.rowIndex != null) {
+                state.focusedCellColId    = colId;
                 state.focusedCellRowIndex = event.rowIndex;
-                applyRowIndexHighlight();
             }
         },
 
@@ -167,10 +213,6 @@ export function buildGrid(): void {
                 const colId = typeof event.column === 'string' ? event.column : event.column.getColId();
                 state.focusedCellColId    = colId;
                 state.focusedCellRowIndex = event.rowIndex;
-                if (colId !== 'row-index' && state.rowIndexSelected !== null) {
-                    state.rowIndexSelected = null;
-                    applyRowIndexHighlight();
-                }
             } else {
                 state.focusedCellColId    = null;
                 state.focusedCellRowIndex = null;
@@ -179,12 +221,27 @@ export function buildGrid(): void {
         onCellEditingStarted: () => { state.isCellEditing = true; },
         onCellEditingStopped:  () => { state.isCellEditing = false; },
 
-        // Row indices shift when sorting or filtering — clear the selection so the
-        // highlight doesn't appear on the wrong row.
-        onSortChanged:   () => { state.rowIndexSelected = null; applyRowIndexHighlight(); },
+        // Range selection (Excel-style) — hand-rolled since AG Grid Community has no
+        // built-in cell-range selection.
+        onCellMouseDown: onCellMouseDownHandler,
+        onCellMouseOver: onCellMouseOverHandler,
+        // A rowData reset (undo/redo, row insert/delete, paste, dup-view) shifts
+        // display indices, so the display-coordinate selection must be dropped.
+        onRowDataUpdated: () => clearRangeSelection(),
+
+        // Display indices shift when sorting or filtering — clear the selection so
+        // the highlight doesn't appear on the wrong cells.
+        onSortChanged:   () => {
+            clearRangeSelection();
+            // The '#' column's valueGetter returns the row's display position,
+            // which AG Grid won't re-evaluate on its own after a reorder (the
+            // row data is unchanged). Force it so the numbers renumber at once.
+            state.gridApi?.refreshCells({ columns: ['row-index'], force: true });
+        },
 
         onFilterChanged: () => {
-            state.rowIndexSelected = null; applyRowIndexHighlight();
+            clearRangeSelection();
+            state.gridApi?.refreshCells({ columns: ['row-index'], force: true });
             const isAnyFilter = state.gridApi?.isAnyFilterPresent();
             const cfBtn = document.getElementById('btn-clear-filters') as HTMLButtonElement | null;
             const sepBtn = document.getElementById('sep-filters') as HTMLElement | null;

@@ -4,6 +4,7 @@ out/
 .vscode-test/
 .vscode/
 .claude/
+.superpowers/
 test_data/
 docs/
 # media/ holds the committed static stylesheet (webview.css) AND build output.

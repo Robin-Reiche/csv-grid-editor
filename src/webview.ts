@@ -96,7 +96,7 @@ export function getWebviewContent(
     </div>
 
     <!-- Preview banner -->
-    ${isPreview ? `<div class="preview-banner"><span class="preview-icon">&#x1F50D;</span><span id="preview-text"></span></div>` : ''}
+    ${isPreview ? `<div class="preview-banner"><span class="preview-icon"><i class="codicon codicon-eye"></i></span><span id="preview-text"></span></div>` : ''}
 
     <!-- Toolbar -->
     <div class="toolbar">
@@ -110,8 +110,6 @@ export function getWebviewContent(
         <button id="btn-zoom-out" title="Decrease size (${mod}-)"><i class="codicon codicon-zoom-out"></i></button>
         <span   id="zoom-level"  style="font-size:11px;min-width:28px;text-align:center;opacity:0.6;">100%</span>
         <button id="btn-zoom-in"  title="Increase size (${mod}+)"><i class="codicon codicon-zoom-in"></i></button>
-        <div    class="separator"></div>
-        <button id="btn-select-mode"   title="Select &amp; Copy Mode"><i class="codicon codicon-selection"></i></button>
         <div    class="separator"></div>
         <button id="btn-profile"       title="Column Profile"><i class="codicon codicon-graph"></i></button>
         <div    class="separator"></div>
@@ -176,28 +174,14 @@ export function getWebviewContent(
     <div id="content-row">
         <div id="grid-container" class="ag-theme-alpine-dark"></div>
 
-        <div id="select-container" style="display:none;flex-direction:column;">
-            <div class="sc-toolbar">
-                <button id="btn-sc-back" class="sc-back-btn"><i class="codicon codicon-arrow-left"></i> Back</button>
-                <div class="sc-vsep"></div>
-                <button id="btn-sc-copy" class="sc-copy-btn" disabled><i class="codicon codicon-copy"></i> Copy</button>
-                <button id="btn-sc-copy-headers" class="sc-copy-headers-btn"><i class="codicon codicon-symbol-key"></i> Copy only headers</button>
-                <label class="sc-check-lbl"><input type="checkbox" id="sc-with-header" checked> Include header</label>
-                <span id="sc-sel-info" class="sc-sel-info"></span>
-                <span id="sc-feedback" class="sc-feedback"></span>
-            </div>
-            <div class="sc-table-wrap" id="sc-table-wrap"></div>
-            <div id="sc-row-note" class="sc-row-note" style="display:none;"></div>
-        </div>
-
         <div id="profile-panel">
             <div class="profile-resize-handle" id="profile-resize-handle"></div>
             <div class="profile-panel-header">
                 <span class="profile-panel-title">Column Profile</span>
                 <div class="profile-dock-btns">
-                    <button class="profile-dock-btn" data-dock="left"   title="Dock left">  <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="1" width="5"  height="12" rx="1"/><rect x="7"  y="1" width="6" height="12" rx="1" opacity="0.25"/></svg></button>
-                    <button class="profile-dock-btn" data-dock="bottom" title="Dock bottom"><svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="1" width="12" height="7"  rx="1" opacity="0.25"/><rect x="1" y="9" width="12" height="4"  rx="1"/></svg></button>
-                    <button class="profile-dock-btn profile-dock-btn--active" data-dock="right"  title="Dock right"> <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="1" width="6"  height="12" rx="1" opacity="0.25"/><rect x="8"  y="1" width="5" height="12" rx="1"/></svg></button>
+                    <button class="profile-dock-btn" data-dock="left"   title="Dock left"><i class="codicon codicon-layout-sidebar-left"></i></button>
+                    <button class="profile-dock-btn" data-dock="bottom" title="Dock bottom"><i class="codicon codicon-layout-panel"></i></button>
+                    <button class="profile-dock-btn profile-dock-btn--active" data-dock="right"  title="Dock right"><i class="codicon codicon-layout-sidebar-right"></i></button>
                 </div>
                 <button class="profile-panel-close" id="btn-profile-close" title="Close"><i class="codicon codicon-close"></i></button>
             </div>
@@ -207,10 +191,15 @@ export function getWebviewContent(
 
     <!-- Column context menu [F5] -->
     <div id="col-context-menu" class="col-context-menu hidden">
+        <div id="col-ctx-insert-left"  class="col-ctx-item"${isPreview ? ' style="display:none;"' : ''}>&#x2B05;&#xFE0F; Insert column left</div>
+        <div id="col-ctx-insert-right" class="col-ctx-item"${isPreview ? ' style="display:none;"' : ''}>&#x27A1;&#xFE0F; Insert column right</div>
+        <div class="col-ctx-separator"${isPreview ? ' style="display:none;"' : ''}></div>
+        <div id="col-ctx-select"   class="col-ctx-item">&#x2630; Select column</div>
+        <div class="col-ctx-separator"></div>
         <div id="col-ctx-freeze"   class="col-ctx-item">&#x1F4CC; Freeze column</div>
         <div id="col-ctx-unfreeze" class="col-ctx-item" style="display:none;">&#x1F4CC; Unfreeze column</div>
-        <div class="col-ctx-separator"></div>
-        <div id="col-ctx-delete"   class="col-ctx-item danger">&#x2715; Delete column</div>
+        <div class="col-ctx-separator"${isPreview ? ' style="display:none;"' : ''}></div>
+        <div id="col-ctx-delete"   class="col-ctx-item danger"${isPreview ? ' style="display:none;"' : ''}>&#x2715; Delete column</div>
     </div>
 
     <!-- Row context menu -->
@@ -229,6 +218,7 @@ export function getWebviewContent(
 
     <!-- Footer -->
     <div class="footer">
+        <span class="sel-stats" id="sel-stats"></span>
         <span class="status" id="status"></span>
     </div>
 

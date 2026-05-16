@@ -21,12 +21,6 @@ export const state = {
     profileOpen: false,
     profileDock: 'right' as 'right' | 'bottom' | 'left',
 
-    rowIndexSelected: null as number | null,
-
-    selectMode: false,
-    selectViewRowIndices: null as number[] | null,
-    selectViewColIndices: null as number[] | null,
-
     findMatches: [] as FindMatch[],
     findMatchIndex: -1,
 

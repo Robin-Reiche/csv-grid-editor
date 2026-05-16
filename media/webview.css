@@ -83,7 +83,8 @@ button .codicon {
     flex-shrink: 0;
     gap: 6px;
 }
-.preview-banner .preview-icon { opacity: 0.8; }
+.preview-banner .preview-icon { opacity: 0.8; display: inline-flex; align-items: center; }
+.preview-banner .preview-icon .codicon { font-size: 14px; }
 
 /* ── Content row: grid + profile panel side-by-side ── */
 #content-row {
@@ -182,6 +183,7 @@ button .codicon {
     align-items: center;
     line-height: 1;
 }
+.profile-dock-btn .codicon { font-size: 14px; }
 .profile-dock-btn:hover {
     opacity: 0.85;
     background: rgba(255,255,255,0.08);
@@ -466,38 +468,94 @@ button .codicon {
     font-weight: 600 !important;
     border-right: 1px solid var(--vscode-tree-indentGuidesStroke, #585858) !important;
 }
-:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-header-cell-text { overflow: visible !important; line-height: normal !important; }
-:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-header-cell-label { overflow: visible !important; }
-/* Unicode icon sizing (replaces icon-font glyphs, no web-font required) */
+/* The header label is a flex row: [type badge] [name] [sort + menu + filter].
+   The name shrinks with an ellipsis so the badge and sort indicators (including
+   the multi-sort order number) always stay visible, even on narrow columns. */
+:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-header-cell-label { overflow: hidden !important; }
+:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-header-cell-text {
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+    min-width: 0 !important;
+    line-height: normal !important;
+}
+/* Grid icons are inline Codicon SVGs (see grid/builder.ts → GRID_ICONS).
+   - .ag-icon flex-centres the SVG within itself;
+   - force a normal font-family so AG Grid's own (CSP-blocked) icon-font
+     ::before glyph renders blank instead of as a stray tofu box. */
 :is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-icon {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
     font-family: var(--vscode-font-family, "Segoe UI", sans-serif) !important;
-    font-size: 11px !important;
     line-height: 1 !important;
 }
-:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-header-cell.ag-header-cell-filtered .ag-icon-filter {
-    color: var(--vscode-charts-blue, #3794ff) !important;
+:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-icon svg {
+    display: block;
+    width: 12px;
+    height: 12px;
+}
+/* AG Grid's icon wrappers stretch to the full header-row height, so an inline
+   SVG baseline-aligns and sits too high. Force the sort-arrow and filter-funnel
+   wrappers to flex-centre their icon vertically against the header text. The
+   sort-icon rule deliberately omits !important so AG Grid's .ag-hidden
+   (display:none !important) still hides the inactive ascending/descending/none
+   variants. */
+:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-sort-indicator-container {
+    align-items: center;
+}
+:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-sort-indicator-icon,
+:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-header-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-icon svg.csv-icon-spin {
+    animation: csv-icon-spin 1s linear infinite;
+    transform-origin: 50% 50%;
+}
+@keyframes csv-icon-spin { to { transform: rotate(360deg); } }
+/* Filter funnel in the header filter button: a thin outline by default,
+   solid white once the column's filter is active. Targeted via the button
+   wrapper class (.ag-header-cell-filter-button) + the <path> element — AG
+   Grid gives a custom icon only a generic .ag-icon span, so the icon's own
+   class cannot be relied on, and .ag-header-cell-filtered does not exist in
+   AG Grid 32. .ag-filter-active is AG Grid's active-filter marker; cover it
+   both as an ancestor and on the button itself. */
+:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-header-cell-filter-button path {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.4;
+    stroke-linejoin: round;
+}
+:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-filter-active .ag-header-cell-filter-button path,
+:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-header-cell-filter-button.ag-filter-active path {
+    fill: #ffffff;
+    stroke: none;
 }
 
 /* ── Column type badge icons ── */
-:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-header-cell[class*="col-type-"] .ag-header-cell-text::before {
+/* Attached to the label (a flex container) rather than the text, so the badge
+   is its own non-shrinking flex item and never gets clipped or pushed out. */
+:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-header-cell[class*="col-type-"] .ag-header-cell-label::before {
     display: inline-block;
+    flex: none;
     font-size: 9px;
     font-weight: 700;
     letter-spacing: 0;
     padding: 1px 4px;
     border-radius: 3px;
     margin-right: 5px;
-    vertical-align: middle;
     line-height: 1.5;
     font-family: var(--vscode-font-family, "Segoe UI", sans-serif);
 }
-:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-header-cell.col-type-integer  .ag-header-cell-text::before { content: '123';  background: rgba(55,148,255,0.18); color: #5aabff; }
-:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-header-cell.col-type-float    .ag-header-cell-text::before { content: '1.0';  background: rgba(55,148,255,0.18); color: #5aabff; }
-:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-header-cell.col-type-string   .ag-header-cell-text::before { content: 'abc';  background: rgba(156,220,254,0.12); color: #9cdcfe; }
-:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-header-cell.col-type-boolean  .ag-header-cell-text::before { content: 'T/F';  background: rgba(78,201,176,0.18); color: #4ec9b0; }
-:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-header-cell.col-type-date     .ag-header-cell-text::before { content: 'date'; background: rgba(204,167,0,0.18); color: #e5bc4b; }
-:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-header-cell.col-type-datetime .ag-header-cell-text::before { content: 'dt';   background: rgba(204,167,0,0.18); color: #e5bc4b; }
-:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-header-cell.col-type-time     .ag-header-cell-text::before { content: 'time'; background: rgba(204,167,0,0.18); color: #e5bc4b; }
+:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-header-cell.col-type-integer  .ag-header-cell-label::before { content: '123';  background: rgba(55,148,255,0.18); color: #5aabff; }
+:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-header-cell.col-type-float    .ag-header-cell-label::before { content: '1.0';  background: rgba(55,148,255,0.18); color: #5aabff; }
+:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-header-cell.col-type-string   .ag-header-cell-label::before { content: 'abc';  background: rgba(156,220,254,0.12); color: #9cdcfe; }
+:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-header-cell.col-type-boolean  .ag-header-cell-label::before { content: 'T/F';  background: rgba(78,201,176,0.18); color: #4ec9b0; }
+:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-header-cell.col-type-date     .ag-header-cell-label::before { content: 'date'; background: rgba(204,167,0,0.18); color: #e5bc4b; }
+:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-header-cell.col-type-datetime .ag-header-cell-label::before { content: 'dt';   background: rgba(204,167,0,0.18); color: #e5bc4b; }
+:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-header-cell.col-type-time     .ag-header-cell-label::before { content: 'time'; background: rgba(204,167,0,0.18); color: #e5bc4b; }
 
 .ag-tooltip {
     background: var(--vscode-editorHoverWidget-background, #252526);
@@ -587,13 +645,28 @@ button .codicon {
 .csv-filter-cond-row { display: flex; align-items: center; gap: 4px; margin-bottom: 4px; }
 .csv-filter-cond-row .csv-filter-select { flex: 1; min-width: 0; }
 .csv-filter-cond-input { flex: 1; min-width: 0; margin-top: 0 !important; }
-.csv-filter-and-label {
+/* AND/OR join toggle between condition rows — click to flip the operator. */
+.csv-filter-join-toggle {
+    align-self: center;
+    margin: 2px 0 4px;
+    padding: 1px 9px;
     font-size: 10px;
     font-weight: 600;
     letter-spacing: 0.06em;
+    background: none;
+    border: 1px solid var(--vscode-panel-border, rgba(255,255,255,0.15));
+    border-radius: 9px;
     color: var(--vscode-descriptionForeground, #888);
-    text-align: center;
-    padding: 2px 0 4px;
+    cursor: pointer;
+    line-height: 1.5;
+}
+.csv-filter-join-toggle:hover {
+    border-color: var(--vscode-textLink-foreground, #4db6f0);
+    color: var(--vscode-editor-foreground, #d4d4d4);
+}
+.csv-filter-join-toggle[data-join="or"] {
+    color: var(--vscode-textLink-foreground, #4db6f0);
+    border-color: var(--vscode-textLink-foreground, #4db6f0);
 }
 .csv-filter-remove-btn {
     flex-shrink: 0;
@@ -680,131 +753,18 @@ button .codicon {
     font-size: 11px;
 }
 .footer .status { margin-left: auto; opacity: 0.6; }
+.footer .sel-stats {
+    opacity: 0.85;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
 
-/* ── Select & Copy Mode ── */
+/* ── Active toolbar button ── */
 .toolbar button.btn-active {
     background: var(--vscode-toolbar-activeBackground, rgba(255,255,255,0.15)) !important;
     border-color: var(--vscode-focusBorder, #007fd4) !important;
-}
-/* ── Select & Copy Mode ── */
-#select-container { flex: 1; overflow: hidden; background: var(--vscode-editor-background, #1e1e1e); }
-
-.sc-toolbar {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 4px 10px;
-    background: var(--vscode-editorGroupHeader-tabsBackground, #252526);
-    border-bottom: 1px solid var(--vscode-panel-border, #2d2d2d);
-    flex-shrink: 0;
-    font-family: var(--vscode-font-family, "Segoe UI", sans-serif);
-}
-.sc-back-btn {
-    background: none; border: 1px solid transparent;
-    color: var(--vscode-editor-foreground, #ccc);
-    cursor: pointer; padding: 3px 8px; border-radius: 3px;
-    font-size: 12px; font-family: inherit;
-    display: flex; align-items: center; gap: 4px; flex-shrink: 0;
-}
-.sc-back-btn:hover { background: var(--vscode-toolbar-hoverBackground, rgba(255,255,255,0.1)); }
-.sc-vsep { width: 1px; height: 16px; background: var(--vscode-panel-border, #444); flex-shrink: 0; }
-.sc-copy-btn {
-    background: var(--vscode-button-background, #0e639c);
-    color: var(--vscode-button-foreground, #fff);
-    border: none; border-radius: 3px; padding: 4px 12px;
-    font-size: 12px; font-family: inherit; cursor: pointer;
-    display: flex; align-items: center; gap: 5px; flex-shrink: 0;
-}
-.sc-copy-btn:hover:not(:disabled):not(.sc-btn-copied) { background: var(--vscode-button-hoverBackground, #1177bb); }
-.sc-copy-btn:disabled:not(.sc-btn-copied) { opacity: 0.35; cursor: default; }
-.sc-btn-copied, .sc-btn-copied:hover { background: var(--vscode-charts-green, #4ec9b0) !important; color: #000 !important; cursor: default; }
-.sc-copy-headers-btn {
-    background: var(--vscode-button-secondaryBackground, #3a3d41);
-    color: var(--vscode-button-secondaryForeground, #cccccc);
-    border: 1px solid transparent;
-    border-radius: 3px; padding: 3px 10px;
-    font-size: 12px; font-family: inherit; cursor: pointer;
-    display: flex; align-items: center; gap: 5px; flex-shrink: 0;
-}
-.sc-copy-headers-btn:hover { background: var(--vscode-button-secondaryHoverBackground, #45494e); }
-.sc-check-lbl {
-    font-size: 11px; color: var(--vscode-editor-foreground, #ccc);
-    display: flex; align-items: center; gap: 4px;
-    cursor: pointer; white-space: nowrap; flex-shrink: 0;
-}
-.sc-check-lbl input { cursor: pointer; accent-color: var(--vscode-focusBorder, #007fd4); margin: 0; }
-.sc-sel-info {
-    font-size: 11px; color: var(--vscode-descriptionForeground, #888);
-    flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.sc-feedback { font-size: 11px; white-space: nowrap; flex-shrink: 0; }
-.sc-feedback.ok  { color: var(--vscode-charts-green, #4ec9b0); font-weight: 600; }
-.sc-feedback.err { color: var(--vscode-charts-red,   #f48771); }
-
-/* Table */
-.sc-table-wrap { flex: 1; overflow: auto; }
-.sc-table-wrap::-webkit-scrollbar { width: 8px; height: 8px; }
-.sc-table-wrap::-webkit-scrollbar-thumb { background: var(--vscode-scrollbarSlider-background, #424242); border-radius: 4px; }
-.sc-table-wrap::-webkit-scrollbar-corner { background: transparent; }
-
-.sc-table {
-    border-collapse: collapse;
-    font-family: var(--vscode-font-family, "Segoe UI", sans-serif);
-    font-size: var(--vscode-font-size, 13px);
-    user-select: none;
-}
-.sc-table th, .sc-table td {
-    border: 1px solid var(--vscode-panel-border, #3c3c3c);
-    padding: 2px 8px; white-space: nowrap;
-    max-width: 200px; overflow: hidden; text-overflow: ellipsis;
-}
-
-/* Sticky column headers — clickable */
-.sc-table thead th.sc-col-hd {
-    position: sticky; top: 0; z-index: 2;
-    background: var(--vscode-editorGroupHeader-tabsBackground, #252526);
-    font-weight: 600; cursor: pointer;
-}
-.sc-table thead th.sc-col-hd:hover:not(.sc-sel) {
-    background: var(--vscode-list-hoverBackground, #2a2d2e);
-}
-
-/* Corner cell */
-.sc-corner {
-    position: sticky; top: 0; left: 0; z-index: 3;
-    min-width: 36px; width: 36px; text-align: center;
-    background: var(--vscode-editorGroupHeader-tabsBackground, #252526);
-    cursor: pointer;
-}
-.sc-corner:hover:not(.sc-sel) { background: var(--vscode-list-hoverBackground, #2a2d2e); }
-.sc-corner-icon { font-size: 13px; }
-
-/* Sticky row numbers — clickable */
-.sc-row-num {
-    position: sticky; left: 0; z-index: 1;
-    min-width: 36px; width: 36px; text-align: right; padding: 2px 6px;
-    background: var(--vscode-editorGroupHeader-tabsBackground, #252526);
-    color: var(--vscode-descriptionForeground, #888);
-    font-size: 11px; cursor: pointer;
-}
-.sc-row-num:hover:not(.sc-sel) { background: var(--vscode-list-hoverBackground, #2a2d2e) !important; }
-
-/* Data cells */
-.sc-data { cursor: cell; }
-.sc-data:hover:not(.sc-sel) { background: var(--vscode-list-hoverBackground, #2a2d2e); }
-
-/* Selection highlight */
-.sc-cell.sc-sel     { background: var(--vscode-list-inactiveSelectionBackground, rgba(14,99,156,0.28)) !important; }
-.sc-col-hd.sc-sel   { background: rgba(14,99,156,0.50) !important; color: var(--vscode-editor-foreground, #d4d4d4); }
-.sc-row-num.sc-sel  { background: rgba(14,99,156,0.50) !important; color: var(--vscode-editor-foreground, #d4d4d4); }
-.sc-corner.sc-sel   { background: rgba(14,99,156,0.65) !important; }
-
-/* Truncation note */
-.sc-row-note {
-    font-size: 11px; color: var(--vscode-descriptionForeground, #888);
-    padding: 4px 10px; flex-shrink: 0;
-    background: var(--vscode-editorWidget-background, #252526);
-    border-top: 1px solid var(--vscode-panel-border, #2d2d2d);
 }
 
 /* ── F1: Row Index Column ── */
@@ -976,6 +936,9 @@ button .codicon {
 .ag-cell.cell-find-match  { background: rgba(255,214,0,0.18) !important; }
 .ag-cell.cell-find-active { background: rgba(255,140,0,0.45) !important; outline: 1px solid orange; }
 
+/* Range selection (Excel-style) — defined after find rules so it wins on overlap */
+.ag-cell.cell-range-sel { background: rgba(55,148,255,0.28) !important; }
+
 /* ── F7: Pagination Bar ── */
 .pagination-bar {
     display: flex;
@@ -1101,6 +1064,7 @@ button .codicon {
     display: flex;
     align-items: center;
 }
+.dup-banner-icon .codicon { font-size: 14px; }
 .dup-banner-text { flex: 1; min-width: 0; }
 .dup-banner-btn {
     background: transparent;

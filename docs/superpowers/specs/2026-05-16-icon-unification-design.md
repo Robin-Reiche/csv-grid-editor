@@ -41,10 +41,19 @@ from the other four sources.
 
 ## Approach
 
-Replace every non-Codicon icon source with Codicons. Codicons is VS Code's
-native icon language, the font is already bundled, and it provides every
-glyph the grid needs. AG Grid's `icons` config accepts arbitrary HTML
-strings, so `<i class="codicon codicon-NAME"></i>` slots in directly.
+Replace every non-Codicon icon source with Codicons — VS Code's native icon
+language, already bundled, covering every glyph the grid needs.
+
+Two rendering forms of the same Codicon glyphs are used:
+
+- **Codicon font** (`<i class="codicon codicon-NAME">`) for the toolbar,
+  profile dock buttons and banners — simple flex containers where the font
+  sizes and centres correctly.
+- **Inline SVG built from the Codicon path data** for AG Grid header icons
+  (sort, filter, menu, chevrons, …). The Codicon *font* does not size or
+  centre predictably inside AG Grid's nested header layout; an `<svg>` with
+  an explicit size does. Both forms render the identical glyph, so the grid
+  still shares one visual icon family.
 
 ## Icon Mapping
 
@@ -98,11 +107,12 @@ the ad-hoc inconsistency being removed):
 | Context | Size |
 |---------|------|
 | Toolbar buttons | 16 px |
-| Grid / column-header icons | 13 px |
+| Grid / column-header icons | 12 px |
 | Banner icons (preview, duplicate) | 14 px |
 
-Sizes are set via `font-size` on the `.codicon` element in the relevant CSS
-scope (`media/webview.css`).
+Toolbar/banner sizes are set via `font-size` on the `.codicon` element;
+grid-icon size is the `width`/`height` of the inline `<svg>`, set in the
+`.ag-icon > svg` rule. All in `media/webview.css`.
 
 ## Unsort Indicator — Removed
 

@@ -1,10 +1,11 @@
 import type { CsvRow } from '../types';
 
-export function parseCsv(text: string, delimiter: string): CsvRow[] {
+export function parseCsv(text: string, delimiter: string, trimFields: boolean = true): CsvRow[] {
     const rows: CsvRow[] = [];
     let row: string[] = [];
     let field = '';
     let inQuotes = false;
+    const finalize = (s: string) => trimFields ? s.trim() : s;
 
     for (let i = 0; i < text.length; i++) {
         const ch = text[i];
@@ -22,12 +23,12 @@ export function parseCsv(text: string, delimiter: string): CsvRow[] {
         } else if (ch === '"') {
             inQuotes = true;
         } else if (ch === delimiter) {
-            row.push(field.trim());
+            row.push(finalize(field));
             field = '';
         } else if (ch === '\r') {
             // skip
         } else if (ch === '\n') {
-            row.push(field.trim());
+            row.push(finalize(field));
             if (row.length > 0) rows.push(row);
             row = [];
             field = '';
@@ -35,7 +36,7 @@ export function parseCsv(text: string, delimiter: string): CsvRow[] {
             field += ch;
         }
     }
-    row.push(field.trim());
+    row.push(finalize(field));
     if (row.some(f => f !== '')) rows.push(row);
     return rows;
 }
@@ -50,6 +51,17 @@ export function toCsv(rows: CsvRow[], delimiter: string): string {
             return s;
         }).join(delimiter)
     ).join('\n');
+}
+
+// TSV-quote a single cell — matches Excel's clipboard format. Wraps the value
+// in double quotes (and doubles any internal quotes) iff it contains a tab,
+// newline, carriage return, or quote character. Leaves all other values as-is
+// so plain text round-trips byte-for-byte.
+export function tsvCell(value: string): string {
+    if (value.includes('\t') || value.includes('\n') || value.includes('\r') || value.includes('"')) {
+        return '"' + value.replace(/"/g, '""') + '"';
+    }
+    return value;
 }
 
 export function colLetter(i: number): string {

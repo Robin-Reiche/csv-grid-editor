@@ -37,18 +37,16 @@ A fast, feature-rich CSV/TSV editor for Visual Studio Code. Opens CSV files in a
 
 ### Copy & Export
 - **Cell Copy** — Click a cell to focus it, then `Ctrl+C` copies its full value to the clipboard
-- **Row Copy** — Click a row number in the index column to select the entire row; a blue highlight spans all visible columns so you can track it while scrolling horizontally. `Ctrl+C` or right-click → Copy copies all values as tab-separated values (TSV). Click the same row number again to deselect.
-- **Select & Copy Mode** — Click the selection icon in the toolbar to enter a dedicated selection view:
-  - All visible rows are displayed — no row count limit
-  - Mirrors the active filter, sort order, column visibility, and column order from the grid
-  - Select entire columns, entire rows, or a rectangular cell range
-  - `Shift+click` to extend selection; `Ctrl+A` to select all
-  - Copy as TSV with one click — pastes directly into Excel or Google Sheets
-  - Toggle whether column headers are included in the copy
-  - Copy only the header row with the separate **Copy headers** button
+- **Range Selection** — Excel-style selection directly in the grid:
+  - Click and drag to select a rectangular cell range
+  - Click and drag the row-number (`#`) column to select whole rows
+  - Right-click a column header → **Select column** to select a whole column
+  - `Shift+click` and `Shift`+arrow keys extend the selection; `Ctrl+A` selects everything
+  - `Ctrl+C` copies the selection as tab-separated values (TSV) — pastes straight into Excel or Google Sheets
+  - Right-click → **Copy with header** to include the column headers in the copy
+  - `Delete` / `Backspace` clears every cell in the selection
+  - The status bar shows the selection size plus live `Count / Sum / Avg / Min / Max`
 - **Export CSV** — Export the current filtered/sorted view as a CSV file via the native VS Code save dialog
-
-![Select & Copy Mode](https://raw.githubusercontent.com/Robin-Reiche/csv-grid-editor/master/images/select-copy-mode.png)
 
 ### Delimiter
 - **Auto-Detection** — Automatically detects commas, semicolons, and tabs on open; `.tsv` files always use tab
@@ -124,8 +122,10 @@ When a file is open in full (non-preview) mode, the editor watches the file on d
 | `Ctrl+Z` | Undo |
 | `Ctrl+Y` | Redo |
 | `Ctrl+Shift+Z` | Redo (alternative) |
-| `Ctrl+C` | Copy focused cell value or selected row |
-| `Ctrl+A` | Select all *(in Select & Copy Mode)* |
+| `Ctrl+C` | Copy focused cell or selected range (TSV) |
+| `Ctrl+A` | Select all cells |
+| `Shift`+arrows | Extend the selection |
+| `Delete` / `Backspace` | Clear the selected cells |
 | `Ctrl++` / `Ctrl+=` | Zoom in |
 | `Ctrl+-` | Zoom out |
 | `Ctrl+F` / `Ctrl+H` | Open Find & Replace bar |
