@@ -2,6 +2,11 @@
 
 All notable changes to CSV Grid Editor are documented here.
 
+## [1.5.4] - 2026-05-27
+
+### Fixed
+- **Large-file picker cancellation** — Dismissing the "How would you like to open this file?" picker for large CSVs left the editor tab in a broken state and surfaced a `Canceled: Canceled` entry in the Output log; clicking the file again would surface the cached error instead of re-showing the picker. `openCustomDocument` now returns a sentinel "cancelled" document instead of throwing `CancellationError`, and the matching tab is closed via the `tabGroups` API on the next microtask. `resolveCustomEditor` returns early for the sentinel without touching the webview, avoiding the `OverlayWebview has been disposed` race that an immediate panel-dispose would otherwise trigger. The picker also no longer dismisses on accidental focus loss (use `Esc` to cancel explicitly).
+
 ## [1.5.0] - 2026-05-16
 
 ### Added

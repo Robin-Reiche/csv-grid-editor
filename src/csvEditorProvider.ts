@@ -8,6 +8,7 @@ const LARGE_FILE_THRESHOLD   = 10  * 1024 * 1024; // 10 MB
 const CHUNKED_THRESHOLD      = 50  * 1024 * 1024; // 50 MB
 const PREVIEW_ROW_COUNT      = 1000;
 const PAGE_SIZE              = 500;
+const CANCELLED_PREVIEW_MODE = '__cancelled__';
 
 interface RowPageIndex {
     offsets: number[];   // byte offset of the first byte of each page's first data row
@@ -89,11 +90,32 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             }
 
             const choice = await vscode.window.showQuickPick(quickPickItems, {
-                placeHolder: `This file is large (${sizeMB} MB). How would you like to open it?`
+                placeHolder: `This file is large (${sizeMB} MB). How would you like to open it?`,
+                ignoreFocusOut: true
             });
 
             if (!choice) {
-                throw new vscode.CancellationError();
+                // Don't throw — VSCode would log the rejection as a hard error. And don't
+                // dispose the webview from resolveCustomEditor either — VSCode is still
+                // wiring it up at that point and trips an "OverlayWebview has been disposed"
+                // race. Instead, return a sentinel doc and close the matching tab via the
+                // tabGroups API on the next tick; that lets VSCode manage the webview
+                // lifecycle correctly. The resolver returns early for the sentinel.
+                queueMicrotask(() => {
+                    try {
+                        const tab = vscode.window.tabGroups.all
+                            .flatMap(group => group.tabs)
+                            .find(t =>
+                                t.input instanceof vscode.TabInputCustom &&
+                                t.input.viewType === CsvEditorProvider.viewType &&
+                                t.input.uri.toString() === uri.toString()
+                            );
+                        if (tab) {
+                            void vscode.window.tabGroups.close(tab);
+                        }
+                    } catch {}
+                });
+                return new CsvDocument(uri, '', ',', true, CANCELLED_PREVIEW_MODE, 0, false);
             }
 
             previewMode = choice.id;
@@ -139,6 +161,12 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         webviewPanel: vscode.WebviewPanel,
         _token: vscode.CancellationToken
     ): Promise<void> {
+        if (document.previewMode === CANCELLED_PREVIEW_MODE) {
+            // Cancellation sentinel — openCustomDocument has already scheduled the tab
+            // close. Don't touch the webview or VSCode raises an OverlayWebview race.
+            return;
+        }
+
         webviewPanel.webview.options = {
             enableScripts: true,
             localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'media')]
