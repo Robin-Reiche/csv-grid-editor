@@ -1,9 +1,12 @@
 .vscode/**
 .claude/**
 .superpowers/**
+.omc/**
+.github/**
 clearView_code_example/**
 src/**
 docs/**
+test/**
 test_data/**
 !media/**
 node_modules/**

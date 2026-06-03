@@ -2,6 +2,13 @@
 
 All notable changes to CSV Grid Editor are documented here.
 
+## [1.5.5] - 2026-06-03
+
+### Fixed
+- **Cell edits landed on the wrong row under an active sort or filter** — Editing a cell while the grid was filtered and/or sorted wrote the new value to the wrong row in the underlying CSV (the row at the same *display* position in the unfiltered/unsorted data), corrupting data silently. The edit handler now maps the edited row back to its source position via `_origIndex` instead of the display row index. The default unsorted/unfiltered view was unaffected.
+- **Find & Replace had the same wrong-row bug** — Replace / Replace All wrote substitutions to the wrong rows whenever a sort or filter was active. Matches now capture the row's `_origIndex` at search time so replacements always hit the correct row.
+- Added regression tests for both index-mapping paths (`test/`).
+
 ## [1.5.4] - 2026-05-27
 
 ### Fixed

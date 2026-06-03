@@ -1,6 +1,7 @@
 import { state } from '../state';
 import { pushUndo, notifyChange } from './undo-redo';
 import { scheduleRecomputeColTypes } from '../grid/column-type';
+import { dataRowIndexForFindMatch } from '../grid/row-mapping';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -70,7 +71,13 @@ function execFind(): void {
             if (raw == null) continue;
             const val = cs ? String(raw) : String(raw).toLowerCase();
             if (val.includes(cs ? needle : lowerNeedle)) {
-                state.findMatches.push({ rowIndex: node.rowIndex, colField: col.field });
+                // Capture _origIndex now so a later replace writes to the right
+                // state.data row even if the user changes sort/filter meanwhile.
+                state.findMatches.push({
+                    rowIndex: node.rowIndex,
+                    origIndex: Number(node.data._origIndex),
+                    colField: col.field,
+                });
             }
         }
     });
@@ -135,14 +142,15 @@ function replaceOne(): void {
     const cs     = isCaseSensitive();
     const m      = state.findMatches[state.findMatchIndex];
     const colIdx = parseInt(m.colField.replace('col_', ''));
-    const oldVal = String(state.data[m.rowIndex + 1][colIdx] ?? '');
+    const dataIndex = dataRowIndexForFindMatch(m);
+    const oldVal = String(state.data[dataIndex][colIdx] ?? '');
     // Replace only the FIRST occurrence of needle within the cell value
     const newVal = oldVal.replace(
         new RegExp(escapeRegExp(needle), cs ? '' : 'i'),
         repl
     );
     pushUndo();
-    state.data[m.rowIndex + 1][colIdx] = newVal;
+    state.data[dataIndex][colIdx] = newVal;
     notifyChange();
     scheduleRecomputeColTypes();
     execFind();
@@ -158,8 +166,9 @@ function replaceAll(): void {
     pushUndo();
     state.findMatches.forEach(m => {
         const colIdx = parseInt(m.colField.replace('col_', ''));
-        const oldVal = String(state.data[m.rowIndex + 1][colIdx] ?? '');
-        state.data[m.rowIndex + 1][colIdx] = oldVal.replace(regex, repl);
+        const dataIndex = dataRowIndexForFindMatch(m);
+        const oldVal = String(state.data[dataIndex][colIdx] ?? '');
+        state.data[dataIndex][colIdx] = oldVal.replace(regex, repl);
     });
     notifyChange();
     scheduleRecomputeColTypes();
