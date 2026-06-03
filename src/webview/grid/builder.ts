@@ -1,6 +1,7 @@
 import { state, getNumCols } from '../state';
 import { getColumnType, scheduleRecomputeColTypes } from './column-type';
 import { createCombinedFilter } from './filter';
+import { dataRowIndexForNode } from './row-mapping';
 import { pushUndo, notifyChange, updateButtons } from '../features/undo-redo';
 import { getFindCellClassRules } from '../features/find-replace';
 import { attachHeaderContextMenus } from '../features/freeze-columns';
@@ -265,7 +266,10 @@ export function buildGrid(): void {
         },
 
         onCellValueChanged: (event: any) => {
-            const dataIndex = event.node.rowIndex + 1;
+            // Map the edited node back to its row in state.data via _origIndex —
+            // event.node.rowIndex is the DISPLAY position and points at the wrong
+            // row once a sort or filter is active.
+            const dataIndex = dataRowIndexForNode(event.node);
             const colField  = event.colDef.field;
             if (!colField) return;
             const colIndex = parseInt(colField.replace('col_', ''));

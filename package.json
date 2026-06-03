@@ -2,7 +2,7 @@
   "name": "csv-grid-editor",
   "displayName": "CSV Grid Editor",
   "description": "View and edit CSV/TSV files in a sortable, filterable grid with auto-fit columns, zoom, and theme integration",
-  "version": "1.5.4",
+  "version": "1.5.5",
   "publisher": "RobinReiche",
   "license": "MIT",
   "icon": "icon.png",
@@ -51,6 +51,8 @@
     "copy-codicons": "node -e \"const fs=require('fs');fs.mkdirSync('media',{recursive:true});fs.copyFileSync('node_modules/@vscode/codicons/dist/codicon.css','media/codicon.css');fs.copyFileSync('node_modules/@vscode/codicons/dist/codicon.ttf','media/codicon.ttf');\"",
     "watch": "tsc -watch -p ./",
     "watch:web": "esbuild src/webview/index.ts --bundle --outfile=media/webview.js --platform=browser --watch",
+    "pretest": "tsc -p ./",
+    "test": "node test/run-all.cjs",
     "package": "npm run compile && vsce package"
   },
   "devDependencies": {

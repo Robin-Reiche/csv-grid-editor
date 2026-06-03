@@ -37,6 +37,10 @@ export interface ColProfile {
 }
 
 export interface FindMatch {
+    // Display position (post sort/filter) — drives highlighting and navigation.
     rowIndex: number;
+    // The row's _origIndex (its position in state.data), captured at search time
+    // so replace writes hit the correct row even under an active sort/filter.
+    origIndex: number;
     colField: string;
 }
