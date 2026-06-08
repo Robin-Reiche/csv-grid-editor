@@ -464,6 +464,20 @@ button .codicon {
 :is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-row-even { background-color: var(--vscode-editor-background, #1e1e1e) !important; }
 :is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-cell { border-right: 1px solid var(--vscode-tree-indentGuidesStroke, #585858) !important; }
 :is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-row  { border-bottom: 1px solid var(--vscode-tree-indentGuidesStroke, #585858) !important; }
+/* Frozen reference row (Freeze row feature): a faint highlight plus a solid
+   accent rule separating the pinned band from the scrolling body. */
+:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-floating-top {
+    border-bottom: 2px solid var(--vscode-focusBorder, #007fd4) !important;
+}
+:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-floating-top .ag-row {
+    background-color: var(--vscode-list-inactiveSelectionBackground, #37373d) !important;
+}
+/* Frozen (pinned-left) column header: a 📌 marker before the column name,
+   mirroring the frozen-row pin. The always-pinned '#' gutter (.row-index-header)
+   is excluded so only user-frozen columns get the marker. */
+:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-pinned-left-header .ag-header-cell:not(.row-index-header) .ag-header-cell-text::before {
+    content: '📌 ';
+}
 :is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-header-cell {
     font-weight: 600 !important;
     border-right: 1px solid var(--vscode-tree-indentGuidesStroke, #585858) !important;

@@ -53,7 +53,10 @@ A fast, feature-rich CSV/TSV editor for Visual Studio Code. Opens CSV files in a
 - **Manual Override** — Click the delimiter badge in the toolbar to change the delimiter on the fly (comma `,`, semicolon `;`, tab, pipe `|`); the grid re-parses the file immediately
 
 ### Column Freeze
-- **Freeze / Unfreeze** — Right-click any column header to pin it to the left side of the grid; right-click again to unfreeze
+- **Freeze / Unfreeze** — Right-click any column header to pin it to the left side of the grid; right-click again to unfreeze. Frozen columns show a 📌 marker before the column name.
+
+### Row Freeze
+- **Freeze / Unfreeze** — Right-click any row and choose **Freeze row** to pin it to the top of the grid as an always-visible reference while you scroll, sort and filter; right-click the pinned row to unfreeze. One row at a time. A 📌 marker on the pinned row shows its original row number, and the row stays visible regardless of any active filter.
 
 ### Sort & Filter
 

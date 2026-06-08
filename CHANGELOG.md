@@ -2,6 +2,12 @@
 
 All notable changes to CSV Grid Editor are documented here.
 
+## [1.6.1] - 2026-06-08
+
+### Added
+- **Freeze row** — Right-click any row and choose **Freeze row** to pin it to the top of the grid as an always-visible reference while you scroll, sort and filter the rest of the data; right-click the pinned row and choose **Unfreeze row** to release it. One row can be frozen at a time. Like Freeze column it is a view aid (also available in read-only previews) and is not persisted across reload. A 📌 marker on the pinned row's `#` cell shows its original row number, so it never reads as a duplicate of the body row that renumbers into its place. A frozen row stays visible regardless of any active column filter, and the feature is mutually exclusive with the duplicate-rows view.
+- **Freeze markers** — Frozen columns now show a 📌 marker before the column name, matching the frozen-row marker, so pinned columns and rows are easy to spot at a glance.
+
 ## [1.5.5] - 2026-06-03
 
 ### Fixed
