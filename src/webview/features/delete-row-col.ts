@@ -4,6 +4,7 @@ import { refreshGrid } from '../grid/refresh';
 import { recomputeColTypes } from '../grid/column-type';
 import { buildGrid } from '../grid/builder';
 import { copySelection, hasMultiSelection } from './range-select';
+import { freezeRow, unfreezeRow, isRowFrozen } from './freeze-rows';
 
 // ── Data mutations ────────────────────────────────────────────────────────────
 
@@ -11,7 +12,11 @@ function deleteColumn(colId: string): void {
     const colIndex = parseInt(colId.replace('col_', ''), 10);
     if (isNaN(colIndex)) return;
     pushUndo();
+    // map() rebuilds every row array, replacing the frozen row's reference —
+    // re-anchor it to the new array at the same position so the freeze survives.
+    const frozenIdx = state.frozenRowRef ? state.data.indexOf(state.frozenRowRef) : -1;
     state.data = state.data.map(row => row.filter((_, i) => i !== colIndex));
+    if (frozenIdx >= 0) state.frozenRowRef = state.data[frozenIdx];
     state.isAutoFitted = false;
     state.autoFitCache = null;
     buildGrid();
@@ -110,11 +115,15 @@ function insertColumn(colId: string, position: 'left' | 'right'): void {
     const insertAt = position === 'left' ? baseIndex : baseIndex + 1;
 
     pushUndo();
+    // map() rebuilds every row array — re-anchor the frozen row afterwards so the
+    // freeze survives a column insert (row positions are unchanged).
+    const frozenIdx = state.frozenRowRef ? state.data.indexOf(state.frozenRowRef) : -1;
     state.data = state.data.map(row => {
         const copy = row.slice();
         copy.splice(insertAt, 0, '');
         return copy;
     });
+    if (frozenIdx >= 0) state.frozenRowRef = state.data[frozenIdx];
     state.isAutoFitted = false;
     state.autoFitCache = null;
     // buildGrid (not refreshGrid) — column count changed, columnDefs need rebuild.
@@ -128,11 +137,19 @@ function hideMenu(): void {
     document.getElementById('row-context-menu')?.classList.add('hidden');
 }
 
-function showContextMenu(x: number, y: number, rowIndex: number | null, colId: string | null): void {
+function showContextMenu(x: number, y: number, rowIndex: number | null, colId: string | null, isPinnedRow = false): void {
     const menu = document.getElementById('row-context-menu') as HTMLElement | null;
     if (!menu) return;
 
     menu.innerHTML = '';
+
+    // Resolve the right-clicked row's grid node. A frozen row lives in the
+    // pinned-top band (its DOM row-index would otherwise collide with body row 0),
+    // so it must be looked up via getPinnedTopRow, not getDisplayedRowAtIndex.
+    const resolveNode = (): any =>
+        isPinnedRow            ? state.gridApi?.getPinnedTopRow(rowIndex ?? 0)
+        : rowIndex === null    ? null
+        : state.gridApi?.getDisplayedRowAtIndex(rowIndex);
 
     // ── Copy ──────────────────────────────────────────────────────────────────
     if (hasMultiSelection()) {
@@ -153,9 +170,9 @@ function showContextMenu(x: number, y: number, rowIndex: number | null, colId: s
         sep.className = 'col-ctx-separator';
         menu.appendChild(sep);
     } else if (colId && rowIndex !== null && colId !== 'row-index') {
-        // Read the value from the displayed grid node — rowIndex is a display
+        // Read the value from the resolved grid node — rowIndex is a display
         // index, which differs from the state.data position when a sort is active.
-        const node  = state.gridApi?.getDisplayedRowAtIndex(rowIndex);
+        const node  = resolveNode();
         const raw   = node?.data?.[colId];
         const value = raw != null ? String(raw) : '';
 
@@ -173,8 +190,47 @@ function showContextMenu(x: number, y: number, rowIndex: number | null, colId: s
         menu.appendChild(sep);
     }
 
+    // ── Freeze / Unfreeze row ─────────────────────────────────────────────────
+    // A pure view aid (available in preview too). Suppressed while duplicate
+    // detection is active, since that mode drives the grid's rowData itself —
+    // the two are mutually exclusive (runDetect() drops any frozen row).
+    if (state.dupRowSet.size === 0 && !state.dupShowOnly) {
+        if (isPinnedRow && state.frozenRowRef !== null) {
+            // Right-clicked the pinned band — it can only be the single frozen row,
+            // so offer Unfreeze directly without depending on a (possibly absent)
+            // body row index.
+            const item = document.createElement('div');
+            item.className = 'row-ctx-item';
+            item.textContent = '📌 Unfreeze row';
+            item.addEventListener('click', () => { unfreezeRow(); hideMenu(); });
+            menu.appendChild(item);
+
+            const sep = document.createElement('div');
+            sep.className = 'col-ctx-separator';
+            menu.appendChild(sep);
+        } else if (rowIndex !== null) {
+            const node        = resolveNode();
+            const clickedOrig = node?.data?._origIndex != null ? Number(node.data._origIndex) : null;
+            if (clickedOrig != null) {
+                const frozen = isRowFrozen(clickedOrig);
+                const item = document.createElement('div');
+                item.className = 'row-ctx-item';
+                item.textContent = frozen ? '📌 Unfreeze row' : '📌 Freeze row';
+                item.addEventListener('click', () => {
+                    if (frozen) unfreezeRow(); else freezeRow(clickedOrig);
+                    hideMenu();
+                });
+                menu.appendChild(item);
+
+                const sep = document.createElement('div');
+                sep.className = 'col-ctx-separator';
+                menu.appendChild(sep);
+            }
+        }
+    }
+
     // ── Insert row above/below ────────────────────────────────────────────────
-    if (rowIndex !== null && !IS_PREVIEW) {
+    if (rowIndex !== null && !IS_PREVIEW && !isPinnedRow) {
         const insertAbove = document.createElement('div');
         insertAbove.className = 'row-ctx-item';
         insertAbove.textContent = 'Insert row above';
@@ -199,7 +255,7 @@ function showContextMenu(x: number, y: number, rowIndex: number | null, colId: s
     }
 
     // ── Delete row(s) ─────────────────────────────────────────────────────────
-    if (rowIndex !== null && !IS_PREVIEW) {
+    if (rowIndex !== null && !IS_PREVIEW && !isPinnedRow) {
         const selectedNodes: any[] = state.gridApi?.getSelectedNodes() ?? [];
         const selectedIndices: number[] = selectedNodes.map((n: any) => n.rowIndex as number);
         const rowIndices = selectedIndices.includes(rowIndex) ? selectedIndices : [rowIndex];
@@ -284,9 +340,12 @@ export function setupDeleteRowCol(): void {
 
         const colId   = cell.getAttribute('col-id');
         const agRow   = cell.closest('.ag-row') as HTMLElement | null;
+        // Frozen rows render in AG Grid's .ag-floating-top band with their own
+        // row-index attribute — flag them so the menu resolves the right node.
+        const isPinnedRow = !!agRow?.closest('.ag-floating-top');
         const riStr   = agRow?.getAttribute('row-index');
         const rowIndex = riStr != null ? parseInt(riStr, 10) : null;
 
-        showContextMenu(e.clientX, e.clientY, rowIndex, colId);
+        showContextMenu(e.clientX, e.clientY, rowIndex, colId, isPinnedRow);
     });
 }

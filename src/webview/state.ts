@@ -26,6 +26,13 @@ export const state = {
 
     currentPage: 0,
 
+    // Freeze row — the single data row pinned to the top of the grid as an
+    // always-visible reference. Tracked by its array reference within state.data
+    // (NOT by index) so the freeze follows the row through inserts/deletes/sorts
+    // and clears itself automatically when state.data is replaced (paging,
+    // undo/redo, re-parse). null = no row frozen. See features/freeze-rows.ts.
+    frozenRowRef: null as string[] | null,
+
     // Duplicate detection
     // dupRowSet — set of original 1-based row indices (i.e. _origIndex values) that
     // appear more than once. Empty set means dup detection is currently OFF.

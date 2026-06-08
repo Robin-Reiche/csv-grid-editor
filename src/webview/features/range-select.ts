@@ -318,6 +318,7 @@ export function onCellMouseDownHandler(e: any): void {
     if (state.isCellEditing) return;
     const native: MouseEvent | undefined = e.event;
     if (native && native.button !== 0) return;   // left button only — right = context menu
+    if (e.rowPinned) return;                      // ignore the frozen (pinned) reference row
 
     const colId: string | undefined = e.column?.getColId?.();
     const rowIndex: number | null = e.rowIndex;
@@ -353,6 +354,7 @@ export function onCellMouseDownHandler(e: any): void {
 
 export function onCellMouseOverHandler(e: any): void {
     if (!dragging) return;
+    if (e.rowPinned) return;                      // don't extend a selection onto the frozen row
     const rowIndex: number | null = e.rowIndex;
     if (rowIndex == null) return;
     const colId: string | undefined = e.column?.getColId?.();

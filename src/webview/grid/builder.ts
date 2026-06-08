@@ -2,6 +2,7 @@ import { state, getNumCols } from '../state';
 import { getColumnType, scheduleRecomputeColTypes } from './column-type';
 import { createCombinedFilter } from './filter';
 import { dataRowIndexForNode } from './row-mapping';
+import { partitionFrozenRows } from './refresh';
 import { pushUndo, notifyChange, updateButtons } from '../features/undo-redo';
 import { getFindCellClassRules } from '../features/find-replace';
 import { attachHeaderContextMenus } from '../features/freeze-columns';
@@ -115,10 +116,16 @@ export function buildGrid(): void {
         headerName: '#',
         colId: 'row-index',
         headerClass: 'row-index-header',
-        valueGetter: (p: any) =>
-            state.dupShowOnly && p.data?._origIndex != null
-                ? p.data._origIndex
-                : p.node.rowIndex + 1,
+        // The frozen (pinned) row shows a 📌 marker + its original row number so it
+        // reads as "the frozen row N", not a duplicate of the body row that now
+        // sits at display position N (the body renumbers positionally once a row is
+        // pinned out). "Show only duplicates" mode shows the original number; every
+        // other row shows its live display position.
+        valueGetter: (p: any) => {
+            if (p.node.rowPinned && p.data?._origIndex != null) return '📌' + p.data._origIndex;
+            if (state.dupShowOnly && p.data?._origIndex != null) return p.data._origIndex;
+            return p.node.rowIndex + 1;
+        },
         width: 48, minWidth: 36, maxWidth: 80,
         pinned: 'left',
         suppressHeaderMenuButton: true, sortable: false, filter: false,
@@ -154,6 +161,10 @@ export function buildGrid(): void {
         return obj as Record<string, string>;
     });
 
+    // Pull any frozen reference row out of the scrollable body into AG Grid's
+    // pinned-top band so it stays visible while the body scrolls/sorts/filters.
+    const { body: bodyRowData, pinnedTop: pinnedTopRowData } = partitionFrozenRows(rowData);
+
     const container = document.getElementById('grid-container')!;
     container.innerHTML = '';
     applyGridTheme(); // ensure correct ag-theme-alpine[-dark] class
@@ -174,7 +185,8 @@ export function buildGrid(): void {
 
     const gridOptions: any = {
         columnDefs,
-        rowData,
+        rowData: bodyRowData,
+        pinnedTopRowData,
         defaultColDef: {
             flex: 0, width: 130,
             editable: !IS_PREVIEW,
@@ -202,6 +214,10 @@ export function buildGrid(): void {
         undoRedoCellEditing: false,
 
         onCellClicked: (event: any) => {
+            // A click on the frozen (pinned) reference row must not become a body
+            // anchor — its rowIndex lives in the pinned namespace and would alias
+            // body row 0 for paste / range-select (onCellFocused clears focus too).
+            if (event.rowPinned) return;
             const colId = event.column?.getColId?.() ?? event.column;
             if (colId != null && event.rowIndex != null) {
                 state.focusedCellColId    = colId;
@@ -210,7 +226,10 @@ export function buildGrid(): void {
         },
 
         onCellFocused: (event: any) => {
-            if (event.column && event.rowIndex != null) {
+            // Track focus on body cells only. A pinned (frozen) cell falls through
+            // to the else branch and clears focus, so paste / range-select never
+            // alias its pinned-namespace rowIndex onto a body row.
+            if (!event.rowPinned && event.column && event.rowIndex != null) {
                 const colId = typeof event.column === 'string' ? event.column : event.column.getColId();
                 state.focusedCellColId    = colId;
                 state.focusedCellRowIndex = event.rowIndex;
@@ -257,6 +276,7 @@ export function buildGrid(): void {
             if (isAnyFilter) {
                 let displayed = 0;
                 state.gridApi.forEachNodeAfterFilter(() => displayed++);
+                if (state.frozenRowRef) displayed++; // the pinned reference row is always visible
                 document.getElementById('info')!.textContent   = `${displayed} of ${totalRows} rows \u00D7 ${cols} columns`;
                 document.getElementById('status')!.textContent = `${displayed} of ${totalRows} records (filtered)`;
             } else {
