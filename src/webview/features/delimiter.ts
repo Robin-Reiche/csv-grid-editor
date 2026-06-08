@@ -27,6 +27,7 @@ export function setupDelimiterBadge(): void {
             updateDelimiterBadge(state.currentDelimiter);
             dropdown.classList.add('hidden');
             state.data = parseCsv(state.rawCsvText, state.currentDelimiter);
+            state.hiddenCols.clear(); // re-parse may change the column set — drop index-based hide state
             state.autoFitCache = null;
             state.colTypes = [];
             buildGrid();

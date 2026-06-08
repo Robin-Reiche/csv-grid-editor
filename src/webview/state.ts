@@ -33,6 +33,12 @@ export const state = {
     // undo/redo, re-parse). null = no row frozen. See features/freeze-rows.ts.
     frozenRowRef: null as string[] | null,
 
+    // Hidden columns — set of 0-based data-column indices the user has hidden via
+    // the column chooser. Re-applied in buildGrid (so visibility survives a grid
+    // rebuild, e.g. paging) and cleared on column insert/delete since those shift
+    // indices. In-memory only. See features/column-chooser.ts.
+    hiddenCols: new Set<number>(),
+
     // Duplicate detection
     // dupRowSet — set of original 1-based row indices (i.e. _origIndex values) that
     // appear more than once. Empty set means dup detection is currently OFF.

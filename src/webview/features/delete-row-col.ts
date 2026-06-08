@@ -17,6 +17,7 @@ function deleteColumn(colId: string): void {
     const frozenIdx = state.frozenRowRef ? state.data.indexOf(state.frozenRowRef) : -1;
     state.data = state.data.map(row => row.filter((_, i) => i !== colIndex));
     if (frozenIdx >= 0) state.frozenRowRef = state.data[frozenIdx];
+    state.hiddenCols.clear(); // column indices shifted — drop index-based hide state
     state.isAutoFitted = false;
     state.autoFitCache = null;
     buildGrid();
@@ -124,6 +125,7 @@ function insertColumn(colId: string, position: 'left' | 'right'): void {
         return copy;
     });
     if (frozenIdx >= 0) state.frozenRowRef = state.data[frozenIdx];
+    state.hiddenCols.clear(); // column indices shifted — drop index-based hide state
     state.isAutoFitted = false;
     state.autoFitCache = null;
     // buildGrid (not refreshGrid) — column count changed, columnDefs need rebuild.

@@ -2,6 +2,12 @@
 
 All notable changes to CSV Grid Editor are documented here.
 
+## [1.7.0] - 2026-06-08
+
+### Added
+- **Rename columns** — Double-click a column header, or right-click it → **Rename column**, to rename it. The new name is written to the CSV header row and is fully undoable; column widths, sort and freeze state are preserved.
+- **Show / hide columns** — A new toolbar button opens a column chooser: a checklist of every column with checkboxes to hide or show individual columns, plus **Show all** to reset. Hidden columns persist across paged-view page changes. Export still includes all columns.
+
 ## [1.6.1] - 2026-06-08
 
 ### Added
