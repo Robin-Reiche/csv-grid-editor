@@ -1047,6 +1047,57 @@ button .codicon {
     color:      var(--vscode-button-secondaryForeground, #ccc);
 }
 .goto-btn-secondary:hover { background: var(--vscode-button-secondaryHoverBackground, #45494e); }
+
+/* ── Column chooser (show / hide columns) ── */
+.col-chooser-popover {
+    position: fixed;
+    z-index: 250;
+    min-width: 200px;
+    max-width: 320px;
+    padding: 8px;
+    background: var(--vscode-menu-background, #252526);
+    border: 1px solid var(--vscode-menu-border, #454545);
+    border-radius: 4px;
+    box-shadow: 0 4px 12px rgba(0,0,0,.45);
+    font-family: var(--vscode-font-family, "Segoe UI", sans-serif);
+    color: var(--vscode-editor-foreground, #d4d4d4);
+}
+.col-chooser-popover.hidden { display: none; }
+.col-chooser-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 2px 4px 6px;
+    border-bottom: 1px solid var(--vscode-menu-border, #454545);
+    margin-bottom: 4px;
+}
+.col-chooser-showall {
+    border: 1px solid transparent;
+    border-radius: 3px;
+    padding: 2px 8px;
+    font-size: 11px;
+    font-family: inherit;
+    cursor: pointer;
+    background: var(--vscode-button-secondaryBackground, #3a3d41);
+    color:      var(--vscode-button-secondaryForeground, #ccc);
+}
+.col-chooser-showall:hover { background: var(--vscode-button-secondaryHoverBackground, #45494e); }
+.col-chooser-list { max-height: 320px; overflow-y: auto; }
+.col-chooser-list::-webkit-scrollbar { width: 6px; }
+.col-chooser-list::-webkit-scrollbar-thumb { background: var(--vscode-scrollbarSlider-background, #424242); border-radius: 3px; }
+.col-chooser-item {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 4px 6px;
+    font-size: 12px;
+    cursor: pointer;
+    border-radius: 3px;
+}
+.col-chooser-item:hover { background: var(--vscode-list-hoverBackground, #2a2d2e); }
+.col-chooser-item input { cursor: pointer; margin: 0; flex: none; accent-color: var(--vscode-focusBorder, #007fd4); }
+.col-chooser-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .goto-error {
     margin-top: 6px;
     font-size: 11px;

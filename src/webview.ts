@@ -112,6 +112,7 @@ export function getWebviewContent(
         <button id="btn-zoom-in"  title="Increase size (${mod}+)"><i class="codicon codicon-zoom-in"></i></button>
         <div    class="separator"></div>
         <button id="btn-profile"       title="Column Profile"><i class="codicon codicon-graph"></i></button>
+        <button id="btn-columns"       title="Show / hide columns"><i class="codicon codicon-checklist"></i></button>
         <div    class="separator"></div>
         <button id="btn-find-replace"  title="Find &amp; Replace (${mod}F)"><i class="codicon codicon-search"></i></button>
         <div    class="separator"></div>
@@ -144,6 +145,27 @@ export function getWebviewContent(
             <button id="goto-go"     class="goto-btn goto-btn-primary">Go</button>
         </div>
         <div id="goto-error" class="goto-error" style="display:none;"></div>
+    </div>
+
+    <!-- Rename column popover -->
+    <div id="rename-popover" class="goto-popover hidden">
+        <label class="goto-label" for="rename-input">Rename column</label>
+        <div class="goto-input-row">
+            <input id="rename-input" type="text" spellcheck="false" placeholder="Column name">
+        </div>
+        <div class="goto-actions">
+            <button id="rename-cancel" class="goto-btn goto-btn-secondary">Cancel</button>
+            <button id="rename-ok"     class="goto-btn goto-btn-primary">Rename</button>
+        </div>
+    </div>
+
+    <!-- Column chooser popover (show/hide columns) -->
+    <div id="col-chooser-popover" class="col-chooser-popover hidden">
+        <div class="col-chooser-head">
+            <span class="goto-label" style="margin:0;">Columns</span>
+            <button id="col-chooser-showall" class="col-chooser-showall">Show all</button>
+        </div>
+        <div id="col-chooser-list" class="col-chooser-list"></div>
     </div>
 
     <!-- Duplicate banner -->
@@ -193,6 +215,8 @@ export function getWebviewContent(
     <div id="col-context-menu" class="col-context-menu hidden">
         <div id="col-ctx-insert-left"  class="col-ctx-item"${isPreview ? ' style="display:none;"' : ''}>&#x2B05;&#xFE0F; Insert column left</div>
         <div id="col-ctx-insert-right" class="col-ctx-item"${isPreview ? ' style="display:none;"' : ''}>&#x27A1;&#xFE0F; Insert column right</div>
+        <div class="col-ctx-separator"${isPreview ? ' style="display:none;"' : ''}></div>
+        <div id="col-ctx-rename"   class="col-ctx-item"${isPreview ? ' style="display:none;"' : ''}>&#x270F;&#xFE0F; Rename column</div>
         <div class="col-ctx-separator"${isPreview ? ' style="display:none;"' : ''}></div>
         <div id="col-ctx-select"   class="col-ctx-item">&#x2630; Select column</div>
         <div class="col-ctx-separator"></div>

@@ -1,6 +1,6 @@
 import { state } from '../state';
 import { toCsv } from '../utils/csv';
-import { refreshGrid } from '../grid/refresh';
+import { refreshGrid, syncColumnHeaders } from '../grid/refresh';
 import { recomputeColTypes } from '../grid/column-type';
 import { resetDuplicatesState } from './duplicates';
 
@@ -20,6 +20,7 @@ export function undo(): void {
     state.redoStack.push(snapshot());
     state.data = state.undoStack.pop()!;
     refreshGrid();
+    syncColumnHeaders(); // header row may have changed (rename column)
     notifyChange();
     updateButtons();
     recomputeColTypes();
@@ -30,6 +31,7 @@ export function redo(): void {
     state.undoStack.push(snapshot());
     state.data = state.redoStack.pop()!;
     refreshGrid();
+    syncColumnHeaders(); // header row may have changed (rename column)
     notifyChange();
     updateButtons();
     recomputeColTypes();

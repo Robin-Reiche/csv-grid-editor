@@ -101,6 +101,11 @@ function makeComparator(colType: string): (a: string, b: string) => number {
     return textCompare;
 }
 
+// Guards the one-time wiring of the resize-handle dblclick listener. #grid-container
+// persists across rebuilds (buildGrid only clears its innerHTML), so the delegated
+// listener must be attached once — not re-added on every buildGrid call.
+let dblclickWired = false;
+
 export function buildGrid(): void {
     if (!state.data?.length) return;
 
@@ -147,6 +152,8 @@ export function buildGrid(): void {
             filter:       createCombinedFilter(colType),
             resizable:    true,
             suppressMovable: false,
+            // Re-apply column-chooser visibility so hidden columns survive a rebuild.
+            hide:         state.hiddenCols.has(c),
         };
         colDef.comparator = makeComparator(colType);
         columnDefs.push(colDef);
@@ -304,17 +311,21 @@ export function buildGrid(): void {
     state.gridApi = agGrid.createGrid(container, gridOptions);
     updateButtons();
 
-    // Double-click on resize handle → auto-size that column
-    container.addEventListener('dblclick', e => {
-        const target = e.target as HTMLElement;
-        if (target?.classList.contains('ag-header-cell-resize')) {
-            const headerCell = target.closest('.ag-header-cell');
-            if (headerCell) {
-                const colId = headerCell.getAttribute('col-id');
-                if (colId) state.gridApi.autoSizeColumns([colId]);
+    // Double-click on resize handle → auto-size that column. Wired once: the
+    // container survives rebuilds, so re-adding would accumulate listeners.
+    if (!dblclickWired) {
+        dblclickWired = true;
+        container.addEventListener('dblclick', e => {
+            const target = e.target as HTMLElement;
+            if (target?.classList.contains('ag-header-cell-resize')) {
+                const headerCell = target.closest('.ag-header-cell');
+                if (headerCell) {
+                    const colId = headerCell.getAttribute('col-id');
+                    if (colId) state.gridApi.autoSizeColumns([colId]);
+                }
             }
-        }
-    });
+        });
+    }
 
     const rowCount = bodyRows.length;
     const infoEl   = document.getElementById('info');

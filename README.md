@@ -58,6 +58,12 @@ A fast, feature-rich CSV/TSV editor for Visual Studio Code. Opens CSV files in a
 ### Row Freeze
 - **Freeze / Unfreeze** — Right-click any row and choose **Freeze row** to pin it to the top of the grid as an always-visible reference while you scroll, sort and filter; right-click the pinned row to unfreeze. One row at a time. A 📌 marker on the pinned row shows its original row number, and the row stays visible regardless of any active filter.
 
+### Rename Columns
+- **Rename** — Double-click a column header (or right-click it → **Rename column**) to rename it; the new name is written to the CSV header row and is fully undoable.
+
+### Show / Hide Columns
+- **Column chooser** — Click the checklist icon in the toolbar to open a list of all columns with checkboxes; uncheck a column to hide it, re-check to show it, or **Show all** to reset. A view aid — hidden columns are still included on export.
+
 ### Sort & Filter
 
 ![Filter View](https://raw.githubusercontent.com/Robin-Reiche/csv-grid-editor/master/images/filter-view.png)

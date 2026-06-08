@@ -13,6 +13,8 @@ import { setupGoToRow }        from './features/go-to-row';
 import { setupDuplicates }     from './features/duplicates';
 import { setupPaste }          from './features/paste';
 import { setupRangeSelect }    from './features/range-select';
+import { setupRenameColumn }   from './features/rename-column';
+import { setupColumnChooser }  from './features/column-chooser';
 import { setupKeyboard }       from './keyboard';
 import { setupMessaging }      from './messaging';
 
@@ -31,6 +33,8 @@ setupGoToRow();
 setupDuplicates();
 setupPaste();
 setupRangeSelect();
+setupRenameColumn();
+setupColumnChooser();
 setupKeyboard();
 setupMessaging();
 

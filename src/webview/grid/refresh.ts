@@ -25,6 +25,29 @@ export function partitionFrozenRows<T extends { _origIndex?: number }>(
     return { body, pinnedTop };
 }
 
+// Re-applies header labels from state.data[0] onto the live column defs. The
+// header row is editable data (rename column), but refreshGrid only swaps
+// rowData — so after undo/redo restores state.data[0] the header labels must be
+// re-synced WITHOUT a full buildGrid (which would drop widths/sort/freeze).
+export function syncColumnHeaders(): void {
+    if (!state.gridApi) return;
+    const header = state.data[0] ?? [];
+    const defs = state.gridApi.getColumnDefs() as any[] | undefined;
+    if (!defs) return;
+    let changed = false;
+    for (const d of defs) {
+        if (typeof d.field === 'string' && d.field.indexOf('col_') === 0) {
+            const ci   = parseInt(d.field.slice(4), 10);
+            const name = header[ci] ?? '';
+            if (d.headerName !== name) { d.headerName = name; changed = true; }
+        }
+    }
+    if (changed) {
+        state.gridApi.setGridOption('columnDefs', defs);
+        state.gridApi.refreshHeader();
+    }
+}
+
 export function refreshGrid(): void {
     if (!state.gridApi) return;
     state.autoFitCache = null;
