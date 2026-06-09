@@ -2,6 +2,12 @@
 
 All notable changes to CSV Grid Editor are documented here.
 
+## [1.7.3] - 2026-06-09
+
+### Changed
+- **Marketplace listing and discoverability** - Expanded the search keywords and switched the second category to Data Science, rewrote the displayName and description to lead with what the extension does, and added homepage, bugs, Q&A, gallery banner and pricing metadata. No functional changes to the editor.
+- **README** - Reworked for clarity and search with a keyword-first intro, a Contents list, Why / Who it is for / Quick start sections, an honest How it compares table, an FAQ, two short demo GIFs and clearer image alt text.
+
 ## [1.7.2] - 2026-06-08
 
 ### Fixed

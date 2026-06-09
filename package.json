@@ -2,7 +2,7 @@
   "name": "csv-grid-editor",
   "displayName": "CSV Grid Editor: CSV & TSV Viewer",
   "description": "Open, view and edit CSV and TSV files in a fast sortable filterable grid. Inline editing, find and replace, freeze rows, column stats and Excel copy and paste. Free.",
-  "version": "1.7.2",
+  "version": "1.7.3",
   "publisher": "RobinReiche",
   "license": "MIT",
   "icon": "icon.png",
@@ -39,8 +39,7 @@
     "column statistics",
     "find and replace",
     "large csv",
-    "excel alternative",
-    "dataframe"
+    "excel alternative"
   ],
   "activationEvents": [],
   "main": "./out/extension.js",
