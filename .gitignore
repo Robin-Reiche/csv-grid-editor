@@ -16,3 +16,6 @@ feature_ideen.txt
 test.csv
 clearView_code_example
 .omc/
+# Raw screen recordings (huge). The optimized demo.gif / demo-2.gif are committed instead.
+images/preview_gif1.gif
+images/preview_gif2.gif

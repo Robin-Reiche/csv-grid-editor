@@ -1,7 +1,7 @@
 {
   "name": "csv-grid-editor",
-  "displayName": "CSV Grid Editor",
-  "description": "View and edit CSV/TSV files in a sortable, filterable grid with auto-fit columns, zoom, and theme integration",
+  "displayName": "CSV Grid Editor: CSV & TSV Viewer",
+  "description": "Open, view and edit CSV and TSV files in a fast sortable filterable grid. Inline editing, find and replace, freeze rows, column stats and Excel copy and paste. Free.",
   "version": "1.7.2",
   "publisher": "RobinReiche",
   "license": "MIT",
@@ -13,21 +13,34 @@
   "sponsor": {
     "url": "https://github.com/sponsors/Robin-Reiche"
   },
+  "homepage": "https://marketplace.visualstudio.com/items?itemName=RobinReiche.csv-grid-editor",
+  "bugs": {
+    "url": "https://github.com/Robin-Reiche/csv-grid-editor/issues"
+  },
+  "qna": "marketplace",
+  "galleryBanner": {
+    "color": "#1e508c",
+    "theme": "dark"
+  },
+  "pricing": "Free",
   "engines": {
     "vscode": "^1.80.0"
   },
   "categories": [
-    "Visualization",
-    "Other"
+    "Data Science",
+    "Visualization"
   ],
   "keywords": [
     "csv",
     "tsv",
-    "viewer",
-    "editor",
-    "grid",
     "spreadsheet",
-    "table"
+    "data grid",
+    "delimited",
+    "column statistics",
+    "find and replace",
+    "large csv",
+    "excel alternative",
+    "dataframe"
   ],
   "activationEvents": [],
   "main": "./out/extension.js",
