@@ -815,8 +815,8 @@ button .codicon {
     box-shadow: 0 3px 8px rgba(0,0,0,.35);
 }
 .delim-dropdown.hidden { display: none; }
-.delim-option { padding: 5px 10px; font-size: 12px; cursor: pointer; color: var(--vscode-menu-foreground, #ccc); }
-.delim-option:hover { background: var(--vscode-menu-selectionBackground, #094771); color: var(--vscode-menu-selectionForeground, #fff); }
+.delim-option, .export-option { padding: 5px 10px; font-size: 12px; cursor: pointer; color: var(--vscode-menu-foreground, #ccc); }
+.delim-option:hover, .export-option:hover { background: var(--vscode-menu-selectionBackground, #094771); color: var(--vscode-menu-selectionForeground, #fff); }
 
 /* ── F5: Column Context Menu ── */
 .col-context-menu {

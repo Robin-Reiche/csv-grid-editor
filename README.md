@@ -86,7 +86,9 @@ For files larger than 10 MB you get a quick menu to open the full file, preview 
   - Right-click → **Copy with header** to include the column headers in the copy
   - `Delete` / `Backspace` clears every cell in the selection
   - The status bar shows the selection size plus live `Count / Sum / Avg / Min / Max`
-- **Export CSV** - Export the current filtered and sorted view as a CSV file via the native VS Code save dialog
+- **Export as JSON** - Convert the current filtered and sorted view to a JSON array of objects via the native VS Code save dialog. Column headers become the keys and numbers and booleans come out typed, while values that would lose information (IDs with leading zeros, very large numbers) stay strings.
+- **Export as JSON Lines** - The same view as JSON Lines (NDJSON), one object per line, handy for streaming tools and data pipelines
+- **Export as Markdown table** - The same view as a GitHub-flavored Markdown table, ready to paste into a README, issue or pull request
 
 ### Delimiter
 - **Auto-Detection** - Automatically detects commas, semicolons and tabs on open. `.tsv` files always use tab.

@@ -240,15 +240,21 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
                 document.content = msg.text;
                 this._onDidChangeCustomDocument.fire({ document });
 
-            // F4: Export handler
+            // F4: Export handler — the webview sends the converted text plus a
+            // suggested filename; the extension picks dialog filters from its
+            // extension (.json / .jsonl / .md).
             } else if (msg.type === 'export') {
+                const filename   = msg.filename ?? 'export.json';
                 const defaultUri = vscode.Uri.file(
-                    path.join(path.dirname(document.uri.fsPath), msg.filename ?? 'export.csv')
+                    path.join(path.dirname(document.uri.fsPath), filename)
                 );
-                const saveUri = await vscode.window.showSaveDialog({
-                    defaultUri,
-                    filters: { 'CSV files': ['csv'], 'All files': ['*'] }
-                });
+                const ext = path.extname(filename).toLowerCase();
+                const filters: Record<string, string[]> =
+                    ext === '.jsonl' ? { 'JSON Lines': ['jsonl', 'ndjson'] } :
+                    ext === '.md'    ? { 'Markdown':   ['md'] } :
+                                       { 'JSON':       ['json'] };
+                filters['All files'] = ['*'];
+                const saveUri = await vscode.window.showSaveDialog({ defaultUri, filters });
                 if (saveUri) {
                     await vscode.workspace.fs.writeFile(saveUri, new TextEncoder().encode(msg.text ?? ''));
                     vscode.window.showInformationMessage(`Exported to ${path.basename(saveUri.fsPath)}`);

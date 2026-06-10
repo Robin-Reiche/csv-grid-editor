@@ -119,7 +119,7 @@ export function getWebviewContent(
         <button id="btn-go-to-row"     title="Go to row (${mod}G)${isChunked ? ' — disabled in Paged View' : ''}"${isChunked ? ' disabled' : ''}><i class="codicon codicon-list-ordered"></i></button>
         <button id="btn-duplicates"    title="Find duplicate rows${isChunked ? ' — disabled in Paged View' : ''}"${isChunked ? ' disabled' : ''}><i class="codicon codicon-files"></i></button>
         <div    class="separator"></div>
-        <button id="btn-export"        title="Export CSV" class="text-btn"${isPreview ? ' style="display:none;"' : ''}><i class="codicon codicon-export"></i> Export</button>
+        <button id="btn-export"        title="Export as JSON, JSON Lines or Markdown" class="text-btn"${isPreview ? ' style="display:none;"' : ''}><i class="codicon codicon-export"></i> Export</button>
         <div    class="separator"></div>
         <span   id="delim-badge" class="delim-badge" title="Click to change delimiter">Delim: ,</span>
         <span   class="info" id="info"></span>
@@ -131,6 +131,13 @@ export function getWebviewContent(
         <div class="delim-option" data-delim=";">;&nbsp;&nbsp; Semicolon</div>
         <div class="delim-option" data-delim="\\t">&#x21E5;&nbsp; Tab</div>
         <div class="delim-option" data-delim="|">|&nbsp;&nbsp; Pipe</div>
+    </div>
+
+    <!-- Export format dropdown -->
+    <div id="export-dropdown" class="delim-dropdown hidden">
+        <div class="export-option" data-format="json">JSON</div>
+        <div class="export-option" data-format="jsonl">JSON Lines</div>
+        <div class="export-option" data-format="md">Markdown table</div>
     </div>
 
     <!-- Go to Row popover -->

@@ -2,6 +2,14 @@
 
 All notable changes to CSV Grid Editor are documented here.
 
+## [1.8.0] - 2026-06-10
+
+### Added
+- **Export as JSON, JSON Lines and Markdown table** - The Export button now opens a small menu with three formats (requested in [#4](https://github.com/Robin-Reiche/csv-grid-editor/issues/4)). Every format exports the current view: filters, sort order, renamed headers and column order are all applied, and a frozen reference row is exported first. JSON exports an array of objects with the column headers as keys. Numbers and booleans come out typed, but never lossily: IDs with leading zeros, numbers too large for JSON and stray text in numeric columns stay strings, and empty cells in typed columns become `null`. JSON Lines writes one compact object per line for streaming tools. Markdown writes a GitHub-flavored table with right-aligned numeric columns, ready to paste into a README or issue.
+
+### Removed
+- **Export as CSV** - Removed because saving the file already writes CSV. The export menu now focuses on converting to other formats.
+
 ## [1.7.3] - 2026-06-09
 
 ### Changed
