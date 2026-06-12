@@ -48,3 +48,27 @@ export function insertColumnsIntoData(data: string[][], atIndex: number, count: 
         return copy;
     });
 }
+
+// Re-maps a set of column (or row) indices after some indices are deleted: dropped
+// indices are removed, and each surviving index shifts down by how many deleted
+// indices sat before it. Used to keep frozen-column tracking correct across a
+// multi-column delete.
+export function shiftIndicesAfterDelete(indices: Iterable<number>, deleted: Iterable<number>): Set<number> {
+    const del = deleted instanceof Set ? deleted : new Set(deleted);
+    const out = new Set<number>();
+    for (const i of indices) {
+        if (del.has(i)) continue;
+        let shift = 0;
+        for (const d of del) if (d < i) shift++;
+        out.add(i - shift);
+    }
+    return out;
+}
+
+// Re-maps a set of indices after `count` columns (or rows) are inserted at `at`:
+// indices at or after the insertion point shift up by `count`.
+export function shiftIndicesAfterInsert(indices: Iterable<number>, at: number, count: number): Set<number> {
+    const out = new Set<number>();
+    for (const i of indices) out.add(i >= at ? i + count : i);
+    return out;
+}

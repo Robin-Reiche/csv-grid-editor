@@ -16,7 +16,11 @@ const {
     deleteRowsFromData,
     insertRowsIntoData,
     insertColumnsIntoData,
+    shiftIndicesAfterDelete,
+    shiftIndicesAfterInsert,
 } = require('../out/webview/grid/mutations.js');
+
+const sorted = (set) => [...set].sort((a, b) => a - b);
 
 let failures = 0;
 function test(name, fn) {
@@ -148,6 +152,37 @@ test('insertColumnsIntoData appends N columns when index is past the end', () =>
 test('insertColumnsIntoData returns data unchanged for count < 1', () => {
     const data = makeData();
     assert.strictEqual(insertColumnsIntoData(data, 1, 0), data, 'no-op for count 0');
+});
+
+// ── index remap (frozen-column tracking across column ops) ────────────────────
+
+test('shiftIndicesAfterDelete: deleting a later column leaves earlier frozen ones', () => {
+    assert.deepStrictEqual(sorted(shiftIndicesAfterDelete([0, 1, 2], [4])), [0, 1, 2]);
+});
+
+test('shiftIndicesAfterDelete: deleting an earlier column shifts the rest down', () => {
+    assert.deepStrictEqual(sorted(shiftIndicesAfterDelete([1, 2], [0])), [0, 1]);
+});
+
+test('shiftIndicesAfterDelete: non-contiguous deletes shift by the count below each index', () => {
+    // delete cols 1 and 3: 0 stays, 2 -> 1 (one below), 4 -> 2 (two below)
+    assert.deepStrictEqual(sorted(shiftIndicesAfterDelete([0, 2, 4], [1, 3])), [0, 1, 2]);
+});
+
+test('shiftIndicesAfterDelete: a frozen column that is itself deleted drops out', () => {
+    assert.deepStrictEqual(sorted(shiftIndicesAfterDelete([2], [2])), []);
+});
+
+test('shiftIndicesAfterInsert: inserting before shifts frozen columns up', () => {
+    assert.deepStrictEqual(sorted(shiftIndicesAfterInsert([0, 1, 2], 0, 2)), [2, 3, 4]);
+});
+
+test('shiftIndicesAfterInsert: inserting after leaves earlier frozen columns put', () => {
+    assert.deepStrictEqual(sorted(shiftIndicesAfterInsert([0, 1, 2], 5, 1)), [0, 1, 2]);
+});
+
+test('shiftIndicesAfterInsert: only indices at/after the insertion point move', () => {
+    assert.deepStrictEqual(sorted(shiftIndicesAfterInsert([1, 3], 2, 1)), [1, 4]);
 });
 
 if (failures) { console.error('\n' + failures + ' test(s) failed'); process.exit(1); }

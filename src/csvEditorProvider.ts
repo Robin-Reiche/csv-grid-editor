@@ -200,7 +200,15 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             watcher.onDidChange(async () => {
                 try {
                     const raw = await vscode.workspace.fs.readFile(document.uri);
-                    document.content = new TextDecoder().decode(raw);
+                    const text = new TextDecoder().decode(raw);
+                    // Ignore our own writes. saveCustomDocument writes document.content
+                    // verbatim, so a watcher event whose content equals what we already
+                    // hold is the echo of our own save, not an external edit. Reloading
+                    // on it would re-parse the CSV into fresh arrays and wipe in-memory
+                    // view state (frozen rows, in particular). Only genuinely external
+                    // changes differ from document.content.
+                    if (text === document.content) return;
+                    document.content = text;
                     webviewPanel.webview.postMessage({
                         type: 'update',
                         text: document.content,
