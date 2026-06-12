@@ -65,4 +65,32 @@ export function refreshGrid(): void {
     const { body, pinnedTop } = partitionFrozenRows(rowData);
     state.gridApi.setGridOption('rowData', body);
     state.gridApi.setGridOption('pinnedTopRowData', pinnedTop);
+    // refreshGrid only swaps rowData, so the row/column counters in the toolbar
+    // and status bar would otherwise go stale after a delete/insert/paste/undo.
+    updateCountsDisplay();
+}
+
+// Recomputes the "<n> rows × <n> columns" toolbar text and the "<n> records"
+// status-bar text from state.data, honouring an active filter. Called by both
+// buildGrid() and refreshGrid() (and the filter handler) so the counts stay live
+// across every structural change, not just full rebuilds.
+export function updateCountsDisplay(): void {
+    const infoEl   = document.getElementById('info');
+    const statusEl = document.getElementById('status');
+    if (!infoEl && !statusEl) return;
+
+    const totalRows = Math.max(0, state.data.length - 1);
+    const cols      = getNumCols(state.data);
+    const filtered  = !!state.gridApi?.isAnyFilterPresent?.();
+
+    if (filtered && state.gridApi) {
+        let displayed = 0;
+        state.gridApi.forEachNodeAfterFilter(() => displayed++);
+        if (state.frozenRowRef) displayed++; // the pinned reference row is always visible
+        if (infoEl)   infoEl.textContent   = `${displayed} of ${totalRows} rows × ${cols} columns`;
+        if (statusEl) statusEl.textContent = `${displayed} of ${totalRows} records (filtered)`;
+    } else {
+        if (infoEl)   infoEl.textContent   = `${totalRows} rows × ${cols} columns`;
+        if (statusEl) statusEl.textContent = `${totalRows} records`;
+    }
 }

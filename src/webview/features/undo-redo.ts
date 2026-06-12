@@ -3,6 +3,7 @@ import { toCsv } from '../utils/csv';
 import { refreshGrid, syncColumnHeaders } from '../grid/refresh';
 import { recomputeColTypes } from '../grid/column-type';
 import { resetDuplicatesState } from './duplicates';
+import { refreshProfileIfOpen } from './profile';
 
 export function snapshot(): string[][] {
     return JSON.parse(JSON.stringify(state.data));
@@ -49,6 +50,10 @@ export function notifyChange(): void {
     // deleted, or modified into / out of being a duplicate). Clearing here
     // covers cell edits, undo/redo, find-replace, and row/column deletions.
     resetDuplicatesState();
+    // Every data mutation funnels through here, so it is the one place that
+    // guarantees the analysis panel reflects the current data (row counts,
+    // nulls, stats, and the column set) after a delete/insert/paste/edit/undo.
+    refreshProfileIfOpen();
     vscodeApi.postMessage({ type: 'edit', text: toCsv(state.data, state.currentDelimiter) });
 }
 

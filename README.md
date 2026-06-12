@@ -64,7 +64,8 @@ For files larger than 10 MB you get a quick menu to open the full file, preview 
 ![CSV Grid Editor toolbar with auto-fit, zoom, find and replace, export and column profile buttons](https://raw.githubusercontent.com/Robin-Reiche/csv-grid-editor/master/images/toolbar.png)
 
 ### Editing
-- **Inline Editing** - Double-click any cell to edit its value inline. Changes are tracked and saved back to the file.
+- **Inline Editing** - Double-click any cell to edit its value inline. Changes are tracked and saved back to the file. Press `Enter` to commit and jump to the cell below in the same column, the same as Excel and Google Sheets, so you can type down a column quickly.
+- **Insert & Delete rows and columns** - Right-click a row to insert above or below or to delete it, and right-click a column header to insert left or right or to delete. Select several rows (drag or `Shift`+click the `#` gutter) or several columns (`Shift`+click the headers) first to insert or delete that many at once, anchored to the selection edge, just like a spreadsheet.
 - **Undo / Redo** - Full multi-step undo and redo stack (`Ctrl+Z` / `Ctrl+Y`)
 - **Save / Save As** - Uses VS Code's native save mechanism and supports Save As to a new location
 
@@ -80,6 +81,7 @@ For files larger than 10 MB you get a quick menu to open the full file, preview 
 - **Range Selection** - Excel-style selection directly in the grid:
   - Click and drag to select a rectangular cell range
   - Click and drag the row-number (`#`) column to select whole rows
+  - `Shift`+click a column header to select a whole column or a run of adjacent columns
   - Right-click a column header → **Select column** to select a whole column
   - `Shift+click` and `Shift`+arrow keys extend the selection, `Ctrl+A` selects everything
   - `Ctrl+C` copies the selection as tab-separated values (TSV) that paste straight into Excel or Google Sheets
@@ -127,7 +129,7 @@ Click any column header to sort ascending or descending. Use the filter icon in 
 - **Dockable** - Dock the panel to the right (default), left or bottom of the grid
 - **Resizable** - Drag the panel border to adjust its size
 - **Zoom-aware** - Panel text and spacing scale with the grid's zoom level (60 to 200%)
-- **Live Updates** - The panel re-renders automatically when column types change due to data edits
+- **Live Updates** - The panel re-renders automatically as the data changes, including cell edits, inserts, deletes, paste and undo
 
 ![Column Profile panel showing min, max, mean, median, null percent and distinct counts for a CSV column](https://raw.githubusercontent.com/Robin-Reiche/csv-grid-editor/master/images/column-profile.png)
 

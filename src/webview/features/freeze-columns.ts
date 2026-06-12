@@ -1,4 +1,5 @@
 import { state } from '../state';
+import { getSelectedColIndices } from './range-select';
 
 // Kept as a no-op — builder.ts calls this after grid creation but it is no
 // longer needed since setupFreezeColumns uses event delegation on #grid-container.
@@ -51,6 +52,20 @@ export function setupFreezeColumns(): void {
         const unfreezeEl = document.getElementById('col-ctx-unfreeze');
         if (freezeEl)   freezeEl.style.display  = isPinned ? 'none'  : 'block';
         if (unfreezeEl) unfreezeEl.style.display = isPinned ? 'block' : 'none';
+
+        // Reflect a multi-column selection in the insert/delete labels so the user
+        // sees "Insert/Delete N columns" before clicking (matches the data-cell menu
+        // and Google Sheets). N inserts happen anchored to the selection edge.
+        const colIndex = parseInt(colId.replace('col_', ''), 10);
+        const selectedCols = getSelectedColIndices();
+        const n = selectedCols.length > 1 && selectedCols.includes(colIndex) ? selectedCols.length : 1;
+
+        const delEl = document.getElementById('col-ctx-delete');
+        if (delEl)  delEl.textContent  = n > 1 ? `✕ Delete ${n} columns`      : '✕ Delete column';
+        const insL = document.getElementById('col-ctx-insert-left');
+        if (insL)   insL.textContent   = n > 1 ? `⬅️ Insert ${n} columns left`  : '⬅️ Insert column left';
+        const insR = document.getElementById('col-ctx-insert-right');
+        if (insR)   insR.textContent   = n > 1 ? `➡️ Insert ${n} columns right` : '➡️ Insert column right';
 
         menu.dataset.colId = colId;
         menu.style.left    = e.clientX + 'px';

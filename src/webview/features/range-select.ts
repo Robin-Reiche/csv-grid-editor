@@ -268,6 +268,30 @@ export function clearRangeSelection(): void {
     if (el) el.textContent = '';
 }
 
+// ── selection accessors (read by the delete-row/col context menus) ─────────────
+
+// Display row indices of the current whole-row selection (gutter shift-click /
+// drag, or Ctrl+A). Contiguous by construction. Empty unless rows are selected —
+// a cell or column selection returns [] so it can't trigger a row delete.
+export function getSelectedRowDisplayIndices(): number[] {
+    if (!selActive || (selType !== 'rows' && selType !== 'all') || selRowHi < selRowLo) return [];
+    const out: number[] = [];
+    for (let r = selRowLo; r <= selRowHi; r++) out.push(r);
+    return out;
+}
+
+// Data column indices (the N in 'col_N') of the current whole-column selection
+// (header shift-click, "Select column", or Ctrl+A). Restricted to whole-column
+// selections on purpose: a stray multi-column CELL drag must not arm a column
+// delete. Returns the data indices, so it is correct even if columns were moved.
+export function getSelectedColIndices(): number[] {
+    if (!selActive || (selType !== 'cols' && selType !== 'all')) return [];
+    return [...selColIds]
+        .map(id => parseInt(id.slice(4), 10))
+        .filter(n => !isNaN(n))
+        .sort((a, b) => a - b);
+}
+
 function selectWholeColumn(colId: string): void {
     const cpos = displayedColIds().indexOf(colId);
     if (cpos < 0) return;
@@ -275,6 +299,23 @@ function selectWholeColumn(colId: string): void {
     selType = 'cols';
     anchorCol = focusCol = cpos;
     anchorRow = focusRow = 0;
+    selectionChanged();
+}
+
+// Shift-click on a column header: start a whole-column selection, or extend the
+// existing one to this column (contiguous). The companion to the row gutter's
+// shift-click, so multiple columns can be selected and deleted at once.
+function selectColumnRangeTo(colId: string): void {
+    const cpos = displayedColIds().indexOf(colId);
+    if (cpos < 0) return;
+    if (selActive && selType === 'cols') {
+        focusCol = cpos; // keep the anchor, move the focus → contiguous range
+    } else {
+        selActive = true;
+        selType = 'cols';
+        anchorCol = focusCol = cpos;
+        anchorRow = focusRow = 0;
+    }
     selectionChanged();
 }
 
@@ -435,6 +476,22 @@ export function setupRangeSelect(): void {
         dragging = false;
         document.body.style.userSelect = '';
     });
+
+    // Shift-click on a column header selects / extends a whole-column range.
+    // Capture phase + stopPropagation so AG Grid's own header click (which sorts)
+    // never fires for a shift-click; a plain click falls straight through to it.
+    // #grid-container is never replaced (buildGrid only clears its innerHTML), so
+    // one delegated listener covers every rebuild.
+    const container = document.getElementById('grid-container');
+    container?.addEventListener('click', (e: MouseEvent) => {
+        if (!e.shiftKey) return;
+        const headerCell = (e.target as HTMLElement).closest<HTMLElement>('.ag-header-cell[col-id]');
+        const colId = headerCell?.getAttribute('col-id');
+        if (!colId || !colId.startsWith('col_')) return;
+        e.preventDefault();
+        e.stopPropagation();
+        selectColumnRangeTo(colId);
+    }, true /* capture */);
 
     const colMenu = document.getElementById('col-context-menu') as HTMLElement | null;
     document.getElementById('col-ctx-select')?.addEventListener('click', () => {
