@@ -97,10 +97,10 @@ For files larger than 10 MB you get a quick menu to open the full file, preview 
 - **Manual Override** - Click the delimiter badge in the toolbar to change the delimiter on the fly (comma `,`, semicolon `;`, tab, pipe `|`). The grid re-parses the file immediately.
 
 ### Column Freeze
-- **Freeze / Unfreeze** - Right-click any column header to pin it to the left side of the grid, right-click again to unfreeze. Frozen columns show a 📌 marker before the column name.
+- **Freeze / Unfreeze** - Right-click any column header to pin it to the left side of the grid, right-click again to unfreeze. `Shift`+click several headers first to **Freeze N columns** at once. Frozen columns show a 📌 marker before the column name.
 
 ### Row Freeze
-- **Freeze / Unfreeze** - Right-click any row and choose **Freeze row** to pin it to the top of the grid as an always-visible reference while you scroll, sort and filter. Right-click the pinned row to unfreeze. One row can be frozen at a time. A 📌 marker on the pinned row shows its original row number, and the row stays visible regardless of any active filter.
+- **Freeze / Unfreeze** - Right-click any row and choose **Freeze row** to pin it to the top of the grid as an always-visible reference while you scroll, sort and filter. Select several rows first (drag or `Shift`+click the `#` gutter) and choose **Freeze N rows** to pin them all at once, handy for multi-line headers. Freezing is additive and the rows stay in the order you froze them. Right-click a pinned row to **Unfreeze** just that one, or **Unfreeze all rows**. A 📌 marker on each pinned row shows its original row number, and pinned rows stay visible regardless of any active filter.
 
 ### Rename Columns
 - **Rename** - Double-click a column header (or right-click it → **Rename column**) to rename it. The new name is written to the CSV header row and is fully undoable.

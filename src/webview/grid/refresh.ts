@@ -1,26 +1,39 @@
 import { state, getNumCols } from '../state';
 
-// Splits a freshly-built rowData array into the scrollable body and the single
-// frozen reference row (AG Grid renders the latter in a fixed pinned-top band).
-// The frozen row is matched by resolving state.frozenRowRef back to its current
-// position in state.data — which equals its _origIndex (state.data[0] is the
-// header, so a data row's index in state.data is its 1-based body position).
-// If the reference can no longer be found (row deleted, or state.data replaced
-// by paging/undo/re-parse) the stale freeze is dropped here, so callers never
-// have to clear it explicitly. Used by both buildGrid() and refreshGrid().
+// Splits a freshly-built rowData array into the scrollable body and the frozen
+// reference rows (AG Grid renders the latter in a fixed pinned-top band). Frozen
+// rows are tracked by their array references in state.frozenRowRefs, matched back
+// to their current position in state.data — which equals their _origIndex
+// (state.data[0] is the header). References that can no longer be found (row
+// deleted, or state.data replaced by paging/undo/re-parse) are dropped here, so
+// callers never have to clear stale freezes. Pinned rows keep FREEZE order (the
+// order they were frozen in), so a newly frozen row is appended at the end rather
+// than jumping to a data-sorted position. Used by buildGrid() and refreshGrid().
 export function partitionFrozenRows<T extends { _origIndex?: number }>(
     rowData: T[]
 ): { body: T[]; pinnedTop: T[] } {
-    const frozenOrig = state.frozenRowRef ? state.data.indexOf(state.frozenRowRef) : -1;
-    if (frozenOrig < 0) {
-        state.frozenRowRef = null; // self-heal: row gone or data replaced
-        return { body: rowData, pinnedTop: [] };
-    }
+    if (state.frozenRowRefs.length === 0) return { body: rowData, pinnedTop: [] };
+
+    // Map each current row array to its position, then self-heal the freeze list to
+    // the rows that still exist WHILE PRESERVING freeze order (newest stays last).
+    const idxOf = new Map<string[], number>();
+    state.data.forEach((row, i) => idxOf.set(row, i));
+    state.frozenRowRefs = state.frozenRowRefs.filter(r => idxOf.has(r));
+    if (state.frozenRowRefs.length === 0) return { body: rowData, pinnedTop: [] };
+
+    const frozenOrigs = new Set<number>(state.frozenRowRefs.map(r => idxOf.get(r) as number));
+    const byOrig = new Map<number, T>();
     const body: T[] = [];
-    const pinnedTop: T[] = [];
     for (const row of rowData) {
-        if (Number(row._origIndex) === frozenOrig) pinnedTop.push(row);
+        const oi = Number(row._origIndex);
+        if (frozenOrigs.has(oi)) byOrig.set(oi, row);
         else body.push(row);
+    }
+    // Emit pinned rows in freeze order (the frozenRowRefs array order).
+    const pinnedTop: T[] = [];
+    for (const r of state.frozenRowRefs) {
+        const row = byOrig.get(idxOf.get(r) as number);
+        if (row) pinnedTop.push(row);
     }
     return { body, pinnedTop };
 }
@@ -86,7 +99,7 @@ export function updateCountsDisplay(): void {
     if (filtered && state.gridApi) {
         let displayed = 0;
         state.gridApi.forEachNodeAfterFilter(() => displayed++);
-        if (state.frozenRowRef) displayed++; // the pinned reference row is always visible
+        displayed += state.frozenRowRefs.length; // pinned reference rows are always visible
         if (infoEl)   infoEl.textContent   = `${displayed} of ${totalRows} rows × ${cols} columns`;
         if (statusEl) statusEl.textContent = `${displayed} of ${totalRows} records (filtered)`;
     } else {

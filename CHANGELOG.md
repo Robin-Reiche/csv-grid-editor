@@ -2,6 +2,15 @@
 
 All notable changes to CSV Grid Editor are documented here.
 
+## [1.10.0] - 2026-06-12
+
+### Added
+- **Freeze multiple rows** - You can now pin more than one row to the top at once, which makes multi-line headers (a group row plus a unit row, for example) stay readable while you scroll (requested in [#9](https://github.com/Robin-Reiche/csv-grid-editor/issues/9)). Select several rows (drag or `Shift`+click the `#` gutter) and choose **Freeze N rows**, or keep adding rows one at a time, freezing is additive and the rows stay in the order you froze them. Right-click a pinned row to **Unfreeze** just that one, or **Unfreeze all rows**. This also covers the multi-level-header use case from [#8](https://github.com/Robin-Reiche/csv-grid-editor/issues/8) without changing the CSV.
+- **Freeze multiple columns at once** - `Shift`+click several column headers and choose **Freeze N columns** to pin them all in one go, the companion to multi-row freeze.
+
+### Fixed
+- **Freezes were lost during normal editing** - Frozen rows and columns are now preserved across deleting and inserting rows or columns, undo and redo, saving, and changing the delimiter, and frozen rows survive an external reload. Previously any of these could silently clear the freeze because the grid rebuild or re-parse lost track of the pinned rows and columns.
+
 ## [1.9.0] - 2026-06-12
 
 ### Added

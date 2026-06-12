@@ -1,11 +1,11 @@
-import type { CsvRow, ColType, FindMatch } from './types';
+import type { CsvRow, ColType, FindMatch, UndoSnapshot } from './types';
 
 export const state = {
     currentDelimiter: ',',
     rawCsvText: '',
     data: [] as CsvRow[],
-    undoStack: [] as CsvRow[][],
-    redoStack: [] as CsvRow[][],
+    undoStack: [] as UndoSnapshot[],
+    redoStack: [] as UndoSnapshot[],
     gridApi: null as any,
     focusedCellColId: null as string | null,
     focusedCellRowIndex: null as number | null,
@@ -26,18 +26,27 @@ export const state = {
 
     currentPage: 0,
 
-    // Freeze row — the single data row pinned to the top of the grid as an
-    // always-visible reference. Tracked by its array reference within state.data
-    // (NOT by index) so the freeze follows the row through inserts/deletes/sorts
-    // and clears itself automatically when state.data is replaced (paging,
-    // undo/redo, re-parse). null = no row frozen. See features/freeze-rows.ts.
-    frozenRowRef: null as string[] | null,
+    // Freeze rows — the data rows pinned to the top of the grid as always-visible
+    // references. Tracked by their array references within state.data (NOT by
+    // index) so each freeze follows its row through inserts/deletes/sorts and
+    // clears itself automatically when state.data is replaced (paging, undo/redo,
+    // re-parse). Empty = no row frozen. Multiple rows can be frozen at once, e.g.
+    // a multi-line header. See features/freeze-rows.ts.
+    frozenRowRefs: [] as string[][],
 
     // Hidden columns — set of 0-based data-column indices the user has hidden via
     // the column chooser. Re-applied in buildGrid (so visibility survives a grid
     // rebuild, e.g. paging) and cleared on column insert/delete since those shift
     // indices. In-memory only. See features/column-chooser.ts.
     hiddenCols: new Set<number>(),
+
+    // Frozen columns — set of 0-based data-column indices pinned to the left. Held
+    // in state (not only in AG Grid) so the freeze survives a buildGrid rebuild
+    // (column insert/delete, delimiter change, paging) — buildGrid rebuilds the
+    // column defs from scratch, which would otherwise drop the pinning. Re-applied
+    // via colDef.pinned in builder.ts and index-remapped on column insert/delete.
+    // See features/freeze-columns.ts.
+    pinnedCols: new Set<number>(),
 
     // Duplicate detection
     // dupRowSet — set of original 1-based row indices (i.e. _origIndex values) that

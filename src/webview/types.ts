@@ -1,5 +1,15 @@
 export type CsvRow = string[];
 
+// One undo/redo entry. Bundles the data clone with the freeze state so undo/redo
+// restores frozen rows and columns too. Freezes are stored by POSITION because the
+// data is deep-cloned (new row arrays), which would otherwise leave the reference-
+// based frozenRowRefs pointing at orphaned objects after a restore.
+export interface UndoSnapshot {
+    data: CsvRow[];
+    frozenRowIdx: number[];
+    pinnedCols: number[];
+}
+
 export type ColType =
     | 'integer'
     | 'float'

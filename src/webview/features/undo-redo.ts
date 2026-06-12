@@ -4,9 +4,27 @@ import { refreshGrid, syncColumnHeaders } from '../grid/refresh';
 import { recomputeColTypes } from '../grid/column-type';
 import { resetDuplicatesState } from './duplicates';
 import { refreshProfileIfOpen } from './profile';
+import type { UndoSnapshot } from '../types';
 
-export function snapshot(): string[][] {
-    return JSON.parse(JSON.stringify(state.data));
+// Captures the undoable view state: a deep clone of the data plus the freeze
+// state. The freeze is stored by POSITION (frozen-row indices, pinned-column
+// indices) so it survives the deep clone — the clone makes new row arrays, so the
+// reference-based state.frozenRowRefs would otherwise go stale after a restore.
+// Captured together with the data so positions and data are always consistent.
+export function snapshot(): UndoSnapshot {
+    return {
+        data: JSON.parse(JSON.stringify(state.data)),
+        frozenRowIdx: state.frozenRowRefs.map(r => state.data.indexOf(r)).filter(i => i >= 0),
+        pinnedCols: [...state.pinnedCols],
+    };
+}
+
+function restore(snap: UndoSnapshot): void {
+    state.data = snap.data;
+    // Re-anchor frozen rows to the restored (cloned) arrays at their saved
+    // positions, and restore the frozen-column set.
+    state.frozenRowRefs = snap.frozenRowIdx.map(i => state.data[i]).filter(Boolean) as string[][];
+    state.pinnedCols = new Set(snap.pinnedCols);
 }
 
 export function pushUndo(): void {
@@ -19,7 +37,7 @@ export function pushUndo(): void {
 export function undo(): void {
     if (state.undoStack.length === 0) return;
     state.redoStack.push(snapshot());
-    state.data = state.undoStack.pop()!;
+    restore(state.undoStack.pop()!);
     refreshGrid();
     syncColumnHeaders(); // header row may have changed (rename column)
     notifyChange();
@@ -30,7 +48,7 @@ export function undo(): void {
 export function redo(): void {
     if (state.redoStack.length === 0) return;
     state.undoStack.push(snapshot());
-    state.data = state.redoStack.pop()!;
+    restore(state.redoStack.pop()!);
     refreshGrid();
     syncColumnHeaders(); // header row may have changed (rename column)
     notifyChange();

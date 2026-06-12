@@ -155,6 +155,10 @@ export function buildGrid(): void {
             suppressMovable: false,
             // Re-apply column-chooser visibility so hidden columns survive a rebuild.
             hide:         state.hiddenCols.has(c),
+            // Re-apply the freeze so pinned columns survive a rebuild (column
+            // insert/delete, delimiter change, paging) — without this, buildGrid
+            // would silently drop the pinning.
+            pinned:       state.pinnedCols.has(c) ? 'left' : undefined,
         };
         colDef.comparator = makeComparator(colType);
         columnDefs.push(colDef);

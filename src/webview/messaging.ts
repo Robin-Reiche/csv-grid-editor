@@ -7,6 +7,7 @@ import { hideLoader } from './utils/loader';
 import { updateDelimiterBadge } from './features/delimiter';
 import { handlePageData } from './features/pagination';
 import { resetDuplicatesState } from './features/duplicates';
+import { frozenRowPositions, reanchorFrozenRows } from './features/freeze-rows';
 
 function initWithData(text: string, delimiter: string): void {
     state.rawCsvText      = text;
@@ -41,8 +42,13 @@ export function setupMessaging(): void {
         if (msg.type === 'init') {
             initWithData(msg.text, msg.delimiter);
         } else if (msg.type === 'update') {
+            // External file change → re-parse. Re-anchor frozen rows by position so
+            // they survive the reload (best effort: positions past the new row count
+            // are dropped if the external edit removed rows).
+            const frozen = frozenRowPositions();
             state.data = parseCsv(msg.text, msg.delimiter);
-            // External file change → existing dup highlights now point at stale rows.
+            reanchorFrozenRows(frozen);
+            // Existing dup highlights now point at stale rows.
             resetDuplicatesState();
             refreshGrid();
         } else if (msg.type === 'pageData') {

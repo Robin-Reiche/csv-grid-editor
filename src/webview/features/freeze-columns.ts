@@ -9,20 +9,32 @@ export function setupFreezeColumns(): void {
     const menu = document.getElementById('col-context-menu') as HTMLElement | null;
     if (!menu) return;
 
+    // If the right-clicked column is part of a multi-column selection, freeze /
+    // unfreeze applies to all selected columns, otherwise just the clicked one.
+    const targetColIds = (colId: string): string[] => {
+        const colIndex = parseInt(colId.replace('col_', ''), 10);
+        const sel = getSelectedColIndices();
+        return sel.length > 1 && sel.includes(colIndex) ? sel.map(i => 'col_' + i) : [colId];
+    };
+
     document.getElementById('col-ctx-freeze')?.addEventListener('click', () => {
         const colId = menu.dataset.colId;
-        if (colId && state.gridApi) {
-            state.gridApi.applyColumnState({ state: [{ colId, pinned: 'left' }] });
-        }
         menu.classList.add('hidden');
+        if (!colId || !state.gridApi) return;
+        const ids = targetColIds(colId);
+        // Track the freeze in state so it survives a buildGrid rebuild, then apply
+        // it live without a rebuild.
+        for (const id of ids) { const ci = parseInt(id.slice(4), 10); if (!isNaN(ci)) state.pinnedCols.add(ci); }
+        state.gridApi.applyColumnState({ state: ids.map(id => ({ colId: id, pinned: 'left' })) });
     });
 
     document.getElementById('col-ctx-unfreeze')?.addEventListener('click', () => {
         const colId = menu.dataset.colId;
-        if (colId && state.gridApi) {
-            state.gridApi.applyColumnState({ state: [{ colId, pinned: null }] });
-        }
         menu.classList.add('hidden');
+        if (!colId || !state.gridApi) return;
+        const ids = targetColIds(colId);
+        for (const id of ids) { const ci = parseInt(id.slice(4), 10); state.pinnedCols.delete(ci); }
+        state.gridApi.applyColumnState({ state: ids.map(id => ({ colId: id, pinned: null })) });
     });
 
     document.addEventListener('click', () => menu.classList.add('hidden'));
@@ -48,17 +60,23 @@ export function setupFreezeColumns(): void {
         const col         = colStateArr.find((s: any) => s.colId === colId);
         const isPinned    = col?.pinned === 'left';
 
-        const freezeEl   = document.getElementById('col-ctx-freeze');
-        const unfreezeEl = document.getElementById('col-ctx-unfreeze');
-        if (freezeEl)   freezeEl.style.display  = isPinned ? 'none'  : 'block';
-        if (unfreezeEl) unfreezeEl.style.display = isPinned ? 'block' : 'none';
-
-        // Reflect a multi-column selection in the insert/delete labels so the user
-        // sees "Insert/Delete N columns" before clicking (matches the data-cell menu
-        // and Google Sheets). N inserts happen anchored to the selection edge.
+        // Reflect a multi-column selection in every action label so the user sees
+        // "Freeze/Unfreeze/Insert/Delete N columns" before clicking (matches the
+        // data-cell menu and Google Sheets). N inserts anchor to the selection edge.
         const colIndex = parseInt(colId.replace('col_', ''), 10);
         const selectedCols = getSelectedColIndices();
         const n = selectedCols.length > 1 && selectedCols.includes(colIndex) ? selectedCols.length : 1;
+
+        const freezeEl   = document.getElementById('col-ctx-freeze');
+        const unfreezeEl = document.getElementById('col-ctx-unfreeze');
+        if (freezeEl) {
+            freezeEl.style.display = isPinned ? 'none' : 'block';
+            freezeEl.textContent   = n > 1 ? `📌 Freeze ${n} columns` : '📌 Freeze column';
+        }
+        if (unfreezeEl) {
+            unfreezeEl.style.display = isPinned ? 'block' : 'none';
+            unfreezeEl.textContent   = n > 1 ? `📌 Unfreeze ${n} columns` : '📌 Unfreeze column';
+        }
 
         const delEl = document.getElementById('col-ctx-delete');
         if (delEl)  delEl.textContent  = n > 1 ? `✕ Delete ${n} columns`      : '✕ Delete column';
