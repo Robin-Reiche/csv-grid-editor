@@ -2,6 +2,16 @@
 
 All notable changes to CSV Grid Editor are documented here.
 
+## [1.9.0] - 2026-06-12
+
+### Added
+- **Insert and delete multiple rows or columns** - Select several rows (drag or `Shift`+click the `#` gutter) or several columns (`Shift`+click the headers), then right-click to insert or delete all of them at once. Inserting adds as many rows or columns as you selected and lands them at the selection edge, the same as Excel and Google Sheets (requested in [#7](https://github.com/Robin-Reiche/csv-grid-editor/issues/7)). Single-row and single-column insert and delete still work as before when nothing is selected. Non-contiguous `Ctrl`/`Cmd` selection is intentionally out of scope for now.
+- **Enter moves to the next cell** - After editing a cell, pressing `Enter` commits the change and moves the selection one row down in the same column, so you can type down a column without reaching for the mouse (requested in [#6](https://github.com/Robin-Reiche/csv-grid-editor/issues/6)).
+
+### Fixed
+- **Grid jumped to the top after deleting a row or pasting** - Deleting a row, pasting a value or inserting a row scrolled the grid back to the first row and lost your place in large files. The grid now keeps its scroll position across these edits, and undo and redo, by giving rows a stable identity so AG Grid updates them in place instead of rebuilding the whole grid (reported in [#5](https://github.com/Robin-Reiche/csv-grid-editor/issues/5)).
+- **Counters and Column Profile went stale after structural edits** - The "rows × columns" and "records" counts in the toolbar and status bar did not update after deleting or inserting rows or columns, and the Column Profile panel kept showing pre-edit values. Both now refresh after every delete, insert, paste and undo, honouring any active filter.
+
 ## [1.8.0] - 2026-06-10
 
 ### Added

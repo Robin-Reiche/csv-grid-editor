@@ -261,10 +261,17 @@ export function makeOverviewTable(profiles: ColProfile[]): HTMLElement {
     return wrap;
 }
 
+let profileRenderTimer: ReturnType<typeof setTimeout> | null = null;
+
 export function renderProfile(): void {
-    const scroll = document.getElementById('profile-scroll')!;
+    const scroll = document.getElementById('profile-scroll');
+    if (!scroll) return;
+    // Debounce: a single mutation can trigger this from both notifyChange and the
+    // col-types-changed event; coalesce them so the heavier compute runs once.
+    if (profileRenderTimer !== null) clearTimeout(profileRenderTimer);
     scroll.innerHTML = '<div style="padding:6px 0;font-size:12px;opacity:0.5;">Computing\u2026</div>';
-    setTimeout(() => {
+    profileRenderTimer = setTimeout(() => {
+        profileRenderTimer = null;
         scroll.innerHTML = '';
         const profiles = computeProfile();
         if (!profiles.length) {
@@ -278,6 +285,13 @@ export function renderProfile(): void {
             scroll.appendChild(card);
         });
     }, 0);
+}
+
+// Re-renders the profile panel only if it is currently open. Called from the data
+// mutation path (notifyChange) and grid rebuilds (buildGrid) so the stats, column
+// set, and row counts never go stale after an edit/insert/delete/paste/undo.
+export function refreshProfileIfOpen(): void {
+    if (state.profileOpen) renderProfile();
 }
 
 type DockSide = 'right' | 'bottom' | 'left';

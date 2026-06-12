@@ -2,7 +2,8 @@ import { state, getNumCols } from '../state';
 import { getColumnType, scheduleRecomputeColTypes } from './column-type';
 import { createCombinedFilter } from './filter';
 import { dataRowIndexForNode } from './row-mapping';
-import { partitionFrozenRows } from './refresh';
+import { partitionFrozenRows, updateCountsDisplay } from './refresh';
+import { refreshProfileIfOpen } from '../features/profile';
 import { pushUndo, notifyChange, updateButtons } from '../features/undo-redo';
 import { getFindCellClassRules } from '../features/find-replace';
 import { attachHeaderContextMenus } from '../features/freeze-columns';
@@ -220,6 +221,31 @@ export function buildGrid(): void {
         stopEditingWhenCellsLoseFocus: true,
         undoRedoCellEditing: false,
 
+        // Issue #6 — after committing an edit with Enter, move the selection to
+        // the cell below (Excel / Google Sheets behaviour). Deliberately NOT
+        // enterNavigatesVertically: that variant hijacks Enter on a focused (not
+        // editing) cell, which today is what opens the cell for editing.
+        enterNavigatesVerticallyAfterEdit: true,
+
+        // Issue #5 — give AG Grid a row id so a rowData swap (refreshGrid: delete
+        // row, paste, insert, undo/redo, find-replace) does an incremental,
+        // id-matched update instead of destroying every node, which is what reset
+        // the scroll to the top. AG Grid takes the display order from the new
+        // rowData array (matched ids are reused with their data refreshed, surplus
+        // ids removed), so content stays correct; the ids that persist keep the
+        // viewport's nodes alive, so the scroll position survives.
+        //
+        // The id is intentionally POSITIONAL: _origIndex is the row's current
+        // 1-based slot in state.data, set identically by buildGrid/refreshGrid.
+        // It is unique per refresh, and because it is positional the ids still
+        // line up after undo — which deep-clones state.data (JSON round-trip), so
+        // a *permanent* per-row uid would look all-new and reset the scroll on
+        // every undo. Do NOT "stabilise" this into a per-row uid: positional ids
+        // preserve scroll across more paths, and the shifted node-reuse after a
+        // mid-list delete is harmless (each node re-reads its data from the array;
+        // only the surplus tail node is dropped).
+        getRowId: (p: any) => String(p.data._origIndex),
+
         onCellClicked: (event: any) => {
             // A click on the frozen (pinned) reference row must not become a body
             // anchor — its rowIndex lives in the pinned namespace and would alias
@@ -254,7 +280,14 @@ export function buildGrid(): void {
         onCellMouseOver: onCellMouseOverHandler,
         // A rowData reset (undo/redo, row insert/delete, paste, dup-view) shifts
         // display indices, so the display-coordinate selection must be dropped.
-        onRowDataUpdated: () => clearRangeSelection(),
+        onRowDataUpdated: () => {
+            clearRangeSelection();
+            // With getRowId set (Issue #5) AG Grid reuses row nodes across a
+            // rowData swap, so the '#' gutter — a display-position valueGetter —
+            // won't re-evaluate on its own once rows shift. Force it, exactly as
+            // the sort/filter handlers below already do.
+            state.gridApi?.refreshCells({ columns: ['row-index'], force: true });
+        },
 
         // Display indices shift when sorting or filtering — clear the selection so
         // the highlight doesn't appear on the wrong cells.
@@ -278,18 +311,7 @@ export function buildGrid(): void {
             }
             if (sepBtn) sepBtn.style.display = isAnyFilter ? '' : 'none';
 
-            const totalRows = state.data.length - 1;
-            const cols = numCols;
-            if (isAnyFilter) {
-                let displayed = 0;
-                state.gridApi.forEachNodeAfterFilter(() => displayed++);
-                if (state.frozenRowRef) displayed++; // the pinned reference row is always visible
-                document.getElementById('info')!.textContent   = `${displayed} of ${totalRows} rows \u00D7 ${cols} columns`;
-                document.getElementById('status')!.textContent = `${displayed} of ${totalRows} records (filtered)`;
-            } else {
-                document.getElementById('info')!.textContent   = `${totalRows} rows \u00D7 ${cols} columns`;
-                document.getElementById('status')!.textContent = `${totalRows} records`;
-            }
+            updateCountsDisplay();
         },
 
         onCellValueChanged: (event: any) => {
@@ -327,11 +349,8 @@ export function buildGrid(): void {
         });
     }
 
-    const rowCount = bodyRows.length;
-    const infoEl   = document.getElementById('info');
-    const statusEl = document.getElementById('status');
-    if (infoEl)   infoEl.textContent   = `${rowCount} rows \u00D7 ${numCols} columns`;
-    if (statusEl) statusEl.textContent = `${rowCount} records`;
+    updateCountsDisplay();
+    refreshProfileIfOpen(); // column add/delete changes the column set the profile shows
 
     setTimeout(attachHeaderContextMenus, 80);
 }

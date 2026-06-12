@@ -3,7 +3,19 @@ import { pushUndo, notifyChange } from './undo-redo';
 import { refreshGrid } from '../grid/refresh';
 import { recomputeColTypes } from '../grid/column-type';
 import { buildGrid } from '../grid/builder';
-import { copySelection, hasMultiSelection } from './range-select';
+import {
+    deleteColumnsFromData,
+    deleteRowsFromData,
+    insertRowsIntoData,
+    insertColumnsIntoData,
+} from '../grid/mutations';
+import {
+    copySelection,
+    hasMultiSelection,
+    clearRangeSelection,
+    getSelectedRowDisplayIndices,
+    getSelectedColIndices,
+} from './range-select';
 import { freezeRow, unfreezeRow, isRowFrozen } from './freeze-rows';
 
 // ── Data mutations ────────────────────────────────────────────────────────────
@@ -11,15 +23,25 @@ import { freezeRow, unfreezeRow, isRowFrozen } from './freeze-rows';
 function deleteColumn(colId: string): void {
     const colIndex = parseInt(colId.replace('col_', ''), 10);
     if (isNaN(colIndex)) return;
+    deleteColumns([colIndex]);
+}
+
+// Deletes one or more columns (data indices) in a single pass. The actual array
+// surgery lives in the pure deleteColumnsFromData() so the index-shift correctness
+// is unit-tested; everything here is the grid-state bookkeeping around it.
+function deleteColumns(colIndices: number[]): void {
+    const indices = colIndices.filter(c => Number.isInteger(c) && c >= 0);
+    if (indices.length === 0) return;
     pushUndo();
     // map() rebuilds every row array, replacing the frozen row's reference —
     // re-anchor it to the new array at the same position so the freeze survives.
     const frozenIdx = state.frozenRowRef ? state.data.indexOf(state.frozenRowRef) : -1;
-    state.data = state.data.map(row => row.filter((_, i) => i !== colIndex));
+    state.data = deleteColumnsFromData(state.data, indices);
     if (frozenIdx >= 0) state.frozenRowRef = state.data[frozenIdx];
     state.hiddenCols.clear(); // column indices shifted — drop index-based hide state
     state.isAutoFitted = false;
     state.autoFitCache = null;
+    clearRangeSelection(); // the column selection is now stale
     buildGrid();
     notifyChange();
 }
@@ -34,7 +56,7 @@ function deleteRows(displayIndices: number[]): void {
         const oi = state.gridApi.getDisplayedRowAtIndex(di)?.data?._origIndex;
         if (oi != null) toDelete.add(Number(oi));
     }
-    state.data = state.data.filter((_, i) => i === 0 || !toDelete.has(i));
+    state.data = deleteRowsFromData(state.data, toDelete);
     state.isAutoFitted = false;
     state.autoFitCache = null;
     refreshGrid();
@@ -42,18 +64,20 @@ function deleteRows(displayIndices: number[]): void {
     notifyChange();
 }
 
-// rowIndex is the displayed (0-based) row index of the data row that the user
-// right-clicked. position 'above' inserts before it, 'below' inserts after.
+// anchorDisplayIndex is the displayed (0-based) row used as the reference edge:
+// position 'above' inserts before it, 'below' inserts after. `count` blank rows
+// are inserted (spreadsheet behaviour: N selected rows → N inserted). The caller
+// picks the anchor as the selection's top edge for 'above' and bottom edge for
+// 'below', so the insert lands at the selection boundary, not the clicked row.
 //
-// If a sort is active we'd otherwise insert at the right slot in state.data
-// only to have AG Grid re-sort the (empty) new row to one of the extremes —
-// confusing the user who expected it to appear directly next to their target.
-// To avoid that we bake the current displayed order into state.data and clear
-// the sort model first, so the spliced row stays exactly where we put it.
-function insertRow(rowIndex: number, position: 'above' | 'below'): void {
-    if (!state.gridApi) return;
+// If a sort is active we'd otherwise insert at the right slot in state.data only
+// to have AG Grid re-sort the (empty) new rows to one of the extremes. To avoid
+// that we bake the current displayed order into state.data and clear the sort
+// model first, so the spliced rows stay exactly where we put them.
+function insertRows(anchorDisplayIndex: number, position: 'above' | 'below', count: number): void {
+    if (!state.gridApi || count < 1) return;
 
-    const targetNode = state.gridApi.getDisplayedRowAtIndex(rowIndex);
+    const targetNode = state.gridApi.getDisplayedRowAtIndex(anchorDisplayIndex);
     if (!targetNode?.data) return;
     // Hold a reference to the actual row array — survives the reorder below
     // so we can find its new index without doing _origIndex arithmetic on
@@ -101,7 +125,7 @@ function insertRow(rowIndex: number, position: 'above' | 'below'): void {
 
     const insertAt = position === 'above' ? targetIndex : targetIndex + 1;
     const numCols = getNumCols(state.data);
-    state.data.splice(insertAt, 0, Array<string>(numCols).fill(''));
+    state.data = insertRowsIntoData(state.data, insertAt, count, numCols);
 
     state.isAutoFitted = false;
     state.autoFitCache = null;
@@ -110,24 +134,25 @@ function insertRow(rowIndex: number, position: 'above' | 'below'): void {
     notifyChange();
 }
 
-function insertColumn(colId: string, position: 'left' | 'right'): void {
-    const baseIndex = parseInt(colId.replace('col_', ''), 10);
-    if (isNaN(baseIndex)) return;
+// baseIndex is the reference column (data index). 'left' inserts before it,
+// 'right' after. `count` blank columns are inserted (N selected columns → N).
+// The caller anchors to the selection's left edge for 'left' and right edge for
+// 'right'.
+function insertColumns(baseIndex: number, position: 'left' | 'right', count: number): void {
+    if (count < 1 || isNaN(baseIndex)) return;
     const insertAt = position === 'left' ? baseIndex : baseIndex + 1;
 
     pushUndo();
-    // map() rebuilds every row array — re-anchor the frozen row afterwards so the
-    // freeze survives a column insert (row positions are unchanged).
+    // map() (inside insertColumnsIntoData) rebuilds every row array — re-anchor the
+    // frozen row afterwards so the freeze survives a column insert (row positions
+    // are unchanged).
     const frozenIdx = state.frozenRowRef ? state.data.indexOf(state.frozenRowRef) : -1;
-    state.data = state.data.map(row => {
-        const copy = row.slice();
-        copy.splice(insertAt, 0, '');
-        return copy;
-    });
+    state.data = insertColumnsIntoData(state.data, insertAt, count);
     if (frozenIdx >= 0) state.frozenRowRef = state.data[frozenIdx];
     state.hiddenCols.clear(); // column indices shifted — drop index-based hide state
     state.isAutoFitted = false;
     state.autoFitCache = null;
+    clearRangeSelection(); // the column selection is now stale
     // buildGrid (not refreshGrid) — column count changed, columnDefs need rebuild.
     buildGrid();
     notifyChange();
@@ -231,22 +256,31 @@ function showContextMenu(x: number, y: number, rowIndex: number | null, colId: s
         }
     }
 
-    // ── Insert row above/below ────────────────────────────────────────────────
+    // ── Insert row(s) above/below ─────────────────────────────────────────────
     if (rowIndex !== null && !IS_PREVIEW && !isPinnedRow) {
+        // If the clicked row is inside a multi-row selection, insert that many
+        // rows (Excel/Sheets behaviour) anchored to the selection edge — top for
+        // "above", bottom for "below" — not the clicked row.
+        const selectedRows = getSelectedRowDisplayIndices();
+        const inSel = selectedRows.length > 1 && selectedRows.includes(rowIndex);
+        const count = inSel ? selectedRows.length : 1;
+        const topEdge    = inSel ? Math.min(...selectedRows) : rowIndex;
+        const bottomEdge = inSel ? Math.max(...selectedRows) : rowIndex;
+
         const insertAbove = document.createElement('div');
         insertAbove.className = 'row-ctx-item';
-        insertAbove.textContent = 'Insert row above';
+        insertAbove.textContent = count > 1 ? `Insert ${count} rows above` : 'Insert row above';
         insertAbove.addEventListener('click', () => {
-            insertRow(rowIndex, 'above');
+            insertRows(topEdge, 'above', count);
             hideMenu();
         });
         menu.appendChild(insertAbove);
 
         const insertBelow = document.createElement('div');
         insertBelow.className = 'row-ctx-item';
-        insertBelow.textContent = 'Insert row below';
+        insertBelow.textContent = count > 1 ? `Insert ${count} rows below` : 'Insert row below';
         insertBelow.addEventListener('click', () => {
-            insertRow(rowIndex, 'below');
+            insertRows(bottomEdge, 'below', count);
             hideMenu();
         });
         menu.appendChild(insertBelow);
@@ -258,9 +292,14 @@ function showContextMenu(x: number, y: number, rowIndex: number | null, colId: s
 
     // ── Delete row(s) ─────────────────────────────────────────────────────────
     if (rowIndex !== null && !IS_PREVIEW && !isPinnedRow) {
-        const selectedNodes: any[] = state.gridApi?.getSelectedNodes() ?? [];
-        const selectedIndices: number[] = selectedNodes.map((n: any) => n.rowIndex as number);
-        const rowIndices = selectedIndices.includes(rowIndex) ? selectedIndices : [rowIndex];
+        // Use the hand-rolled gutter selection (shift-click / drag), not AG Grid's
+        // native getSelectedNodes() — rowSelection is never enabled, so that was
+        // always empty and "Delete N rows" could never trigger. If the right-clicked
+        // row is inside the selection, delete the whole selection, else just it.
+        const selectedRows = getSelectedRowDisplayIndices();
+        const rowIndices = selectedRows.length > 1 && selectedRows.includes(rowIndex)
+            ? selectedRows
+            : [rowIndex];
 
         const label = rowIndices.length > 1 ? `Delete ${rowIndices.length} rows` : 'Delete row';
         const delRowItem = document.createElement('div');
@@ -273,13 +312,18 @@ function showContextMenu(x: number, y: number, rowIndex: number | null, colId: s
         menu.appendChild(delRowItem);
     }
 
-    // ── Delete column ─────────────────────────────────────────────────────────
+    // ── Delete column(s) ──────────────────────────────────────────────────────
     if (colId && colId !== 'row-index' && !IS_PREVIEW) {
+        const colIndex = parseInt(colId.replace('col_', ''), 10);
+        const selectedCols = getSelectedColIndices();
+        const useMulti = selectedCols.length > 1 && selectedCols.includes(colIndex);
+
         const delColItem = document.createElement('div');
         delColItem.className = 'row-ctx-item danger';
-        delColItem.textContent = 'Delete column';
+        delColItem.textContent = useMulti ? `Delete ${selectedCols.length} columns` : 'Delete column';
         delColItem.addEventListener('click', () => {
-            if (colId) deleteColumn(colId);
+            if (useMulti) deleteColumns(selectedCols);
+            else if (colId) deleteColumn(colId);
             hideMenu();
         });
         menu.appendChild(delColItem);
@@ -313,18 +357,34 @@ export function setupDeleteRowCol(): void {
     const colMenu = document.getElementById('col-context-menu') as HTMLElement | null;
     document.getElementById('col-ctx-delete')?.addEventListener('click', () => {
         const colId = colMenu?.dataset.colId;
-        if (colId) deleteColumn(colId);
         colMenu?.classList.add('hidden');
+        if (!colId) return;
+        const colIndex = parseInt(colId.replace('col_', ''), 10);
+        const selectedCols = getSelectedColIndices();
+        // Right-clicked a header that's part of a multi-column selection → delete
+        // them all; otherwise just the one column under the cursor.
+        if (selectedCols.length > 1 && selectedCols.includes(colIndex)) deleteColumns(selectedCols);
+        else deleteColumn(colId);
     });
     document.getElementById('col-ctx-insert-left')?.addEventListener('click', () => {
         const colId = colMenu?.dataset.colId;
-        if (colId) insertColumn(colId, 'left');
         colMenu?.classList.add('hidden');
+        if (!colId) return;
+        const baseIndex = parseInt(colId.replace('col_', ''), 10);
+        const selectedCols = getSelectedColIndices();
+        const inSel = selectedCols.length > 1 && selectedCols.includes(baseIndex);
+        // Anchor to the left edge of the selection; insert as many as are selected.
+        insertColumns(inSel ? Math.min(...selectedCols) : baseIndex, 'left', inSel ? selectedCols.length : 1);
     });
     document.getElementById('col-ctx-insert-right')?.addEventListener('click', () => {
         const colId = colMenu?.dataset.colId;
-        if (colId) insertColumn(colId, 'right');
         colMenu?.classList.add('hidden');
+        if (!colId) return;
+        const baseIndex = parseInt(colId.replace('col_', ''), 10);
+        const selectedCols = getSelectedColIndices();
+        const inSel = selectedCols.length > 1 && selectedCols.includes(baseIndex);
+        // Anchor to the right edge of the selection; insert as many as are selected.
+        insertColumns(inSel ? Math.max(...selectedCols) : baseIndex, 'right', inSel ? selectedCols.length : 1);
     });
 
     // Attach a SINGLE contextmenu listener to #grid-container.
