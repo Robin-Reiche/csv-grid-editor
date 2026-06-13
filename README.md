@@ -103,7 +103,7 @@ For files larger than 10 MB you get a quick menu to open the full file, preview 
 - **Freeze / Unfreeze** - Right-click any row and choose **Freeze row** to pin it to the top of the grid as an always-visible reference while you scroll, sort and filter. Select several rows first (drag or `Shift`+click the `#` gutter) and choose **Freeze N rows** to pin them all at once, handy for multi-line headers. Freezing is additive and the rows stay in the order you froze them. Right-click a pinned row to **Unfreeze** just that one, or **Unfreeze all rows**. A 📌 marker on each pinned row shows its original row number, and pinned rows stay visible regardless of any active filter.
 
 ### Rename Columns
-- **Rename** - Double-click a column header (or right-click it → **Rename column**) to rename it. The new name is written to the CSV header row and is fully undoable.
+- **Rename** - Right-click a column header → **Rename column** to rename it. The new name is written to the CSV header row and is fully undoable.
 
 ### Show / Hide Columns
 - **Column chooser** - Click the checklist icon in the toolbar to open a list of all columns with checkboxes. Uncheck a column to hide it, re-check to show it, or **Show all** to reset. A view aid, hidden columns are still included on export.

@@ -6,9 +6,10 @@ import { syncColumnHeaders } from '../grid/refresh';
 // A column header is the first row of the CSV (state.data[0]), so renaming
 // writes the new name there (undoable) and updates the live AG Grid header in
 // place via a columnDefs swap — no full rebuild, so column widths, sort order
-// and freeze state are preserved. Entry points: the column header context menu
-// ("Rename column") and a double-click on the header label. Disabled in preview
-// (read-only) mode.
+// and freeze state are preserved. Entry point: the column header context menu
+// ("Rename column"). Double-click is deliberately NOT used because a single click
+// already sorts the column, and fast sort-toggle clicks were being misread as a
+// double-click and opening rename (issue #10). Disabled in preview (read-only) mode.
 
 let pendingColIndex: number | null = null;
 
@@ -67,20 +68,6 @@ export function setupRenameColumn(): void {
         const colId = colMenu?.dataset.colId;
         colMenu?.classList.add('hidden');
         if (colId && colId !== 'row-index') openRenamePopover(colId, null);
-    });
-
-    // Double-click a column header label → rename. The resize handle keeps its
-    // own dblclick (auto-size) behaviour, so skip it here.
-    const container = document.getElementById('grid-container');
-    container?.addEventListener('dblclick', (e: MouseEvent) => {
-        const target = e.target as HTMLElement;
-        if (target.classList.contains('ag-header-cell-resize')) return;
-        const headerCell = target.closest<HTMLElement>('.ag-header-cell[col-id]');
-        if (!headerCell) return;
-        const colId = headerCell.getAttribute('col-id');
-        if (!colId || colId === 'row-index') return;
-        e.preventDefault();
-        openRenamePopover(colId, headerCell);
     });
 
     document.getElementById('rename-ok')?.addEventListener('click', commitRename);

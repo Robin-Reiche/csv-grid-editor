@@ -2,6 +2,11 @@
 
 All notable changes to CSV Grid Editor are documented here.
 
+## [1.10.1] - 2026-06-13
+
+### Changed
+- **Rename a column from the right-click menu only** - Removed double-click-to-rename on a column header. A single click already sorts the column, so quickly clicking to toggle the sort direction was sometimes read as a double-click and opened the rename popup by mistake (reported in [#10](https://github.com/Robin-Reiche/csv-grid-editor/issues/10)). Renaming stays available via right-click → **Rename column**.
+
 ## [1.10.0] - 2026-06-12
 
 ### Added
