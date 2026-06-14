@@ -220,22 +220,22 @@ export function getWebviewContent(
 
     <!-- Column context menu [F5] -->
     <div id="col-context-menu" class="col-context-menu hidden">
-        <div id="col-ctx-insert-left"  class="col-ctx-item"${isPreview ? ' style="display:none;"' : ''}>&#x2B05;&#xFE0F; Insert column left</div>
-        <div id="col-ctx-insert-right" class="col-ctx-item"${isPreview ? ' style="display:none;"' : ''}>&#x27A1;&#xFE0F; Insert column right</div>
+        <div id="col-ctx-insert-left"  class="col-ctx-item"${isPreview ? ' style="display:none;"' : ''}><i class="codicon codicon-arrow-left"></i><span class="col-ctx-label">Insert column left</span></div>
+        <div id="col-ctx-insert-right" class="col-ctx-item"${isPreview ? ' style="display:none;"' : ''}><i class="codicon codicon-arrow-right"></i><span class="col-ctx-label">Insert column right</span></div>
         <div class="col-ctx-separator"${isPreview ? ' style="display:none;"' : ''}></div>
-        <div id="col-ctx-rename"   class="col-ctx-item"${isPreview ? ' style="display:none;"' : ''}>&#x270F;&#xFE0F; Rename column</div>
+        <div id="col-ctx-rename"   class="col-ctx-item"${isPreview ? ' style="display:none;"' : ''}><i class="codicon codicon-edit"></i><span class="col-ctx-label">Rename column</span></div>
         <div class="col-ctx-separator"${isPreview ? ' style="display:none;"' : ''}></div>
-        <div id="col-ctx-select"   class="col-ctx-item">&#x2630; Select column</div>
+        <div id="col-ctx-select"   class="col-ctx-item"><i class="codicon codicon-list-selection"></i><span class="col-ctx-label">Select column</span></div>
         <div class="col-ctx-separator"></div>
-        <div id="col-ctx-freeze"   class="col-ctx-item">&#x1F4CC; Freeze column</div>
-        <div id="col-ctx-unfreeze" class="col-ctx-item" style="display:none;">&#x1F4CC; Unfreeze column</div>
+        <div id="col-ctx-freeze"   class="col-ctx-item"><i class="codicon codicon-pinned"></i><span class="col-ctx-label">Freeze column</span></div>
+        <div id="col-ctx-unfreeze" class="col-ctx-item" style="display:none;"><i class="codicon codicon-pin"></i><span class="col-ctx-label">Unfreeze column</span></div>
         <div class="col-ctx-separator"${isPreview ? ' style="display:none;"' : ''}></div>
-        <div id="col-ctx-delete"   class="col-ctx-item danger"${isPreview ? ' style="display:none;"' : ''}>&#x2715; Delete column</div>
+        <div id="col-ctx-delete"   class="col-ctx-item danger"${isPreview ? ' style="display:none;"' : ''}><i class="codicon codicon-trash"></i><span class="col-ctx-label">Delete column</span></div>
     </div>
 
     <!-- Row context menu -->
     <div id="row-context-menu" class="row-context-menu hidden">
-        <div id="row-ctx-delete" class="row-ctx-item danger">&#x2715; Delete row</div>
+        <div id="row-ctx-delete" class="row-ctx-item danger"><i class="codicon codicon-trash"></i><span class="row-ctx-label">Delete row</span></div>
     </div>
 
     <!-- Pagination bar [F7] -->
