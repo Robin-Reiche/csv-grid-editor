@@ -86,8 +86,12 @@ export function setupFreezeColumns(): void {
         if (insR)   insR.textContent   = n > 1 ? `➡️ Insert ${n} columns right` : '➡️ Insert column right';
 
         menu.dataset.colId = colId;
-        menu.style.left    = e.clientX + 'px';
-        menu.style.top     = e.clientY + 'px';
         menu.classList.remove('hidden');
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        const mw = menu.offsetWidth || 200;
+        const mh = menu.offsetHeight || 240;
+        menu.style.left = Math.max(4, Math.min(e.clientX, vw - mw - 4)) + 'px';
+        menu.style.top = Math.max(4, Math.min(e.clientY, vh - mh - 4)) + 'px';
     });
 }

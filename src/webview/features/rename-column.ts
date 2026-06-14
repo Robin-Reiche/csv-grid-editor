@@ -67,7 +67,10 @@ export function setupRenameColumn(): void {
     document.getElementById('col-ctx-rename')?.addEventListener('click', () => {
         const colId = colMenu?.dataset.colId;
         colMenu?.classList.add('hidden');
-        if (colId && colId !== 'row-index') openRenamePopover(colId, null);
+        if (colId && colId !== 'row-index') {
+            const headerCell = document.querySelector<HTMLElement>(`.ag-header-cell[col-id="${colId}"]`);
+            openRenamePopover(colId, headerCell);
+        }
     });
 
     document.getElementById('rename-ok')?.addEventListener('click', commitRename);
