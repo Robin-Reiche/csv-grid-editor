@@ -122,21 +122,31 @@ export function buildGrid(): void {
         headerName: '#',
         colId: 'row-index',
         headerClass: 'row-index-header',
-        // The frozen (pinned) row shows a 📌 marker + its original row number so it
+        // The frozen (pinned) row shows a pin marker + its original row number so it
         // reads as "the frozen row N", not a duplicate of the body row that now
         // sits at display position N (the body renumbers positionally once a row is
         // pinned out). "Show only duplicates" mode shows the original number; every
         // other row shows its live display position.
         valueGetter: (p: any) => {
-            if (p.node.rowPinned && p.data?._origIndex != null) return '📌' + p.data._origIndex;
+            if (p.node.rowPinned && p.data?._origIndex != null) return p.data._origIndex;
             if (state.dupShowOnly && p.data?._origIndex != null) return p.data._origIndex;
             return p.node.rowIndex + 1;
         },
+        cellRenderer: (p: any) => {
+            const txt = p.value == null ? '' : String(p.value);
+            if (p.node.rowPinned) {
+                return '<span class="row-pin-cell">'
+                    + '<i class="codicon codicon-pinned"></i>'
+                    + '<span class="row-pin-num">' + txt + '</span>'
+                    + '</span>';
+            }
+            return txt;
+        },
+        cellClass: (p: any) => p.node.rowPinned ? 'row-index-cell row-index-pinned' : 'row-index-cell',
         width: 48, minWidth: 36, maxWidth: 80,
         pinned: 'left',
         suppressHeaderMenuButton: true, sortable: false, filter: false,
         editable: false, resizable: false, suppressMovable: true,
-        cellClass: 'row-index-cell',
     }];
 
     for (let c = 0; c < numCols; c++) {

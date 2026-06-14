@@ -67,23 +67,25 @@ export function setupFreezeColumns(): void {
         const selectedCols = getSelectedColIndices();
         const n = selectedCols.length > 1 && selectedCols.includes(colIndex) ? selectedCols.length : 1;
 
-        const freezeEl   = document.getElementById('col-ctx-freeze');
+        const setLabel = (el: HTMLElement | null, text: string): void => {
+            const lbl = el?.querySelector('.col-ctx-label');
+            if (lbl) lbl.textContent = text;
+        };
+
+        const freezeEl = document.getElementById('col-ctx-freeze');
         const unfreezeEl = document.getElementById('col-ctx-unfreeze');
         if (freezeEl) {
-            freezeEl.style.display = isPinned ? 'none' : 'block';
-            freezeEl.textContent   = n > 1 ? `📌 Freeze ${n} columns` : '📌 Freeze column';
+            freezeEl.style.display = isPinned ? 'none' : 'flex';
+            setLabel(freezeEl, n > 1 ? `Freeze ${n} columns` : 'Freeze column');
         }
         if (unfreezeEl) {
-            unfreezeEl.style.display = isPinned ? 'block' : 'none';
-            unfreezeEl.textContent   = n > 1 ? `📌 Unfreeze ${n} columns` : '📌 Unfreeze column';
+            unfreezeEl.style.display = isPinned ? 'flex' : 'none';
+            setLabel(unfreezeEl, n > 1 ? `Unfreeze ${n} columns` : 'Unfreeze column');
         }
 
-        const delEl = document.getElementById('col-ctx-delete');
-        if (delEl)  delEl.textContent  = n > 1 ? `✕ Delete ${n} columns`      : '✕ Delete column';
-        const insL = document.getElementById('col-ctx-insert-left');
-        if (insL)   insL.textContent   = n > 1 ? `⬅️ Insert ${n} columns left`  : '⬅️ Insert column left';
-        const insR = document.getElementById('col-ctx-insert-right');
-        if (insR)   insR.textContent   = n > 1 ? `➡️ Insert ${n} columns right` : '➡️ Insert column right';
+        setLabel(document.getElementById('col-ctx-delete'), n > 1 ? `Delete ${n} columns` : 'Delete column');
+        setLabel(document.getElementById('col-ctx-insert-left'), n > 1 ? `Insert ${n} columns left` : 'Insert column left');
+        setLabel(document.getElementById('col-ctx-insert-right'), n > 1 ? `Insert ${n} columns right` : 'Insert column right');
 
         menu.dataset.colId = colId;
         menu.style.left    = e.clientX + 'px';
