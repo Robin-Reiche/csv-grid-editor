@@ -37,6 +37,14 @@ export function setupFreezeColumns(): void {
         state.gridApi.applyColumnState({ state: ids.map(id => ({ colId: id, pinned: null })) });
     });
 
+    document.getElementById('col-ctx-unfreeze-all')?.addEventListener('click', () => {
+        menu.classList.add('hidden');
+        if (!state.gridApi || state.pinnedCols.size === 0) return;
+        const ids = [...state.pinnedCols].map(ci => 'col_' + ci);
+        state.pinnedCols.clear();
+        state.gridApi.applyColumnState({ state: ids.map(id => ({ colId: id, pinned: null })) });
+    });
+
     document.addEventListener('click', () => menu.classList.add('hidden'));
 
     // Single contextmenu listener on #grid-container using event delegation.
@@ -81,6 +89,13 @@ export function setupFreezeColumns(): void {
         if (unfreezeEl) {
             unfreezeEl.style.display = isPinned ? 'flex' : 'none';
             setLabel(unfreezeEl, n > 1 ? `Unfreeze ${n} columns` : 'Unfreeze column');
+        }
+
+        const unfreezeAllEl = document.getElementById('col-ctx-unfreeze-all');
+        if (unfreezeAllEl) {
+            const lbl = unfreezeAllEl.querySelector('.col-ctx-label');
+            if (lbl) lbl.textContent = `Unfreeze all columns (${state.pinnedCols.size})`;
+            unfreezeAllEl.style.display = state.pinnedCols.size > 1 ? 'flex' : 'none';
         }
 
         setLabel(document.getElementById('col-ctx-delete'), n > 1 ? `Delete ${n} columns` : 'Delete column');

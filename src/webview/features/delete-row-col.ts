@@ -232,25 +232,12 @@ function showContextMenu(x: number, y: number, rowIndex: number | null, colId: s
     // the two are mutually exclusive (runDetect() drops any frozen row).
     if (state.dupRowSet.size === 0 && !state.dupShowOnly) {
         if (isPinnedRow) {
-            // Right-clicked a pinned (frozen) row. pinnedOrig is resolved from the
-            // DOM by the contextmenu handler. Only show the per-row item when it
-            // resolved, so an unresolved click can NEVER fall back to clearing all
-            // freezes. "Unfreeze all rows" is a separate, explicit action.
+            // Right-clicked a pinned (frozen) row -> unfreeze just that row.
             const clickedOrig = pinnedOrig;
             if (clickedOrig != null) {
                 const item = makeRowItem('Unfreeze row', 'codicon-pin');
                 item.addEventListener('click', () => { unfreezeRow(clickedOrig); hideMenu(); });
                 menu.appendChild(item);
-            }
-            if (frozenRowCount() > 1) {
-                const all = makeRowItem('Unfreeze all rows', 'codicon-pin');
-                all.addEventListener('click', () => { unfreezeAllRows(); hideMenu(); });
-                menu.appendChild(all);
-            }
-            if (clickedOrig != null || frozenRowCount() > 1) {
-                const sep = document.createElement('div');
-                sep.className = 'col-ctx-separator';
-                menu.appendChild(sep);
             }
         } else if (rowIndex !== null) {
             // Body rows are never frozen themselves (a frozen row moves to the
@@ -269,11 +256,23 @@ function showContextMenu(x: number, y: number, rowIndex: number | null, colId: s
                 const item = makeRowItem(origs.length > 1 ? `Freeze ${origs.length} rows` : 'Freeze row', 'codicon-pinned');
                 item.addEventListener('click', () => { freezeRows(origs); hideMenu(); });
                 menu.appendChild(item);
-
-                const sep = document.createElement('div');
-                sep.className = 'col-ctx-separator';
-                menu.appendChild(sep);
             }
+        }
+
+        // "Unfreeze all rows (N)" sits below the per-row items, shown on any row
+        // while more than one row is frozen - mirrors "Unfreeze all columns".
+        if (frozenRowCount() > 1) {
+            const all = makeRowItem(`Unfreeze all rows (${frozenRowCount()})`, 'codicon-pin');
+            all.addEventListener('click', () => { unfreezeAllRows(); hideMenu(); });
+            menu.appendChild(all);
+        }
+
+        // One separator for the freeze group, if it has any item.
+        const hasFreezeItem = (isPinnedRow && pinnedOrig != null) || (!isPinnedRow && rowIndex !== null) || frozenRowCount() > 1;
+        if (hasFreezeItem) {
+            const sep = document.createElement('div');
+            sep.className = 'col-ctx-separator';
+            menu.appendChild(sep);
         }
     }
 
@@ -340,6 +339,18 @@ function showContextMenu(x: number, y: number, rowIndex: number | null, colId: s
         });
         menu.appendChild(delColItem);
     }
+
+    // Remove orphan separators: drop a leading/trailing separator and any two
+    // that ended up adjacent (e.g. a middle group rendered nothing).
+    const items = Array.from(menu.children);
+    let lastWasSep = true;
+    for (const el of items) {
+        const isSep = el.classList.contains('col-ctx-separator');
+        if (isSep && lastWasSep) { el.remove(); continue; }
+        lastWasSep = isSep;
+    }
+    const last = menu.lastElementChild;
+    if (last?.classList.contains('col-ctx-separator')) last.remove();
 
     if (menu.children.length === 0) return;
 

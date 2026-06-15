@@ -229,6 +229,7 @@ export function getWebviewContent(
         <div class="col-ctx-separator"></div>
         <div id="col-ctx-freeze"   class="col-ctx-item"><i class="codicon codicon-pinned"></i><span class="col-ctx-label">Freeze column</span></div>
         <div id="col-ctx-unfreeze" class="col-ctx-item" style="display:none;"><i class="codicon codicon-pin"></i><span class="col-ctx-label">Unfreeze column</span></div>
+        <div id="col-ctx-unfreeze-all" class="col-ctx-item" style="display:none;"><i class="codicon codicon-pin"></i><span class="col-ctx-label">Unfreeze all columns</span></div>
         <div class="col-ctx-separator"${isPreview ? ' style="display:none;"' : ''}></div>
         <div id="col-ctx-delete"   class="col-ctx-item danger"${isPreview ? ' style="display:none;"' : ''}><i class="codicon codicon-trash"></i><span class="col-ctx-label">Delete column</span></div>
     </div>
