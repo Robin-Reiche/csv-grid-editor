@@ -177,6 +177,7 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
 
         const fileName  = path.basename(document.uri.fsPath);
         const zoomIndex = this.context.globalState.get<number>('csvGridEditor.zoomIndex', 4);
+        const colorMode = this.context.globalState.get<boolean>('csvGridEditor.colorMode', false);
 
         webviewPanel.webview.html = getWebviewContent(
             webviewPanel.webview,
@@ -188,7 +189,8 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             fileName,
             document.isChunked,
             process.platform === 'darwin',
-            zoomIndex
+            zoomIndex,
+            colorMode
         );
 
         // F3: File System Watcher — auto-reload on external changes (non-preview only)
@@ -243,6 +245,9 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
                 }
             } else if (msg.type === 'zoomChanged') {
                 this.context.globalState.update('csvGridEditor.zoomIndex', msg.zoomIndex);
+
+            } else if (msg.type === 'colorModeChanged') {
+                this.context.globalState.update('csvGridEditor.colorMode', msg.colorMode);
 
             } else if (msg.type === 'edit' && !document.isPreview) {
                 document.content = msg.text;
