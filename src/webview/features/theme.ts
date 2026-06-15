@@ -13,7 +13,12 @@ export function isDarkTheme(): boolean {
 export function applyGridTheme(): void {
     const container = document.getElementById('grid-container');
     if (!container) return;
-    container.className = isDarkTheme() ? 'ag-theme-alpine-dark' : 'ag-theme-alpine';
+    // Swap only the AG Grid theme class. Toggling via classList (rather than
+    // overwriting className) preserves other state classes on the container —
+    // notably `cm-on` from the column color mode — so switching VS Code theme,
+    // or a buildGrid rebuild, doesn't silently drop the coloring.
+    container.classList.remove('ag-theme-alpine', 'ag-theme-alpine-dark');
+    container.classList.add(isDarkTheme() ? 'ag-theme-alpine-dark' : 'ag-theme-alpine');
 }
 
 export function setupTheme(): void {

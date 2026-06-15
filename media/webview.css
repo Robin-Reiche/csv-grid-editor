@@ -472,6 +472,43 @@ button .codicon {
 :is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-floating-top .ag-row {
     background-color: var(--vscode-list-inactiveSelectionBackground, #37373d) !important;
 }
+
+/* ── Column Color Mode ──────────────────────────────────────────────────────
+   Toggled by the toolbar "Color columns" button (features/color-mode.ts), which
+   adds `cm-on` to #grid-container and injects one `--cm-h` hue per column. Each
+   column cell is tinted with a translucent overlay so the theme's own foreground
+   text keeps its contrast and the tint reads as "this column's color".
+
+   Why these rules are NOT !important: every existing highlight — range selection,
+   find match/active, duplicate rows, the focused cell, the frozen-row band — is
+   !important and therefore wins the cascade over this normal-weight tint, so all
+   of them keep painting clearly on top. The tint is also translucent (mixed with
+   `transparent`), so the real row background (striping, hover, the frozen-row
+   tint) shows through underneath. The '#' row-number gutter (col-id "row-index")
+   is never matched, only data columns (col-id "col_*").
+
+   Lightness (--cm-l), chroma (--cm-c) and alpha adapt to the active theme so the
+   color is visible without fighting the text on light, dark or high-contrast
+   themes. Hue varies per column; L/C/alpha do not. color-mix()/oklch() are
+   supported by VS Code's Chromium; on a very old build the declaration is simply
+   ignored and the toggle is a harmless no-op. */
+body.vscode-light #grid-container.cm-on {
+    --cm-l: 0.55; --cm-c: 0.15; --cm-body-a: 15%; --cm-head-a: 30%;
+}
+body.vscode-dark #grid-container.cm-on,
+body.vscode-high-contrast #grid-container.cm-on {
+    --cm-l: 0.74; --cm-c: 0.15; --cm-body-a: 20%; --cm-head-a: 36%;
+}
+/* High contrast: keep tints faint — HC users expect minimal background noise. */
+body.vscode-high-contrast #grid-container.cm-on {
+    --cm-body-a: 10%; --cm-head-a: 20%;
+}
+#grid-container.cm-on .ag-cell[col-id^="col_"] {
+    background-color: color-mix(in oklab, oklch(var(--cm-l) var(--cm-c) var(--cm-h)) var(--cm-body-a), transparent);
+}
+#grid-container.cm-on .ag-header-cell[col-id^="col_"] {
+    background-color: color-mix(in oklab, oklch(var(--cm-l) var(--cm-c) var(--cm-h)) var(--cm-head-a), transparent);
+}
 /* Frozen (pinned-left) column header: a 📌 marker before the column name,
    mirroring the frozen-row pin. The always-pinned '#' gutter (.row-index-header)
    is excluded so only user-frozen columns get the marker. */

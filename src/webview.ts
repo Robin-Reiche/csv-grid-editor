@@ -10,7 +10,8 @@ export function getWebviewContent(
     fileName: string = '',
     isChunked: boolean = false,
     isMac: boolean = false,
-    zoomIndex: number = 4
+    zoomIndex: number = 4,
+    colorMode: boolean = false
 ): string {
     const nonce = getNonce();
     const mod   = isMac ? '⌘' : 'Ctrl+';
@@ -113,6 +114,7 @@ export function getWebviewContent(
         <div    class="separator"></div>
         <button id="btn-profile"       title="Column Profile"><i class="codicon codicon-graph"></i></button>
         <button id="btn-columns"       title="Show / hide columns"><i class="codicon codicon-checklist"></i></button>
+        <button id="btn-colormode"     title="Color columns — distinct, theme-aware tint per column"><i class="codicon codicon-symbol-color"></i></button>
         <div    class="separator"></div>
         <button id="btn-find-replace"  title="Find &amp; Replace (${mod}F)"><i class="codicon codicon-search"></i></button>
         <div    class="separator"></div>
@@ -266,6 +268,7 @@ export function getWebviewContent(
         const FILENAME       = '${fileName.replace(/'/g, "\\'")}';
         const IS_CHUNKED          = ${isChunked ? 'true' : 'false'};
         const INITIAL_ZOOM_INDEX  = ${zoomIndex};
+        const INITIAL_COLOR_MODE  = ${colorMode ? 'true' : 'false'};
     </script>
 
     <!-- Bundled webview logic -->

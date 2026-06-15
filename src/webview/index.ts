@@ -15,6 +15,7 @@ import { setupPaste }          from './features/paste';
 import { setupRangeSelect }    from './features/range-select';
 import { setupRenameColumn }   from './features/rename-column';
 import { setupColumnChooser }  from './features/column-chooser';
+import { setupColorMode }      from './features/color-mode';
 import { setupKeyboard }       from './keyboard';
 import { setupMessaging }      from './messaging';
 
@@ -35,6 +36,7 @@ setupPaste();
 setupRangeSelect();
 setupRenameColumn();
 setupColumnChooser();
+setupColorMode();
 setupKeyboard();
 setupMessaging();
 

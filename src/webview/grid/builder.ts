@@ -9,6 +9,7 @@ import { getFindCellClassRules } from '../features/find-replace';
 import { attachHeaderContextMenus } from '../features/freeze-columns';
 import { applyZoom } from '../features/zoom';
 import { applyGridTheme } from '../features/theme';
+import { applyColorMode } from '../features/color-mode';
 import {
     getRangeCellClassRules,
     onCellMouseDownHandler,
@@ -336,6 +337,10 @@ export function buildGrid(): void {
 
     state.gridApi = agGrid.createGrid(container, gridOptions);
     updateButtons();
+    // Re-apply column color mode for the freshly built columns. buildGrid rebuilds
+    // the column set (insert/delete, delimiter change, paging), so the per-column
+    // hue rules must be regenerated to match the current column count.
+    applyColorMode();
 
     // Double-click on resize handle → auto-size that column. Wired once: the
     // container survives rebuilds, so re-adding would accumulate listeners.
