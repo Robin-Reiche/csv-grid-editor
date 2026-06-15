@@ -484,9 +484,18 @@ export function setupRangeSelect(): void {
     // one delegated listener covers every rebuild.
     const container = document.getElementById('grid-container');
     container?.addEventListener('click', (e: MouseEvent) => {
-        if (!e.shiftKey) return;
         const headerCell = (e.target as HTMLElement).closest<HTMLElement>('.ag-header-cell[col-id]');
         const colId = headerCell?.getAttribute('col-id');
+
+        if (colId === 'row-index') {
+            e.preventDefault();
+            e.stopPropagation();
+            if (selActive && selType === 'all') clearRangeSelection();
+            else selectAll();
+            return;
+        }
+
+        if (!e.shiftKey) return;
         if (!colId || !colId.startsWith('col_')) return;
         e.preventDefault();
         e.stopPropagation();

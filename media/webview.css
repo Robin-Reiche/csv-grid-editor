@@ -472,11 +472,22 @@ button .codicon {
 :is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-floating-top .ag-row {
     background-color: var(--vscode-list-inactiveSelectionBackground, #37373d) !important;
 }
-/* Frozen (pinned-left) column header: a 📌 marker before the column name,
+/* Frozen (pinned-left) column header: a pin marker before the column name,
    mirroring the frozen-row pin. The always-pinned '#' gutter (.row-index-header)
    is excluded so only user-frozen columns get the marker. */
 :is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-pinned-left-header .ag-header-cell:not(.row-index-header) .ag-header-cell-text::before {
-    content: '📌 ';
+    content: "\eba0";
+    font-family: "codicon";
+    font-weight: normal;
+    font-style: normal;
+    font-size: 16px;
+    line-height: 1;
+    display: inline-block;
+    vertical-align: middle;
+    margin-right: 4px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: auto;
 }
 :is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-header-cell {
     font-weight: 600 !important;
@@ -790,7 +801,36 @@ button .codicon {
     user-select: none;
     cursor: pointer;
 }
+.row-index-header { cursor: pointer; }
 .row-index-header .ag-header-cell-text::before { display: none !important; }
+
+:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-cell.row-index-pinned {
+    padding: 0 6px;
+}
+:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-cell.row-index-pinned .ag-cell-value {
+    width: 100%;
+}
+.row-pin-cell {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    gap: 4px;
+}
+.row-pin-cell .codicon {
+    font-size: 16px;
+    width: 16px;
+    height: 16px;
+    line-height: 16px;
+    flex-shrink: 0;
+    font-weight: normal;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+.row-pin-num {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
 
 /* ── F2: Delimiter Badge ── */
 .delim-badge {
@@ -830,11 +870,12 @@ button .codicon {
     box-shadow: 0 3px 8px rgba(0,0,0,.35);
 }
 .col-context-menu.hidden { display: none; }
-.col-ctx-item { padding: 5px 12px; font-size: 12px; cursor: pointer; color: var(--vscode-menu-foreground, #ccc); }
+.col-ctx-item { display: flex; align-items: center; gap: 8px; padding: 5px 12px; font-size: 12px; cursor: pointer; color: var(--vscode-menu-foreground, #ccc); }
 .col-ctx-item:hover { background: var(--vscode-menu-selectionBackground, #094771); color: var(--vscode-menu-selectionForeground, #fff); }
 .col-ctx-separator { height: 1px; margin: 3px 0; background: var(--vscode-menu-border, #454545); pointer-events: none; }
 .col-ctx-item.danger { color: var(--vscode-errorForeground, #f48771); }
 .col-ctx-item.danger:hover { background: var(--vscode-inputValidation-errorBackground, #5a1d1d); color: #fff; }
+.col-ctx-item .codicon { font-size: 16px; width: 16px; flex-shrink: 0; font-weight: normal; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
 
 /* ── Row Context Menu ── */
 .row-context-menu {
@@ -848,10 +889,11 @@ button .codicon {
     box-shadow: 0 3px 8px rgba(0,0,0,.35);
 }
 .row-context-menu.hidden { display: none; }
-.row-ctx-item { padding: 5px 12px; font-size: 12px; cursor: pointer; color: var(--vscode-menu-foreground, #ccc); }
+.row-ctx-item { display: flex; align-items: center; gap: 8px; padding: 5px 12px; font-size: 12px; cursor: pointer; color: var(--vscode-menu-foreground, #ccc); }
 .row-ctx-item:hover { background: var(--vscode-menu-selectionBackground, #094771); color: var(--vscode-menu-selectionForeground, #fff); }
 .row-ctx-item.danger { color: var(--vscode-errorForeground, #f48771); }
 .row-ctx-item.danger:hover { background: var(--vscode-inputValidation-errorBackground, #5a1d1d); color: #fff; }
+.row-ctx-item .codicon { font-size: 16px; width: 16px; flex-shrink: 0; font-weight: normal; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
 
 /* AG Grid context menu danger items */
 .ag-menu-option.ctx-danger .ag-menu-option-text { color: var(--vscode-errorForeground, #f48771); }

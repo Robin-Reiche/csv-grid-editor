@@ -163,6 +163,17 @@ function insertColumns(baseIndex: number, position: 'left' | 'right', count: num
 }
 
 // ── Custom context menu ───────────────────────────────────────────────────────
+function makeRowItem(label: string, iconClass: string, danger = false): HTMLDivElement {
+    const item = document.createElement('div');
+    item.className = 'row-ctx-item' + (danger ? ' danger' : '');
+    const icon = document.createElement('i');
+    icon.className = 'codicon ' + iconClass;
+    const span = document.createElement('span');
+    span.className = 'row-ctx-label';
+    span.textContent = label;
+    item.append(icon, span);
+    return item;
+}
 
 function hideMenu(): void {
     document.getElementById('row-context-menu')?.classList.add('hidden');
@@ -185,15 +196,11 @@ function showContextMenu(x: number, y: number, rowIndex: number | null, colId: s
     // ── Copy ──────────────────────────────────────────────────────────────────
     if (hasMultiSelection()) {
         // A range is selected — offer range copy, with and without header row.
-        const copyRange = document.createElement('div');
-        copyRange.className = 'row-ctx-item';
-        copyRange.textContent = 'Copy';
+        const copyRange = makeRowItem('Copy', 'codicon-copy');
         copyRange.addEventListener('click', () => { copySelection(false); hideMenu(); });
         menu.appendChild(copyRange);
 
-        const copyWithHeader = document.createElement('div');
-        copyWithHeader.className = 'row-ctx-item';
-        copyWithHeader.textContent = 'Copy with header';
+        const copyWithHeader = makeRowItem('Copy with header', 'codicon-copy');
         copyWithHeader.addEventListener('click', () => { copySelection(true); hideMenu(); });
         menu.appendChild(copyWithHeader);
 
@@ -207,9 +214,7 @@ function showContextMenu(x: number, y: number, rowIndex: number | null, colId: s
         const raw   = node?.data?.[colId];
         const value = raw != null ? String(raw) : '';
 
-        const copyItem = document.createElement('div');
-        copyItem.className = 'row-ctx-item';
-        copyItem.textContent = 'Copy';
+        const copyItem = makeRowItem('Copy', 'codicon-copy');
         copyItem.addEventListener('click', () => {
             navigator.clipboard.writeText(value).catch(() => {});
             hideMenu();
@@ -227,29 +232,12 @@ function showContextMenu(x: number, y: number, rowIndex: number | null, colId: s
     // the two are mutually exclusive (runDetect() drops any frozen row).
     if (state.dupRowSet.size === 0 && !state.dupShowOnly) {
         if (isPinnedRow) {
-            // Right-clicked a pinned (frozen) row. pinnedOrig is resolved from the
-            // DOM by the contextmenu handler. Only show the per-row item when it
-            // resolved, so an unresolved click can NEVER fall back to clearing all
-            // freezes. "Unfreeze all rows" is a separate, explicit action.
+            // Right-clicked a pinned (frozen) row -> unfreeze just that row.
             const clickedOrig = pinnedOrig;
             if (clickedOrig != null) {
-                const item = document.createElement('div');
-                item.className = 'row-ctx-item';
-                item.textContent = '📌 Unfreeze row';
+                const item = makeRowItem('Unfreeze row', 'codicon-pin');
                 item.addEventListener('click', () => { unfreezeRow(clickedOrig); hideMenu(); });
                 menu.appendChild(item);
-            }
-            if (frozenRowCount() > 1) {
-                const all = document.createElement('div');
-                all.className = 'row-ctx-item';
-                all.textContent = '📌 Unfreeze all rows';
-                all.addEventListener('click', () => { unfreezeAllRows(); hideMenu(); });
-                menu.appendChild(all);
-            }
-            if (clickedOrig != null || frozenRowCount() > 1) {
-                const sep = document.createElement('div');
-                sep.className = 'col-ctx-separator';
-                menu.appendChild(sep);
             }
         } else if (rowIndex !== null) {
             // Body rows are never frozen themselves (a frozen row moves to the
@@ -265,16 +253,26 @@ function showContextMenu(x: number, y: number, rowIndex: number | null, colId: s
             }
 
             if (origs.length > 0) {
-                const item = document.createElement('div');
-                item.className = 'row-ctx-item';
-                item.textContent = origs.length > 1 ? `📌 Freeze ${origs.length} rows` : '📌 Freeze row';
+                const item = makeRowItem(origs.length > 1 ? `Freeze ${origs.length} rows` : 'Freeze row', 'codicon-pinned');
                 item.addEventListener('click', () => { freezeRows(origs); hideMenu(); });
                 menu.appendChild(item);
-
-                const sep = document.createElement('div');
-                sep.className = 'col-ctx-separator';
-                menu.appendChild(sep);
             }
+        }
+
+        // "Unfreeze all rows (N)" sits below the per-row items, shown on any row
+        // while more than one row is frozen - mirrors "Unfreeze all columns".
+        if (frozenRowCount() > 1) {
+            const all = makeRowItem(`Unfreeze all rows (${frozenRowCount()})`, 'codicon-pin');
+            all.addEventListener('click', () => { unfreezeAllRows(); hideMenu(); });
+            menu.appendChild(all);
+        }
+
+        // One separator for the freeze group, if it has any item.
+        const hasFreezeItem = (isPinnedRow && pinnedOrig != null) || (!isPinnedRow && rowIndex !== null) || frozenRowCount() > 1;
+        if (hasFreezeItem) {
+            const sep = document.createElement('div');
+            sep.className = 'col-ctx-separator';
+            menu.appendChild(sep);
         }
     }
 
@@ -289,18 +287,14 @@ function showContextMenu(x: number, y: number, rowIndex: number | null, colId: s
         const topEdge    = inSel ? Math.min(...selectedRows) : rowIndex;
         const bottomEdge = inSel ? Math.max(...selectedRows) : rowIndex;
 
-        const insertAbove = document.createElement('div');
-        insertAbove.className = 'row-ctx-item';
-        insertAbove.textContent = count > 1 ? `Insert ${count} rows above` : 'Insert row above';
+        const insertAbove = makeRowItem(count > 1 ? `Insert ${count} rows above` : 'Insert row above', 'codicon-arrow-up');
         insertAbove.addEventListener('click', () => {
             insertRows(topEdge, 'above', count);
             hideMenu();
         });
         menu.appendChild(insertAbove);
 
-        const insertBelow = document.createElement('div');
-        insertBelow.className = 'row-ctx-item';
-        insertBelow.textContent = count > 1 ? `Insert ${count} rows below` : 'Insert row below';
+        const insertBelow = makeRowItem(count > 1 ? `Insert ${count} rows below` : 'Insert row below', 'codicon-arrow-down');
         insertBelow.addEventListener('click', () => {
             insertRows(bottomEdge, 'below', count);
             hideMenu();
@@ -323,10 +317,7 @@ function showContextMenu(x: number, y: number, rowIndex: number | null, colId: s
             ? selectedRows
             : [rowIndex];
 
-        const label = rowIndices.length > 1 ? `Delete ${rowIndices.length} rows` : 'Delete row';
-        const delRowItem = document.createElement('div');
-        delRowItem.className = 'row-ctx-item danger';
-        delRowItem.textContent = label;
+        const delRowItem = makeRowItem(rowIndices.length > 1 ? `Delete ${rowIndices.length} rows` : 'Delete row', 'codicon-trash', true);
         delRowItem.addEventListener('click', () => {
             deleteRows(rowIndices);
             hideMenu();
@@ -340,9 +331,7 @@ function showContextMenu(x: number, y: number, rowIndex: number | null, colId: s
         const selectedCols = getSelectedColIndices();
         const useMulti = selectedCols.length > 1 && selectedCols.includes(colIndex);
 
-        const delColItem = document.createElement('div');
-        delColItem.className = 'row-ctx-item danger';
-        delColItem.textContent = useMulti ? `Delete ${selectedCols.length} columns` : 'Delete column';
+        const delColItem = makeRowItem(useMulti ? `Delete ${selectedCols.length} columns` : 'Delete column', 'codicon-trash', true);
         delColItem.addEventListener('click', () => {
             if (useMulti) deleteColumns(selectedCols);
             else if (colId) deleteColumn(colId);
@@ -350,6 +339,18 @@ function showContextMenu(x: number, y: number, rowIndex: number | null, colId: s
         });
         menu.appendChild(delColItem);
     }
+
+    // Remove orphan separators: drop a leading/trailing separator and any two
+    // that ended up adjacent (e.g. a middle group rendered nothing).
+    const items = Array.from(menu.children);
+    let lastWasSep = true;
+    for (const el of items) {
+        const isSep = el.classList.contains('col-ctx-separator');
+        if (isSep && lastWasSep) { el.remove(); continue; }
+        lastWasSep = isSep;
+    }
+    const last = menu.lastElementChild;
+    if (last?.classList.contains('col-ctx-separator')) last.remove();
 
     if (menu.children.length === 0) return;
 
@@ -431,8 +432,10 @@ export function setupDeleteRowCol(): void {
         const rowIndex = riStr != null ? parseInt(riStr, 10) : null;
 
         // For a pinned (frozen) row, resolve which row it is independently of AG
-        // Grid's pinned-row index scheme: the '#' gutter cell renders "📌<origIndex>"
-        // (builder.ts valueGetter), so read that from the matching row in the band.
+        // Grid's pinned-row index scheme: the '#' gutter cell renders a pin icon +
+        // the origIndex (builder.ts cellRenderer). The icon is a ::before glyph with
+        // no text node, so the cell's textContent is just the number - read it from
+        // the matching row in the band.
         let pinnedOrig: number | null = null;
         if (isPinnedRow && agRow && riStr != null) {
             const ft = agRow.closest('.ag-floating-top');
