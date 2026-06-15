@@ -2,6 +2,7 @@ import { state } from '../state';
 import { pushUndo, notifyChange } from './undo-redo';
 import { recomputeColTypes } from '../grid/column-type';
 import { tsvCell } from '../utils/csv';
+import { closeAllPopups } from './popups';
 
 // ── Excel-style range selection for the main grid ─────────────────────────────
 // AG Grid Community has no built-in cell-range selection (Enterprise only), so
@@ -490,6 +491,7 @@ export function setupRangeSelect(): void {
         if (colId === 'row-index') {
             e.preventDefault();
             e.stopPropagation();
+            closeAllPopups(); // capture-phase stop would otherwise leave open popups stuck
             if (selActive && selType === 'all') clearRangeSelection();
             else selectAll();
             return;
@@ -499,6 +501,7 @@ export function setupRangeSelect(): void {
         if (!colId || !colId.startsWith('col_')) return;
         e.preventDefault();
         e.stopPropagation();
+        closeAllPopups(); // capture-phase stop would otherwise leave open popups stuck
         selectColumnRangeTo(colId);
     }, true /* capture */);
 

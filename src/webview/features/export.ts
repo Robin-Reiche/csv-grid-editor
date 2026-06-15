@@ -1,6 +1,7 @@
 import { state } from '../state';
 import type { ColType } from '../types';
 import { toJson, toJsonLines, toMarkdownTable } from '../utils/export-formats';
+import { closeAllPopups } from './popups';
 
 // ── Export menu ──────────────────────────────────────────────────────────────
 // The toolbar Export button opens a small dropdown (JSON / JSON Lines /
@@ -63,9 +64,12 @@ export function setupExport(): void {
 
     btn.addEventListener('click', e => {
         e.stopPropagation();
+        const wasOpen = !dropdown.classList.contains('hidden');
+        closeAllPopups();           // close any other open popup first
+        if (wasOpen) return;        // second click on the button just closes it
         const r = btn.getBoundingClientRect();
         dropdown.style.top = (r.bottom + 2) + 'px';
-        dropdown.classList.toggle('hidden');
+        dropdown.classList.remove('hidden');
         // Clamp after unhiding — offsetWidth is 0 while display:none.
         const w = dropdown.offsetWidth || 140;
         dropdown.style.left = Math.max(4, Math.min(r.left, window.innerWidth - w - 4)) + 'px';

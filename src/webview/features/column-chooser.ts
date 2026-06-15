@@ -1,4 +1,5 @@
 import { state } from '../state';
+import { closeAllPopups } from './popups';
 
 // ── Column chooser (show / hide columns) ────────────────────────────────────
 // A toolbar dropdown listing every data column with a checkbox to toggle its
@@ -77,7 +78,9 @@ export function setupColumnChooser(): void {
     btn?.addEventListener('click', (e) => {
         e.stopPropagation();
         const pop = document.getElementById('col-chooser-popover');
-        if (pop?.classList.contains('hidden')) openChooser(); else closeChooser();
+        const wasOpen = pop != null && !pop.classList.contains('hidden');
+        closeAllPopups();
+        if (!wasOpen) openChooser();
     });
 
     document.getElementById('col-chooser-showall')?.addEventListener('click', showAll);

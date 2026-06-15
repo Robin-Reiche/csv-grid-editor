@@ -2,6 +2,7 @@ import { state } from '../state';
 import { parseCsv } from '../utils/csv';
 import { buildGrid } from '../grid/builder';
 import { frozenRowPositions, reanchorFrozenRows } from './freeze-rows';
+import { closeAllPopups } from './popups';
 
 export function updateDelimiterBadge(delimiter: string): void {
     const badge = document.getElementById('delim-badge');
@@ -15,10 +16,13 @@ export function setupDelimiterBadge(): void {
 
     badge.addEventListener('click', e => {
         e.stopPropagation();
+        const wasOpen = !dropdown.classList.contains('hidden');
+        closeAllPopups();
+        if (wasOpen) return;
         const r = badge.getBoundingClientRect();
         (dropdown as HTMLElement).style.left = r.left + 'px';
         (dropdown as HTMLElement).style.top  = (r.bottom + 2) + 'px';
-        dropdown.classList.toggle('hidden');
+        dropdown.classList.remove('hidden');
     });
 
     document.querySelectorAll<HTMLElement>('.delim-option').forEach(opt => {

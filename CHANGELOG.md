@@ -2,6 +2,11 @@
 
 All notable changes to CSV Grid Editor are documented here.
 
+## [1.11.1] - 2026-06-15
+
+### Fixed
+- **An open menu or dropdown now closes when you open another** - The context menus, the Export and Delimiter dropdowns, the column chooser, Go to row and the rename popover are now mutually exclusive: opening one closes any other that is still open (reported in [#15](https://github.com/Robin-Reiche/csv-grid-editor/issues/15)). A central coordinator routes every opener through a single close step. The 1.11.0 release fixed the popup positioning but not this staying-open behaviour.
+
 ## [1.11.0] - 2026-06-15
 
 ### Added

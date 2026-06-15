@@ -19,6 +19,7 @@ import {
     getSelectedColIndices,
 } from './range-select';
 import { freezeRows, unfreezeRow, unfreezeAllRows, frozenRowCount } from './freeze-rows';
+import { closeAllPopups } from './popups';
 
 // ── Data mutations ────────────────────────────────────────────────────────────
 
@@ -183,6 +184,7 @@ function showContextMenu(x: number, y: number, rowIndex: number | null, colId: s
     const menu = document.getElementById('row-context-menu') as HTMLElement | null;
     if (!menu) return;
 
+    closeAllPopups('row-context-menu'); // a fresh right-click closes any other open popup
     menu.innerHTML = '';
 
     // Resolve the right-clicked row's grid node. A frozen row lives in the
