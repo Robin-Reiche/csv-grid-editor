@@ -6,6 +6,7 @@ declare const DELIMITER: string;
 declare const FILENAME: string;
 declare const IS_CHUNKED: boolean;
 declare const INITIAL_ZOOM_INDEX: number;
+declare const INITIAL_COLOR_MODE: boolean;
 
 declare const agGrid: {
     createGrid(container: HTMLElement, options: unknown): any;

@@ -14,6 +14,14 @@ export const state = {
     ZOOM_STEPS: [60, 70, 80, 90, 100, 110, 125, 150, 175, 200],
     zoomIndex: 4,
     isAutoFitted: false,
+
+    // Column color mode — when on, every data column gets a distinct, theme-adaptive
+    // background tint so columns are easier to tell apart. Persisted globally via
+    // VS Code globalState (csvGridEditor.colorMode), exactly like zoomIndex, so the
+    // toggle is remembered across every CSV file and every session. The actual
+    // colors are pure CSS (features/color-mode.ts + media/webview.css). In-memory
+    // mirror of the persisted flag.
+    colorMode: false,
     autoFitCache: null as any,
     autoFitCacheZoom: -1,
 

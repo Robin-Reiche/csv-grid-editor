@@ -1,4 +1,5 @@
 import { state, getNumCols } from '../state';
+import { applyColorMode } from '../features/color-mode';
 
 // Splits a freshly-built rowData array into the scrollable body and the frozen
 // reference rows (AG Grid renders the latter in a fixed pinned-top band). Frozen
@@ -81,6 +82,10 @@ export function refreshGrid(): void {
     // refreshGrid only swaps rowData, so the row/column counters in the toolbar
     // and status bar would otherwise go stale after a delete/insert/paste/undo.
     updateCountsDisplay();
+    // Keep the per-column color hues in sync with the live column count. Undo/redo
+    // of a column insert/delete reaches here (not buildGrid), so the hue rules must
+    // be regenerated for the current numCols, not left at the pre-undo count.
+    applyColorMode();
 }
 
 // Recomputes the "<n> rows × <n> columns" toolbar text and the "<n> records"
