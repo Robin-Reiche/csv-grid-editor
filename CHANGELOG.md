@@ -2,6 +2,19 @@
 
 All notable changes to CSV Grid Editor are documented here.
 
+## [1.11.0] - 2026-06-15
+
+### Added
+- **Column color mode** - A new toolbar toggle gives every data column its own theme-aware background tint, so wide tables are easier to scan and columns are easy to tell apart (requested in [#16](https://github.com/Robin-Reiche/csv-grid-editor/issues/16)). Each column gets a distinct hue spread by golden-angle rotation, so adjacent columns stay far apart on the color wheel even after you insert or delete one. The tint is a translucent overlay that adapts to light, dark and high-contrast themes and never fights the text, and existing highlights (range selection, find matches, duplicates and frozen rows) keep painting clearly on top. The toggle is remembered across files and sessions, like zoom.
+- **Select all from the corner** - Click the top-left corner of the grid to select every cell at once, the same as a spreadsheet ([#12](https://github.com/Robin-Reiche/csv-grid-editor/pull/12)).
+- **Unfreeze all** - Clear every frozen row and column in one action instead of unfreezing them one at a time ([#14](https://github.com/Robin-Reiche/csv-grid-editor/pull/14)).
+
+### Changed
+- **Menu icons use Codicons** - Context-menu and dropdown icons were emoji that rendered differently on each platform. They now use VS Code's Codicon set, so they match the rest of the editor and look the same everywhere ([#11](https://github.com/Robin-Reiche/csv-grid-editor/pull/11)).
+
+### Fixed
+- **Menus and popups behave correctly** - An open menu or dropdown stayed open when you opened another, and the context menu and rename popup could land in the wrong spot. Opening a menu now closes any other, and popups line up with the cell or header they belong to (reported in [#15](https://github.com/Robin-Reiche/csv-grid-editor/issues/15)).
+
 ## [1.10.1] - 2026-06-13
 
 ### Changed
