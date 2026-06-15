@@ -9,6 +9,7 @@ src/**
 docs/**
 test/**
 test_data/**
+samples/**
 !media/**
 node_modules/**
 .vscode-test/**
