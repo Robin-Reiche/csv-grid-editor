@@ -1,4 +1,5 @@
 import { state } from '../state';
+import { closeAllPopups } from './popups';
 
 // Brief flash applied to the target row to confirm navigation. We toggle a
 // dynamic <style> tag matching .ag-row[row-index="N"] (same approach as the
@@ -117,7 +118,9 @@ export function setupGoToRow(): void {
     btn?.addEventListener('click', e => {
         e.stopPropagation();
         const pop = document.getElementById('goto-popover');
-        if (pop?.classList.contains('hidden')) openPopover(); else closePopover();
+        const wasOpen = pop != null && !pop.classList.contains('hidden');
+        closeAllPopups();
+        if (!wasOpen) openPopover();
     });
 
     document.getElementById('goto-go')?.addEventListener('click', jumpToRow);

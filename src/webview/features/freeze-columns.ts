@@ -1,5 +1,6 @@
 import { state } from '../state';
 import { getSelectedColIndices } from './range-select';
+import { closeAllPopups } from './popups';
 
 // Kept as a no-op — builder.ts calls this after grid creation but it is no
 // longer needed since setupFreezeColumns uses event delegation on #grid-container.
@@ -103,6 +104,7 @@ export function setupFreezeColumns(): void {
         setLabel(document.getElementById('col-ctx-insert-right'), n > 1 ? `Insert ${n} columns right` : 'Insert column right');
 
         menu.dataset.colId = colId;
+        closeAllPopups('col-context-menu'); // a fresh right-click closes any other open popup
         menu.classList.remove('hidden');
         const vw = window.innerWidth;
         const vh = window.innerHeight;

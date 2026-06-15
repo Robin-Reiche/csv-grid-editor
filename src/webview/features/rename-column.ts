@@ -1,6 +1,7 @@
 import { state } from '../state';
 import { pushUndo, notifyChange } from './undo-redo';
 import { syncColumnHeaders } from '../grid/refresh';
+import { closeAllPopups } from './popups';
 
 // ── Rename column ───────────────────────────────────────────────────────────
 // A column header is the first row of the CSV (state.data[0]), so renaming
@@ -37,6 +38,7 @@ function openRenamePopover(colId: string, anchorEl: HTMLElement | null): void {
     pendingColIndex = colIndex;
     input.value = state.data[0]?.[colIndex] ?? '';
 
+    closeAllPopups('rename-popover');
     pop.classList.remove('hidden');
     const pw   = pop.offsetWidth || 240;
     const vw   = window.innerWidth;
