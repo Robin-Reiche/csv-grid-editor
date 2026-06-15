@@ -801,6 +801,7 @@ button .codicon {
     user-select: none;
     cursor: pointer;
 }
+.row-index-header { cursor: pointer; }
 .row-index-header .ag-header-cell-text::before { display: none !important; }
 
 :is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-cell.row-index-pinned {
