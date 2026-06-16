@@ -2,6 +2,14 @@
 
 All notable changes to CSV Grid Editor are documented here.
 
+## [1.12.0] - 2026-06-16
+
+### Added
+- **Search and Hide all in the column chooser** - The **Show / hide columns** menu now has a search box that filters the column list by name, plus a **Hide all** button next to the existing **Show all** (requested in [#18](https://github.com/Robin-Reiche/csv-grid-editor/issues/18)). On a wide file the flow becomes: Hide all, then type to find the few columns you want and check them, instead of unchecking dozens one by one.
+
+### Changed
+- **Export now leaves out hidden columns** - Exporting to JSON, JSON Lines or Markdown used to still include columns you had hidden in the column chooser. It now exports only the visible columns, which matches how copy already behaved, so the output is exactly what you see (follow-up to [#18](https://github.com/Robin-Reiche/csv-grid-editor/issues/18)).
+
 ## [1.11.1] - 2026-06-15
 
 ### Fixed

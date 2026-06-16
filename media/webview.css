@@ -1151,17 +1151,6 @@ body.vscode-high-contrast #grid-container.cm-on {
     border-bottom: 1px solid var(--vscode-menu-border, #454545);
     margin-bottom: 4px;
 }
-.col-chooser-showall {
-    border: 1px solid transparent;
-    border-radius: 3px;
-    padding: 2px 8px;
-    font-size: 11px;
-    font-family: inherit;
-    cursor: pointer;
-    background: var(--vscode-button-secondaryBackground, #3a3d41);
-    color:      var(--vscode-button-secondaryForeground, #ccc);
-}
-.col-chooser-showall:hover { background: var(--vscode-button-secondaryHoverBackground, #45494e); }
 .col-chooser-list { max-height: 320px; overflow-y: auto; }
 .col-chooser-list::-webkit-scrollbar { width: 6px; }
 .col-chooser-list::-webkit-scrollbar-thumb { background: var(--vscode-scrollbarSlider-background, #424242); border-radius: 3px; }

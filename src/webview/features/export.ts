@@ -7,9 +7,10 @@ import { closeAllPopups } from './popups';
 // The toolbar Export button opens a small dropdown (JSON / JSON Lines /
 // Markdown table). Every format exports the CURRENT VIEW: active filters and
 // sort order are applied, columns appear in their current (possibly reordered)
-// order with their current (possibly renamed) headers. Hidden columns are still
-// included — the column chooser is documented as a view aid (see README). A
-// frozen reference row is exported first, matching where the user sees it.
+// order with their current (possibly renamed) headers. Hidden columns are
+// EXCLUDED, matching the Excel-style copy behavior — export reflects exactly the
+// visible view. A frozen reference row is exported first, matching where the
+// user sees it.
 // Saving the file itself already writes CSV, so there is no CSV entry here.
 
 type ExportFormat = 'json' | 'jsonl' | 'md';
@@ -22,7 +23,12 @@ const FORMAT_EXT: Record<ExportFormat, string> = {
 
 function collectView(): { headers: string[]; rows: string[][]; types: ColType[] } {
     const colDefs = (state.gridApi.getColumnDefs() as any[])
-        .filter(c => c.colId !== 'row-index' && (c.field ?? c.colId));
+        .filter(c => {
+            const id = String(c.field ?? c.colId ?? '');
+            if (c.colId === 'row-index' || id === '') return false;
+            const ci = parseInt(id.replace('col_', ''), 10);
+            return !state.hiddenCols.has(ci); // skip hidden columns — export the visible view only
+        });
     const fields  = colDefs.map(c => String(c.field ?? c.colId));
     const headers = colDefs.map(c => String(c.headerName ?? ''));
     const types   = fields.map(f => {

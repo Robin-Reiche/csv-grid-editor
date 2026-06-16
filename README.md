@@ -88,7 +88,7 @@ For files larger than 10 MB you get a quick menu to open the full file, preview 
   - Right-click → **Copy with header** to include the column headers in the copy
   - `Delete` / `Backspace` clears every cell in the selection
   - The status bar shows the selection size plus live `Count / Sum / Avg / Min / Max`
-- **Export as JSON** - Convert the current filtered and sorted view to a JSON array of objects via the native VS Code save dialog. Column headers become the keys and numbers and booleans come out typed, while values that would lose information (IDs with leading zeros, very large numbers) stay strings.
+- **Export as JSON** - Convert the current filtered and sorted view to a JSON array of objects via the native VS Code save dialog. Column headers become the keys and numbers and booleans come out typed, while values that would lose information (IDs with leading zeros, very large numbers) stay strings. Columns you have hidden in the column chooser are left out, the same as copy.
 - **Export as JSON Lines** - The same view as JSON Lines (NDJSON), one object per line, handy for streaming tools and data pipelines
 - **Export as Markdown table** - The same view as a GitHub-flavored Markdown table, ready to paste into a README, issue or pull request
 
@@ -106,7 +106,7 @@ For files larger than 10 MB you get a quick menu to open the full file, preview 
 - **Rename** - Right-click a column header → **Rename column** to rename it. The new name is written to the CSV header row and is fully undoable.
 
 ### Show / Hide Columns
-- **Column chooser** - Click the checklist icon in the toolbar to open a list of all columns with checkboxes. Uncheck a column to hide it, re-check to show it, or **Show all** to reset. A view aid, hidden columns are still included on export.
+- **Column chooser** - Click the checklist icon in the toolbar to open a searchable list of all columns with checkboxes. Type to filter the list by column name, uncheck a column to hide it, re-check to show it, or use **Show all** / **Hide all** to flip every column at once (Hide all, then search and re-check the few you want). Hidden columns are excluded from copy and export, so the output matches exactly what you see.
 
 ### Sort & Filter
 
