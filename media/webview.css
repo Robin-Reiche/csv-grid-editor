@@ -1175,14 +1175,26 @@ body.vscode-high-contrast #grid-container.cm-on {
 .col-chooser-master {
     display: flex;
     align-items: center;
-    gap: 7px;
-    padding: 4px 6px;
-    margin-bottom: 4px;
+    gap: 6px;
+    padding: 6px;
+    margin: 6px 0;
     font-size: 12px;
     font-weight: 600;
     cursor: pointer;
     border-radius: 3px;
-    border-bottom: 1px solid var(--vscode-menu-border, #454545);
+    position: relative;
+}
+.col-chooser-master::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -4px;
+    height: 1px;
+    background: var(--vscode-menu-border, #454545);
+}
+.col-chooser-master:hover {
+    background: var(--vscode-list-hoverBackground, #2a2d2e);
 }
 .col-chooser-master:hover {
     background: var(--vscode-list-hoverBackground, #2a2d2e);
