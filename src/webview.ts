@@ -176,7 +176,7 @@ export function getWebviewContent(
         <input id="col-chooser-search" class="csv-filter-input" type="text" placeholder="Search columns…" spellcheck="false">
         <label id="col-chooser-master" class="col-chooser-master">
             <input id="col-chooser-master-cb" type="checkbox">
-            <span class="col-chooser-master-label">(Select all)</span>
+            <span class="col-chooser-master-label">Select all</span>
             <span id="col-chooser-master-count" class="col-chooser-master-count"></span>
         </label>
         <div id="col-chooser-list" class="col-chooser-list"></div>

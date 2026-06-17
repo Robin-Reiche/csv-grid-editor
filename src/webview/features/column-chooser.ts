@@ -4,7 +4,7 @@ import { closeAllPopups } from './popups';
 // ── Column chooser (show / hide columns) ────────────────────────────────────
 // A toolbar dropdown listing every data column with a checkbox to toggle its
 // visibility. A search box filters the list by column name. A pinned tri-state
-// "(Select all)" master checkbox above the list reflects and controls the columns.
+// "Select all" master checkbox above the list reflects and controls the columns.
 // Visibility is applied via AG Grid (setColumnsVisible) and mirrored into state.hiddenCols
 // (0-based data-column indices) so it survives a grid rebuild - e.g. a paged-view
 // page change re-runs buildGrid, which re-applies `hide` from this set. In-memory
