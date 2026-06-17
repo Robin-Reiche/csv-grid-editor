@@ -298,7 +298,7 @@ export function createCombinedFilter(colType: ColType): any {
             masterCb.type = 'checkbox';
             const masterLabel = document.createElement('span');
             masterLabel.className = 'csv-filter-master-label';
-            masterLabel.textContent = '(Select all)';
+            masterLabel.textContent = 'Select all';
             const masterCount = document.createElement('span');
             masterCount.className = 'csv-filter-master-count';
             masterRow.appendChild(masterCb);
