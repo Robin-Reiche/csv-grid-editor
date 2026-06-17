@@ -3,13 +3,13 @@ import { closeAllPopups } from './popups';
 
 // ── Column chooser (show / hide columns) ────────────────────────────────────
 // A toolbar dropdown listing every data column with a checkbox to toggle its
-// visibility. A search box filters the list by column name, and Show all / Hide
-// all flip every column at once (Hide all, then search and re-check the few you
-// want). Visibility is applied via AG Grid (setColumnsVisible) and mirrored into
-// state.hiddenCols (0-based data-column indices) so it survives a grid rebuild —
-// e.g. a paged-view page change re-runs buildGrid, which re-applies `hide` from
-// this set. In-memory only (not persisted across reload), matching the freeze
-// features. Column insert/delete clears the set (see delete-row-col).
+// visibility. A search box filters the list by column name. A pinned tri-state
+// "(Select all)" master checkbox above the list reflects and controls the columns.
+// Visibility is applied via AG Grid (setColumnsVisible) and mirrored into state.hiddenCols
+// (0-based data-column indices) so it survives a grid rebuild - e.g. a paged-view
+// page change re-runs buildGrid, which re-applies `hide` from this set. In-memory
+// only (not persisted across reload), matching the freeze features. Column
+// insert/delete clears the set (see delete-row-col).
 
 let searchQuery = '';
 
@@ -18,34 +18,49 @@ function setColHidden(colIndex: number, hidden: boolean): void {
     else state.hiddenCols.delete(colIndex);
     state.gridApi?.setColumnsVisible(['col_' + colIndex], !hidden);
     updateButton();
-}
-
-function allColIds(): string[] {
-    const n = (state.data[0] ?? []).length;
-    const ids: string[] = [];
-    for (let c = 0; c < n; c++) ids.push('col_' + c);
-    return ids;
-}
-
-function showAll(): void {
-    state.hiddenCols.clear();
-    state.gridApi?.setColumnsVisible(allColIds(), true);
-    buildList();
-    updateButton();
-}
-
-function hideAll(): void {
-    const n = (state.data[0] ?? []).length;
-    state.hiddenCols.clear();
-    for (let c = 0; c < n; c++) state.hiddenCols.add(c);
-    state.gridApi?.setColumnsVisible(allColIds(), false);
-    buildList();
-    updateButton();
+    syncMaster();
 }
 
 function colLabel(header: string[], c: number): string {
     const name = header[c] ?? '';
     return name !== '' ? name : '(column ' + (c + 1) + ')';
+}
+
+function visibleColIndices(): number[] {
+    const header = state.data[0] ?? [];
+    const q = searchQuery.trim().toLowerCase();
+    const out: number[] = [];
+    for (let c = 0; c < header.length; c++) {
+        if (q && !colLabel(header, c).toLowerCase().includes(q)) continue;
+        out.push(c);
+    }
+    return out;
+}
+
+function setVisibleColsHidden(hidden: boolean): void {
+    const cols = visibleColIndices();
+    if (cols.length === 0) return;
+    for (const c of cols) {
+        if (hidden) state.hiddenCols.add(c);
+        else state.hiddenCols.delete(c);
+    }
+    state.gridApi?.setColumnsVisible(cols.map(c => 'col_' + c), !hidden);
+    buildList();
+    updateButton();
+}
+
+function syncMaster(): void {
+    const cb = document.getElementById('col-chooser-master-cb') as HTMLInputElement | null;
+    const count = document.getElementById('col-chooser-master-count');
+    if (!cb) return;
+    const cols = visibleColIndices();
+    const visible = cols.reduce((n, c) => n + (state.hiddenCols.has(c) ? 0 : 1), 0);
+    const total = cols.length;
+
+    cb.checked = total > 0 && visible === total;
+    cb.indeterminate = visible > 0 && visible < total;
+    cb.disabled = total === 0;
+    if (count) count.textContent = total > 0 ? `${visible} / ${total}` : '';
 }
 
 function buildList(): void {
@@ -84,6 +99,8 @@ function buildList(): void {
         empty.textContent = 'No matching columns';
         list.appendChild(empty);
     }
+
+    syncMaster();
 }
 
 function updateButton(): void {
@@ -99,10 +116,10 @@ function openChooser(): void {
     if (search) search.value = '';
     buildList();
     pop.classList.remove('hidden');
-    const r  = btn.getBoundingClientRect();
+    const r = btn.getBoundingClientRect();
     const pw = pop.offsetWidth || 220;
     const vw = window.innerWidth;
-    pop.style.top  = (r.bottom + 4) + 'px';
+    pop.style.top = (r.bottom + 4) + 'px';
     pop.style.left = Math.max(4, Math.min(r.left, vw - pw - 4)) + 'px';
     search?.focus();
 }
@@ -121,8 +138,8 @@ export function setupColumnChooser(): void {
         if (!wasOpen) openChooser();
     });
 
-    document.getElementById('col-chooser-showall')?.addEventListener('click', showAll);
-    document.getElementById('col-chooser-hideall')?.addEventListener('click', hideAll);
+    const master = document.getElementById('col-chooser-master-cb') as HTMLInputElement | null;
+    master?.addEventListener('change', () => setVisibleColsHidden(!master.checked));
 
     const search = document.getElementById('col-chooser-search') as HTMLInputElement | null;
     search?.addEventListener('input', () => {

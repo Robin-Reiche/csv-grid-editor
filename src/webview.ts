@@ -174,10 +174,11 @@ export function getWebviewContent(
             <span class="goto-label" style="margin:0;">Columns</span>
         </div>
         <input id="col-chooser-search" class="csv-filter-input" type="text" placeholder="Search columns…" spellcheck="false">
-        <div class="csv-filter-actions">
-            <button id="col-chooser-showall" type="button" class="csv-filter-link">Show all</button>
-            <button id="col-chooser-hideall" type="button" class="csv-filter-link">Hide all</button>
-        </div>
+        <label id="col-chooser-master" class="col-chooser-master">
+            <input id="col-chooser-master-cb" type="checkbox">
+            <span class="col-chooser-master-label">(Select all)</span>
+            <span id="col-chooser-master-count" class="col-chooser-master-count"></span>
+        </label>
         <div id="col-chooser-list" class="col-chooser-list"></div>
     </div>
 
