@@ -1,3 +1,5 @@
+import { state } from '../state';
+
 // ── Central popup coordinator (issue #15) ─────────────────────────────────────
 // The grid has several transient popups: the column and row context menus, the
 // Export and Delimiter dropdowns, the column-chooser and go-to-row popovers and
@@ -27,4 +29,38 @@ export function closeAllPopups(except?: string): void {
         if (id === except) continue;
         document.getElementById(id)?.classList.add('hidden');
     }
+}
+
+// Checks if any coordinated popup is currently visible.
+// This ensures the global Esc handler only consumes the keystroke when
+// there is actually a popup to dismiss, leaving Esc free for standard
+// tasks (like canceling a cell edit).
+export function isAnyPopupOpen(): boolean {
+    return POPUP_IDS.some(id => {
+        const el = document.getElementById(id);
+        return el != null && !el.classList.contains('hidden');
+    });
+}
+
+// Sets up a global Esc key listener to dismiss all popups (wired once at startup).
+// - Uses the `capture phase` (true) to intercept the event before AG Grid consumes it.
+// - Does NOT call `stopPropagation`, allowing individual popups to run their own cleanup logic (e.g., resetting state).
+// - Only targets popups in POPUP_IDS, leaving persistent panels unaffected.
+export function setupPopups(): void {
+    document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape') return;
+
+        // AG Grid's filter panel lives outside POPUP_IDS (it has no fixed id).
+        // Detect it in the DOM and let AG Grid close it.
+        const agOpen = document.querySelector('.ag-popup .ag-menu, .ag-popup .ag-filter');
+        if (agOpen) {
+            (state.gridApi as any)?.hidePopupMenu?.();
+            e.preventDefault();
+            return;
+        }
+
+        if (!isAnyPopupOpen()) return;
+        closeAllPopups();
+        e.preventDefault();
+    }, true);
 }
