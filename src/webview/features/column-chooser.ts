@@ -40,13 +40,25 @@ function visibleColIndices(): number[] {
 function setVisibleColsHidden(hidden: boolean): void {
     const cols = visibleColIndices();
     if (cols.length === 0) return;
-    for (const c of cols) {
-        if (hidden) state.hiddenCols.add(c);
-        else state.hiddenCols.delete(c);
+    if (!hidden && searchQuery.trim() === '') {
+        state.hiddenCols.clear();
+        state.gridApi?.setColumnsVisible(allColIds(), true);
+    } else {
+        for (const c of cols) {
+            if (hidden) state.hiddenCols.add(c);
+            else state.hiddenCols.delete(c);
+        }
+        state.gridApi?.setColumnsVisible(cols.map(c => 'col_' + c), !hidden);
     }
-    state.gridApi?.setColumnsVisible(cols.map(c => 'col_' + c), !hidden);
     buildList();
     updateButton();
+}
+
+function allColIds(): string[] {
+    const n = (state.data[0] ?? []).length;
+    const ids: string[] = [];
+    for (let c = 0; c < n; c++) ids.push('col_' + c);
+    return ids;
 }
 
 function syncMaster(): void {
@@ -68,13 +80,9 @@ function buildList(): void {
     if (!list) return;
     list.innerHTML = '';
     const header = state.data[0] ?? [];
-    const q = searchQuery.trim().toLowerCase();
-    let shown = 0;
-    for (let c = 0; c < header.length; c++) {
-        const label = colLabel(header, c);
-        if (q && !label.toLowerCase().includes(q)) continue;
-        shown++;
+    const cols = visibleColIndices();
 
+    for (const c of cols) {
         const row = document.createElement('label');
         row.className = 'col-chooser-item';
 
@@ -86,14 +94,14 @@ function buildList(): void {
 
         const span = document.createElement('span');
         span.className = 'col-chooser-label';
-        span.textContent = label;
+        span.textContent = colLabel(header, c);
 
         row.appendChild(cb);
         row.appendChild(span);
         list.appendChild(row);
     }
 
-    if (shown === 0) {
+    if (cols.length === 0) {
         const empty = document.createElement('div');
         empty.className = 'csv-filter-empty';
         empty.textContent = 'No matching columns';
