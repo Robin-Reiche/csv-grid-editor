@@ -1234,3 +1234,11 @@ body.vscode-high-contrast #grid-container.cm-on {
     color: var(--vscode-charts-orange, #d18616) !important;
     font-weight: 700 !important;
 }
+/* Override AG Grid's default Alpine popup styles to match the extension's popovers. */
+:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-popup .ag-menu,
+:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-popup .ag-filter {
+    background: var(--vscode-menu-background, #252526);
+    border: 1px solid var(--vscode-menu-border, #454545);
+    border-radius: 4px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, .45);
+}

@@ -43,9 +43,10 @@ export function isAnyPopupOpen(): boolean {
 }
 
 // Sets up a global Esc key listener to dismiss all popups (wired once at startup).
-// - Uses the `capture phase` (true) to intercept the event before AG Grid consumes it.
-// - Does NOT call `stopPropagation`, allowing individual popups to run their own cleanup logic (e.g., resetting state).
-// - Only targets popups in POPUP_IDS, leaving persistent panels unaffected.
+// - Uses the capture phase (true) to intercept the event before AG Grid consumes it.
+// - Does NOT call stopPropagation to allow input-focused popups (rename, go-to-row)
+//   to run their own focus-bound Escape handlers and state cleanup.
+//   Other popups (context menus, dropdowns) are simply hidden by closeAllPopups().
 export function setupPopups(): void {
     document.addEventListener('keydown', (e) => {
         if (e.key !== 'Escape') return;
