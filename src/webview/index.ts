@@ -18,6 +18,7 @@ import { setupColumnChooser }  from './features/column-chooser';
 import { setupColorMode }      from './features/color-mode';
 import { setupKeyboard }       from './keyboard';
 import { setupMessaging }      from './messaging';
+import { setupPopups }         from './features/popups';
 
 setupTheme();
 setupUndoRedo();
@@ -39,5 +40,6 @@ setupColumnChooser();
 setupColorMode();
 setupKeyboard();
 setupMessaging();
+setupPopups();
 
 vscodeApi.postMessage({ type: 'ready' });
