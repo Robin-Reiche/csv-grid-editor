@@ -319,6 +319,7 @@ export function createCombinedFilter(colType: ColType): any {
                 masterCb.indeterminate = checked > 0 && checked < total;
                 masterCb.disabled = total === 0;
                 masterCount.textContent = total > 0 ? `${checked} / ${total}` : '';
+                masterLabel.textContent = this._searchQuery ? 'Select all matches' : 'Select all';
             };
 
             const renderList = () => {
@@ -378,7 +379,6 @@ export function createCombinedFilter(colType: ColType): any {
                     if (check) this.checkedValues.add(v);
                     else this.checkedValues.delete(v);
                 }
-                if (check && this._showBlankInList()) this.checkedValues.add('__blank__');
                 renderList();
                 this.params.filterChangedCallback();
             });
