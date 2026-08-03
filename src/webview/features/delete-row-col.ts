@@ -237,7 +237,7 @@ function showContextMenu(x: number, y: number, rowIndex: number | null, colId: s
             // Right-clicked a pinned (frozen) row -> unfreeze just that row.
             const clickedOrig = pinnedOrig;
             if (clickedOrig != null) {
-                const item = makeRowItem('Unfreeze row', 'codicon-pin');
+                const item = makeRowItem('Unfreeze row', 'codicon-unpin');
                 item.addEventListener('click', () => { unfreezeRow(clickedOrig); hideMenu(); });
                 menu.appendChild(item);
             }
@@ -264,7 +264,7 @@ function showContextMenu(x: number, y: number, rowIndex: number | null, colId: s
         // "Unfreeze all rows (N)" sits below the per-row items, shown on any row
         // while more than one row is frozen - mirrors "Unfreeze all columns".
         if (frozenRowCount() > 1) {
-            const all = makeRowItem(`Unfreeze all rows (${frozenRowCount()})`, 'codicon-pin');
+            const all = makeRowItem(`Unfreeze all rows (${frozenRowCount()})`, 'codicon-unpin');
             all.addEventListener('click', () => { unfreezeAllRows(); hideMenu(); });
             menu.appendChild(all);
         }
