@@ -2,7 +2,7 @@
   "name": "csv-grid-editor",
   "displayName": "CSV Grid Editor: CSV & TSV Viewer",
   "description": "Open, view and edit CSV and TSV files in a fast sortable filterable grid. Inline editing, find and replace, freeze rows, column stats, Excel copy and paste and export to JSON. Free.",
-  "version": "1.13.1",
+  "version": "1.14.0",
   "publisher": "RobinReiche",
   "license": "MIT",
   "icon": "icon.png",
@@ -75,7 +75,7 @@
   "devDependencies": {
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.80.0",
-    "@vscode/codicons": "^0.0.46-24",
+    "@vscode/codicons": "0.0.46-24",
     "ag-grid-community": "32.3.3",
     "esbuild": "^0.27.4",
     "typescript": "^5.3.0"

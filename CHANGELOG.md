@@ -2,6 +2,13 @@
 
 All notable changes to CSV Grid Editor are documented here.
 
+## [1.14.0] - 2026-08-03
+
+### Changed
+- **Unfreeze has its own icon** - **Freeze** and **Unfreeze** sat under each other in the context menu with almost the same pin icon, so nothing about the picture told you which one undid the other. Unfreeze now uses a pin with a slash across it, in **Unfreeze column**, **Unfreeze all columns**, **Unfreeze row** and **Unfreeze all rows** ([#24](https://github.com/Robin-Reiche/csv-grid-editor/pull/24)). The icon font is bundled with the extension, so this came with an update of the codicon set it ships.
+
+Thanks to [@yukina3230](https://github.com/yukina3230) for the change.
+
 ## [1.13.1] - 2026-06-25
 
 ### Fixed
