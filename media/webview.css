@@ -43,6 +43,10 @@ button .codicon {
     line-height: 1;
 }
 
+/* The Clear-filters button reads as a label with an icon rather than an icon
+   button, so it sits at label size instead of the 14px icon size above. */
+#btn-clear-filters { font-size: 11px; }
+
 .toolbar button .filter-clear-label {
     font-size: 11px;
     font-weight: 400;
@@ -103,6 +107,8 @@ button .codicon {
 /* ── Profile panel ── */
 #profile-panel {
     width: 295px;
+    /* Everything inside the panel is sized in em against this base. */
+    font-size: 12px;
     flex-shrink: 0;
     display: none;
     flex-direction: column;
