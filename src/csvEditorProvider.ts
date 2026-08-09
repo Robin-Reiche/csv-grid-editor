@@ -255,7 +255,7 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
 
             // F4: Export handler — the webview sends the converted text plus a
             // suggested filename; the extension picks dialog filters from its
-            // extension (.json / .jsonl / .md).
+            // extension (.json / .jsonl / .xml / .md).
             } else if (msg.type === 'export') {
                 const filename   = msg.filename ?? 'export.json';
                 const defaultUri = vscode.Uri.file(
@@ -264,6 +264,7 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
                 const ext = path.extname(filename).toLowerCase();
                 const filters: Record<string, string[]> =
                     ext === '.jsonl' ? { 'JSON Lines': ['jsonl', 'ndjson'] } :
+                    ext === '.xml'   ? { 'XML':        ['xml'] } :
                     ext === '.md'    ? { 'Markdown':   ['md'] } :
                                        { 'JSON':       ['json'] };
                 filters['All files'] = ['*'];

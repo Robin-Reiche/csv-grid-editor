@@ -1,23 +1,24 @@
 import { state } from '../state';
 import type { ColType } from '../types';
-import { toJson, toJsonLines, toMarkdownTable } from '../utils/export-formats';
+import { toJson, toJsonLines, toMarkdownTable, toXml } from '../utils/export-formats';
 import { closeAllPopups } from './popups';
 
 // ── Export menu ──────────────────────────────────────────────────────────────
-// The toolbar Export button opens a small dropdown (JSON / JSON Lines /
-// Markdown table). Every format exports the CURRENT VIEW: active filters and
-// sort order are applied, columns appear in their current (possibly reordered)
+// The toolbar Export button opens a small dropdown (JSON / JSON Lines / XML /
+// Markdown table). Every format exports the CURRENT VIEW: active filters
+// and sort order are applied, columns appear in their current (possibly reordered)
 // order with their current (possibly renamed) headers. Hidden columns are
 // EXCLUDED, matching the Excel-style copy behavior — export reflects exactly the
 // visible view. A frozen reference row is exported first, matching where the
 // user sees it.
 // Saving the file itself already writes CSV, so there is no CSV entry here.
 
-type ExportFormat = 'json' | 'jsonl' | 'md';
+type ExportFormat = 'json' | 'jsonl' | 'xml' | 'md';
 
 const FORMAT_EXT: Record<ExportFormat, string> = {
     json: '.json',
     jsonl: '.jsonl',
+    xml: '.xml',
     md: '.md',
 };
 
@@ -56,6 +57,7 @@ function runExport(format: ExportFormat): void {
     let text: string;
     if (format === 'json')       text = toJson(headers, rows, types);
     else if (format === 'jsonl') text = toJsonLines(headers, rows, types);
+    else if (format === 'xml')   text = toXml(headers, rows, types);
     else                         text = toMarkdownTable(headers, rows, types);
 
     const base = FILENAME ? FILENAME.replace(/\.[^.]+$/, '') : 'export';

@@ -1,9 +1,10 @@
 // Tests for the export format converters (webview/utils/export-formats.ts):
-// JSON / JSON Lines / Markdown table generation from the grid's string matrix.
-// The risky parts are key derivation (blank and duplicate headers must not
-// silently drop fields) and value coercion (numbers/booleans should be typed
+// JSON / JSON Lines / Markdown table / XML generation from the grid's string
+// matrix. The risky parts are key derivation (blank and duplicate headers must
+// not silently drop fields), value coercion (numbers/booleans should be typed
 // in JSON, but NEVER lossily — "007" IDs, huge integers and stray text inside
-// a numeric column must survive as strings).
+// a numeric column must survive as strings) and XML well-formedness (arbitrary
+// header text has to become a legal element name, cell text has to be escaped).
 //
 // Run after `npm run compile` (or `tsc -p ./`):  node test/export-formats.test.cjs
 
@@ -14,6 +15,9 @@ const {
     toJson,
     toJsonLines,
     toMarkdownTable,
+    xmlTagNames,
+    escapeXmlText,
+    toXml,
 } = require('../out/webview/utils/export-formats.js');
 
 let failures = 0;
@@ -147,6 +151,104 @@ test('toMarkdownTable escapes pipes and converts newlines to <br>', () => {
 test('toMarkdownTable pads short rows so the table stays rectangular', () => {
     const out = toMarkdownTable(['a', 'b'], [['x']], ['string', 'string']);
     assert.strictEqual(out.split('\n')[2], '| x |  |');
+});
+
+// ── xmlTagNames ──────────────────────────────────────────────────────────────
+
+test('clean headers become element names unchanged', () => {
+    assert.deepStrictEqual(xmlTagNames(['name', 'city_2']), ['name', 'city_2']);
+});
+
+test('characters illegal in an XML name become underscores', () => {
+    assert.deepStrictEqual(xmlTagNames(['Total (€)', 'first name']), ['Total____', 'first_name']);
+});
+
+test('names that cannot start an XML name get an underscore prefix', () => {
+    assert.deepStrictEqual(xmlTagNames(['1st year', '-lead', '.dot']), ['_1st_year', '_-lead', '_.dot']);
+});
+
+test('the reserved "xml" prefix is escaped', () => {
+    assert.deepStrictEqual(xmlTagNames(['xmlns', 'XmlId']), ['_xmlns', '_XmlId']);
+});
+
+test('blank headers become positional column_N element names', () => {
+    assert.deepStrictEqual(xmlTagNames(['a', '', '  ']), ['a', 'column_2', 'column_3']);
+});
+
+test('non-ASCII letters survive as element names', () => {
+    assert.deepStrictEqual(xmlTagNames(['Größe', 'Họ tên']), ['Größe', 'Họ_tên']);
+});
+
+test('headers that sanitize onto the same name are still made unique', () => {
+    assert.deepStrictEqual(xmlTagNames(['a b', 'a-b', 'a b']), ['a_b', 'a-b', 'a_b_2']);
+});
+
+// ── escapeXmlText ────────────────────────────────────────────────────────────
+
+test('markup characters are escaped', () => {
+    assert.strictEqual(escapeXmlText('a & b <tag> "q" \'s\''), 'a &amp; b &lt;tag&gt; "q" \'s\'');
+});
+
+test('an already-escaped entity is not double-decoded, only re-escaped', () => {
+    assert.strictEqual(escapeXmlText('&amp;'), '&amp;amp;');
+});
+
+test('CR is escaped so parsers do not normalise it away, LF and tab stay literal', () => {
+    assert.strictEqual(escapeXmlText('a\r\nb\tc'), 'a&#13;\nb\tc');
+});
+
+test('control characters illegal in XML 1.0 are dropped', () => {
+    const raw = 'a' + String.fromCharCode(0) + 'b' + String.fromCharCode(0x1f) + 'c';
+    assert.strictEqual(escapeXmlText(raw), 'abc');
+});
+
+test('astral characters (emoji) survive intact', () => {
+    assert.strictEqual(escapeXmlText('ok 👍'), 'ok 👍');
+});
+
+test('a lone surrogate is dropped instead of producing invalid XML', () => {
+    assert.strictEqual(escapeXmlText('a' + String.fromCharCode(0xd800) + 'b'), 'ab');
+});
+
+// ── toXml ────────────────────────────────────────────────────────────────────
+
+test('toXml wraps rows in a declaration and a <rows> root', () => {
+    const out = toXml(['name', 'age'], [['Alice', '30']], ['string', 'integer']);
+    assert.strictEqual(out,
+        '<?xml version="1.0" encoding="UTF-8"?>\n' +
+        '<rows>\n' +
+        '  <row>\n' +
+        '    <name>Alice</name>\n' +
+        '    <age>30</age>\n' +
+        '  </row>\n' +
+        '</rows>\n');
+});
+
+test('toXml on an empty row set still emits a well-formed root', () => {
+    const out = toXml(['a'], [], ['string']);
+    assert.strictEqual(out, '<?xml version="1.0" encoding="UTF-8"?>\n<rows>\n</rows>\n');
+});
+
+test('toXml writes numbers verbatim — no coercion, so "2.50" and "007" keep their text', () => {
+    const out = toXml(['f', 'id'], [['2.50', '007']], ['float', 'integer']);
+    assert.ok(out.indexOf('<f>2.50</f>') >= 0, 'trailing zero kept');
+    assert.ok(out.indexOf('<id>007</id>') >= 0, 'leading zero kept');
+});
+
+test('toXml: an empty cell is self-closing in a typed column, empty text in a string column', () => {
+    const out = toXml(['age', 'note'], [['', '']], ['integer', 'string']);
+    assert.ok(out.indexOf('    <age/>\n') >= 0, 'typed empty cell is self-closing');
+    assert.ok(out.indexOf('    <note></note>\n') >= 0, 'string empty cell stays an empty element');
+});
+
+test('toXml escapes cell content instead of emitting raw markup', () => {
+    const out = toXml(['a'], [['<b>&</b>']], ['string']);
+    assert.ok(out.indexOf('<a>&lt;b&gt;&amp;&lt;/b&gt;</a>') >= 0);
+});
+
+test('toXml pads short rows so every row has the same elements', () => {
+    const out = toXml(['a', 'b'], [['x']], ['string', 'string']);
+    assert.ok(out.indexOf('<b></b>') >= 0);
 });
 
 if (failures) { console.error('\n' + failures + ' test(s) failed'); process.exit(1); }
