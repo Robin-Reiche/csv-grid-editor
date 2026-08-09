@@ -1,23 +1,24 @@
 import { hasControlChars, splitControlChars } from '../utils/control-chars';
 
 // ── Cell renderer: labelled control characters ───────────────────────────────
-// Draws the cell value, with any control character replaced by a small chip
-// carrying its ASCII abbreviation and a tooltip with the full name. The
-// underlying value is untouched — this is display only, so editing, copy,
-// find/replace, save and export all still see the original character.
+// Draws the value with each control character replaced by a chip showing its
+// ASCII abbreviation. Display only — the stored value is untouched.
 //
-// The element is built with DOM calls rather than returned as an HTML string:
-// AG Grid assigns a string result with innerHTML, which would let a cell
-// containing markup (`<img onerror=...>`) run inside the webview.
+// Built by hand instead of returned as an HTML string: AG Grid inserts a string
+// result with innerHTML, which would execute markup coming from the file.
+//
+// refresh() returns true so AG Grid reuses this element rather than recreating
+// it. A recreated element breaks double-click-to-edit: range selection
+// force-refreshes cells on mousedown, and if the element the first click hit is
+// gone by the second, the browser fires no dblclick at all.
 
-export function controlCharCellRenderer(params: any): HTMLElement {
-    const value = params.value == null ? '' : String(params.value);
-    const host  = document.createElement('span');
+function paint(host: HTMLElement, value: string): void {
+    host.textContent = '';
 
     // The overwhelmingly common case: no control characters, one text node.
     if (!hasControlChars(value)) {
         host.textContent = value;
-        return host;
+        return;
     }
 
     for (const seg of splitControlChars(value)) {
@@ -31,5 +32,31 @@ export function controlCharCellRenderer(params: any): HTMLElement {
         chip.title       = seg.label;
         host.appendChild(chip);
     }
-    return host;
+}
+
+const valueOf = (params: any): string => params.value == null ? '' : String(params.value);
+
+export class ControlCharCellRenderer {
+    private eGui!: HTMLSpanElement;
+    private value = '';
+
+    init(params: any): void {
+        this.eGui = document.createElement('span');
+        this.value = valueOf(params);
+        paint(this.eGui, this.value);
+    }
+
+    getGui(): HTMLElement {
+        return this.eGui;
+    }
+
+    refresh(params: any): boolean {
+        const next = valueOf(params);
+        // Unchanged value → leave the DOM alone, for the same reason.
+        if (next !== this.value) {
+            this.value = next;
+            paint(this.eGui, next);
+        }
+        return true;
+    }
 }
