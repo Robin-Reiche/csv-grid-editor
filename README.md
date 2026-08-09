@@ -59,6 +59,7 @@ For files larger than 10 MB you get a quick menu to open the full file, preview 
 - **Auto-Fit Columns** - Fit all columns to their content with one click. Double-click a resize handle to auto-fit a single column.
 - **Column Resize** - Drag column borders to adjust width manually
 - **Zoom** - Scale the whole grid from 60% to 200% with the toolbar buttons or keyboard shortcuts. The zoom level shows in the toolbar.
+- **Control Characters** - Invisible control characters inside a value show as a small chip with the character's abbreviation instead of an unnamed box, so you can tell which one it is. Hover it for the full name. The value itself is untouched, so editing, copy, save and export still carry the original character.
 - **Theme Integration** - Automatically adapts to your VS Code color theme (dark or light)
 
 ![CSV Grid Editor toolbar with auto-fit, zoom, find and replace, export and column profile buttons](https://raw.githubusercontent.com/Robin-Reiche/csv-grid-editor/master/images/toolbar.png)
