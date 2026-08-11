@@ -59,6 +59,7 @@ For files larger than 10 MB you get a quick menu to open the full file, preview 
 - **Auto-Fit Columns** - Fit all columns to their content with one click. Double-click a resize handle to auto-fit a single column.
 - **Column Resize** - Drag column borders to adjust width manually
 - **Zoom** - Scale the grid from 60% to 200% with the toolbar buttons or keyboard shortcuts. The zoom level shows in the toolbar.
+- **Control Characters** - Invisible control characters inside a value show as a small chip with the character's abbreviation instead of an unnamed box, so you can tell which one it is. Hover it for the full name. The value itself is untouched, so editing, copy and save still carry the original character.
 - **Theme Integration** - Automatically adapts to your VS Code color theme (dark or light)
 
 ![CSV Grid Editor toolbar with auto-fit, zoom, find and replace, export and column profile buttons](https://raw.githubusercontent.com/Robin-Reiche/csv-grid-editor/master/images/toolbar.png)
@@ -90,7 +91,7 @@ For files larger than 10 MB you get a quick menu to open the full file, preview 
   - The status bar shows the selection size plus live `Count / Sum / Avg / Min / Max`
 - **Export as JSON** - Convert the current filtered and sorted view to a JSON array of objects via the native VS Code save dialog. Column headers become the keys and numbers and booleans come out typed, while values that would lose information (IDs with leading zeros, very large numbers) stay strings. Columns you have hidden in the column chooser are left out, the same as copy.
 - **Export as JSON Lines** - The same view as JSON Lines (NDJSON), one object per line, handy for streaming tools and data pipelines
-- **Export as XML** - The same view as an XML document, one `<row>` element per row and one child element per column. Column headers become element names, with anything that is not legal in an XML name (spaces, punctuation, a leading digit) replaced so the output always parses. Cell text is written exactly as it reads, with `&`, `<` and `>` escaped.
+- **Export as XML** - The same view as an XML document, one `<row>` element per row and one child element per column. Column headers become element names, with anything that is not legal in an XML name (spaces, punctuation, a leading digit) replaced so the output always parses. Cell text is written exactly as it reads, with `&`, `<` and `>` escaped. Control characters are the one exception: XML 1.0 cannot represent them at all, so they are dropped. The other three formats keep them.
 - **Export as Markdown table** - The same view as a GitHub-flavored Markdown table, ready to paste into a README, issue or pull request
 
 ### Delimiter

@@ -602,6 +602,29 @@ body.vscode-high-contrast #grid-container.cm-on {
     stroke: none;
 }
 
+/* ── Control character chip ── */
+/* A control character inside a cell — an in-value separator, a stray byte from
+   a legacy export — has no glyph in the UI font and draws as a tofu box. The
+   cell renderer replaces it with its ASCII abbreviation on a tinted chip; the
+   amber matches the date type badge below rather than the alarm-red of an
+   error, since the character is usually meaningful data, not corruption. */
+.csv-ctrl-char {
+    display: inline-block;
+    font-size: 0.75em;
+    font-weight: 700;
+    line-height: 1.5;
+    padding: 0 3px;
+    margin: 0 1px;
+    border-radius: 3px;
+    vertical-align: baseline;
+    background: rgba(204,167,0,0.18);
+    color: #e5bc4b;
+    font-family: var(--vscode-font-family, "Segoe UI", sans-serif);
+    /* Keeps the abbreviation out of any text selection dragged over the cell —
+       copying must yield the real character, never the label. */
+    user-select: none;
+}
+
 /* ── Column type badge icons ── */
 /* Attached to the label (a flex container) rather than the text, so the badge
    is its own non-shrinking flex item and never gets clipped or pushed out. */

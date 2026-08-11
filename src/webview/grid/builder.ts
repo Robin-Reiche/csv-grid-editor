@@ -3,6 +3,7 @@ import { getColumnType, scheduleRecomputeColTypes } from './column-type';
 import { createCombinedFilter } from './filter';
 import { dataRowIndexForNode } from './row-mapping';
 import { partitionFrozenRows, updateCountsDisplay } from './refresh';
+import { ControlCharCellRenderer } from './control-char-cell';
 import { refreshProfileIfOpen } from '../features/profile';
 import { pushUndo, notifyChange, updateButtons } from '../features/undo-redo';
 import { getFindCellClassRules } from '../features/find-replace';
@@ -161,6 +162,10 @@ export function buildGrid(): void {
             minWidth: 60,
             editable:     !IS_PREVIEW,
             sortable:     true,
+            // Display only — marks control characters that the UI font would
+            // otherwise draw as an anonymous tofu box. Not on the '#' gutter,
+            // which renders its own pin marker.
+            cellRenderer: ControlCharCellRenderer,
             filter:       createCombinedFilter(colType),
             resizable:    true,
             suppressMovable: false,
