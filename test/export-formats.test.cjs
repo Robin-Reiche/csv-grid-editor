@@ -179,6 +179,19 @@ test('non-ASCII letters survive as element names', () => {
     assert.deepStrictEqual(xmlTagNames(['Größe', 'Họ tên']), ['Größe', 'Họ_tên']);
 });
 
+// XML 1.0 5th edition allows an astral letter in a name and libxml2 accepts one,
+// but expat rejects it anywhere in a tag, which is what Python's standard
+// library, PHP and Perl parse with. A file those cannot open at all is worse
+// than a header that lost a character, so astral characters are replaced like
+// any other illegal one. BMP characters must keep coming through untouched.
+// One astral character has to yield ONE underscore, not two: it is a surrogate
+// pair in JavaScript and a per-unit loop would double it.
+test('astral characters are replaced, BMP characters are not', () => {
+    assert.deepStrictEqual(
+        xmlTagNames(['\u{1D400}bc', '\u{20000}', '中文']),
+        ['_bc', '_', '中文']);
+});
+
 test('headers that sanitize onto the same name are still made unique', () => {
     assert.deepStrictEqual(xmlTagNames(['a b', 'a-b', 'a b']), ['a_b', 'a-b', 'a_b_2']);
 });

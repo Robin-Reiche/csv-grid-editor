@@ -111,17 +111,28 @@ export function toMarkdownTable(headers: string[], rows: string[][], types: ColT
 // production is replaced with '_' and a name that cannot start a Name gets an
 // '_' prefix. Letters and digits are matched by Unicode class, so non-ASCII
 // headers ("Họ tên", "Größe") stay readable instead of collapsing into '______'.
+//
+// Both classes stop at the end of the BMP on purpose. XML 1.0 5th edition does
+// allow an astral letter in a name and libxml2 accepts one, but expat rejects
+// it anywhere in a tag, "𠀀" and "_𠀀" alike, because it implements the 4th
+// edition production. expat is what Python's standard library, PHP and Perl
+// parse with, so an astral header would hand out a file those cannot open at
+// all. Losing the character to '_' is the smaller loss.
 const XML_NAME_START = /[:_\p{L}]/u;
 const XML_NAME_CHAR  = /[-.:_\p{L}\p{N}\p{M}]/u;
+const inBmp = (ch: string): boolean => ch.codePointAt(0)! <= 0xffff;
 
 function sanitizeXmlName(raw: string, index: number): string {
     const trimmed = (raw ?? '').trim();
     let name = '';
-    for (const ch of trimmed) name += XML_NAME_CHAR.test(ch) ? ch : '_';
+    // Iterating by code point keeps a surrogate pair together, so one astral
+    // character becomes one '_' instead of two.
+    for (const ch of trimmed) name += inBmp(ch) && XML_NAME_CHAR.test(ch) ? ch : '_';
     if (name === '') return `column_${index + 1}`;
     // A name may not start with a digit, '-' or '.', and any name beginning
     // with "xml" is reserved by the spec — an underscore fixes both without
-    // throwing away the header text.
+    // throwing away the header text. name[0] is safe to read as a single unit
+    // here because nothing above the BMP survived the loop.
     if (!XML_NAME_START.test(name[0]) || /^xml/i.test(name)) name = '_' + name;
     return name;
 }

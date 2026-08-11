@@ -2,6 +2,11 @@
 
 All notable changes to CSV Grid Editor are documented here.
 
+## [1.15.1] - 2026-08-11
+
+### Fixed
+- **XML export parses everywhere, including headers with rare CJK** - A column header holding a character above U+FFFF, the range Mathematical letters and CJK Extension B live in, produced an element name that Python's standard library, PHP and Perl refuse to read. The newest edition of XML 1.0 allows such a name and libxml2 accepts one, but expat implements the older rule and rejects the tag wherever the character sits. Those characters are now replaced with an underscore like every other character that is not legal in an element name, so the file opens in any parser. Headers that stay inside the BMP ("Größe", "中文") are untouched. Shipped with the XML export in 1.15.0.
+
 ## [1.15.0] - 2026-08-11
 
 ### Added
