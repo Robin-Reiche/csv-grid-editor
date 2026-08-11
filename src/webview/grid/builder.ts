@@ -192,9 +192,6 @@ export function buildGrid(): void {
     container.innerHTML = '';
     applyGridTheme(); // ensure correct ag-theme-alpine[-dark] class
 
-    const ZOOM_SCALE = state.ZOOM_STEPS[state.zoomIndex] / 100;
-    const BASE_TEXT_BTN_FONT = 11;
-
     // Merge find-match highlight rules with duplicate-row highlight.
     // Both rule sets must coexist on the same defaultColDef.
     const cellClassRules = {
@@ -320,10 +317,7 @@ export function buildGrid(): void {
             const isAnyFilter = state.gridApi?.isAnyFilterPresent();
             const cfBtn = document.getElementById('btn-clear-filters') as HTMLButtonElement | null;
             const sepBtn = document.getElementById('sep-filters') as HTMLElement | null;
-            if (cfBtn) {
-                cfBtn.style.display  = isAnyFilter ? '' : 'none';
-                cfBtn.style.fontSize = Math.round(BASE_TEXT_BTN_FONT * ZOOM_SCALE) + 'px';
-            }
+            if (cfBtn) cfBtn.style.display = isAnyFilter ? '' : 'none';
             if (sepBtn) sepBtn.style.display = isAnyFilter ? '' : 'none';
 
             updateCountsDisplay();
