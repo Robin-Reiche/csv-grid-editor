@@ -2,9 +2,10 @@ import type { ColType } from '../types';
 
 // ── Export format converters ─────────────────────────────────────────────────
 // Pure string-matrix → text converters behind the toolbar Export menu (JSON,
-// JSON Lines, Markdown table). Kept free of DOM/grid access so they are unit-
-// testable in plain Node (see test/export-formats.test.cjs); features/export.ts
-// gathers the current grid view (filter/sort applied) and feeds it in here.
+// JSON Lines, Markdown table, XML). Kept free of DOM/grid access so they are
+// unit-testable in plain Node (see test/export-formats.test.cjs);
+// features/export.ts gathers the current grid view (filter/sort applied) and
+// feeds it in here.
 
 // JSON object keys come from the header row, which the user can rename or leave
 // blank — keys must still be non-empty and unique or rows would silently lose
@@ -100,5 +101,95 @@ export function toMarkdownTable(headers: string[], rows: string[][], types: ColT
         for (let c = 0; c < numCols; c++) cells.push(row[c] ?? '');
         out.push(line(cells));
     }
+    return out.join('\n') + '\n';
+}
+
+// ── XML ──────────────────────────────────────────────────────────────────────
+
+// XML element names are far stricter than JSON keys: a header like "Total (€)"
+// or "1st year" is not a legal name, so every character outside the XML Name
+// production is replaced with '_' and a name that cannot start a Name gets an
+// '_' prefix. Letters and digits are matched by Unicode class, so non-ASCII
+// headers ("Họ tên", "Größe") stay readable instead of collapsing into '______'.
+const XML_NAME_START = /[:_\p{L}]/u;
+const XML_NAME_CHAR  = /[-.:_\p{L}\p{N}\p{M}]/u;
+
+function sanitizeXmlName(raw: string, index: number): string {
+    const trimmed = (raw ?? '').trim();
+    let name = '';
+    for (const ch of trimmed) name += XML_NAME_CHAR.test(ch) ? ch : '_';
+    if (name === '') return `column_${index + 1}`;
+    // A name may not start with a digit, '-' or '.', and any name beginning
+    // with "xml" is reserved by the spec — an underscore fixes both without
+    // throwing away the header text.
+    if (!XML_NAME_START.test(name[0]) || /^xml/i.test(name)) name = '_' + name;
+    return name;
+}
+
+// Sanitizing can collapse two distinct headers onto one name ("a b" and "a-b"
+// both become "a_b"), so uniqueness is applied AFTER sanitizing — otherwise two
+// columns would share an element name and a reader could not tell them apart.
+export function xmlTagNames(headers: string[]): string[] {
+    const used = new Set<string>();
+    return headers.map((h, i) => {
+        const base = sanitizeXmlName(h, i);
+        let name = base;
+        for (let n = 2; used.has(name); n++) name = `${base}_${n}`;
+        used.add(name);
+        return name;
+    });
+}
+
+// The XML 1.0 Char production: tab/LF/CR plus the printable ranges, with the
+// surrogate block and the two non-characters at the end of the BMP excluded.
+function isXmlChar(cp: number): boolean {
+    return cp === 0x09 || cp === 0x0a || cp === 0x0d
+        || (cp >= 0x20    && cp <= 0xd7ff)
+        || (cp >= 0xe000  && cp <= 0xfffd)
+        || (cp >= 0x10000 && cp <= 0x10ffff);
+}
+
+// Characters outside that production (stray C0 control bytes, lone surrogates)
+// cannot appear in a document at all — not even as a numeric character
+// reference — so they are dropped rather than escaped.
+function stripInvalidXmlChars(value: string): string {
+    let out = '';
+    // Iterating by code point keeps astral characters (emoji, rare CJK) intact;
+    // a lone surrogate arrives on its own and fails isXmlChar, so it is dropped.
+    for (const ch of value) if (isXmlChar(ch.codePointAt(0)!)) out += ch;
+    return out;
+}
+
+// CR is escaped because a parser would otherwise normalise it to LF and
+// silently change the value; LF and tab are left as-is so multi-line cells stay
+// readable.
+export function escapeXmlText(value: string): string {
+    return stripInvalidXmlChars(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/\r/g, '&#13;');
+}
+
+// XML — one <row> element per row, one child element per column, 2-space
+// indented like the JSON output. Cell text is written verbatim (XML has no
+// number type, so coercing "2.50" into 2.5 would only lose formatting); the
+// column type is used solely to decide emptiness: an empty cell in a typed
+// column is the counterpart of JSON's null and becomes a self-closing <age/>,
+// while an empty cell in a string column stays an empty <name></name>.
+export function toXml(headers: string[], rows: string[][], types: ColType[]): string {
+    const tags = xmlTagNames(headers);
+    const out = ['<?xml version="1.0" encoding="UTF-8"?>', '<rows>'];
+    for (const row of rows) {
+        out.push('  <row>');
+        for (let c = 0; c < tags.length; c++) {
+            const raw  = row[c] ?? '';
+            const type = types[c] ?? 'string';
+            if (raw.trim() === '' && type !== 'string') out.push(`    <${tags[c]}/>`);
+            else out.push(`    <${tags[c]}>${escapeXmlText(raw)}</${tags[c]}>`);
+        }
+        out.push('  </row>');
+    }
+    out.push('</rows>');
     return out.join('\n') + '\n';
 }

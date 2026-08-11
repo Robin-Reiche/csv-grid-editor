@@ -90,6 +90,7 @@ For files larger than 10 MB you get a quick menu to open the full file, preview 
   - The status bar shows the selection size plus live `Count / Sum / Avg / Min / Max`
 - **Export as JSON** - Convert the current filtered and sorted view to a JSON array of objects via the native VS Code save dialog. Column headers become the keys and numbers and booleans come out typed, while values that would lose information (IDs with leading zeros, very large numbers) stay strings. Columns you have hidden in the column chooser are left out, the same as copy.
 - **Export as JSON Lines** - The same view as JSON Lines (NDJSON), one object per line, handy for streaming tools and data pipelines
+- **Export as XML** - The same view as an XML document, one `<row>` element per row and one child element per column. Column headers become element names, with anything that is not legal in an XML name (spaces, punctuation, a leading digit) replaced so the output always parses. Cell text is written exactly as it reads, with `&`, `<` and `>` escaped.
 - **Export as Markdown table** - The same view as a GitHub-flavored Markdown table, ready to paste into a README, issue or pull request
 
 ### Delimiter
