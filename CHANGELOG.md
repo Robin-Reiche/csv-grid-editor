@@ -2,6 +2,17 @@
 
 All notable changes to CSV Grid Editor are documented here.
 
+## [1.15.0] - 2026-08-11
+
+### Added
+- **Export as XML** - The Export menu has a fourth format next to JSON, JSON Lines and Markdown ([#26](https://github.com/Robin-Reiche/csv-grid-editor/pull/26)). It writes the current view as one `<row>` element per row with one child element per column, for the systems that still speak XML. Column headers become element names, and because XML names are far stricter than JSON keys, anything illegal in one (spaces, punctuation, a leading digit) is replaced so the output always parses, with headers that collapse onto the same name still kept apart. Cell text is written exactly as it reads, so a leading zero or a trailing decimal zero survives. Control characters are the one thing that cannot come along: XML 1.0 has no way to represent them, so they are dropped. The other three formats keep them.
+- **Control characters say what they are** - A control character inside a cell value has no glyph in the UI font, so the grid drew an anonymous box and there was no way to tell which character it was without exporting the file ([#28](https://github.com/Robin-Reiche/csv-grid-editor/pull/28)). Machine-generated CSVs use these as in-value separators and exports from older systems leave stray bytes behind, so the box turns up more often than you would expect. They now show as a small chip carrying the ASCII abbreviation, with the full name on hover (`U+001D GROUP SEPARATOR`). Display only, so the value itself is untouched and editing, copy, find and replace and save all keep the original character.
+
+### Fixed
+- **Zoom scales the grid, not the toolbar** - Zooming scaled the toolbar, footer and column profile panel along with the data ([#27](https://github.com/Robin-Reiche/csv-grid-editor/pull/27)). That was worse than cosmetic: every step re-laid out the toolbar, so the zoom buttons slid sideways under the pointer and a second click landed on the neighbouring button. Zooming twice in a row was a coin flip. Zoom now changes only the row height, header height, cell font and cell padding, the way the editor's own font-size zoom behaves, and everything around the grid keeps its size at every level.
+
+Thanks to [@yukina3230](https://github.com/yukina3230) who contributed all three changes in this release.
+
 ## [1.14.0] - 2026-08-03
 
 ### Changed
