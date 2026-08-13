@@ -44,12 +44,46 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
 
     private readonly _webviews = new Map<string, vscode.WebviewPanel>();
 
+    // Per-open-document "re-read the file and push it to the grid" callbacks, so
+    // the reload command can reach the same code path the watcher uses.
+    private readonly _reloaders = new Map<string, () => Promise<boolean>>();
+
     public static register(context: vscode.ExtensionContext): vscode.Disposable {
-        return vscode.window.registerCustomEditorProvider(
-            CsvEditorProvider.viewType,
-            new CsvEditorProvider(context),
-            { webviewOptions: { retainContextWhenHidden: true } }
+        const provider = new CsvEditorProvider(context);
+        return vscode.Disposable.from(
+            vscode.window.registerCustomEditorProvider(
+                CsvEditorProvider.viewType,
+                provider,
+                { webviewOptions: { retainContextWhenHidden: true } }
+            ),
+            vscode.commands.registerCommand('csvViewer.reloadFromDisk', () => provider.reloadActiveFromDisk())
         );
+    }
+
+    // "CSV Grid: Reload from Disk". File > Revert File cannot serve as the manual
+    // escape hatch here: VSCode drops a revert before it reaches the provider
+    // unless the document has unsaved changes, so on a file only changed on disk
+    // it does nothing at all (issue #25).
+    private async reloadActiveFromDisk(): Promise<void> {
+        const tab = vscode.window.tabGroups.activeTabGroup.activeTab;
+        const input = tab?.input;
+        if (!(input instanceof vscode.TabInputCustom) || input.viewType !== CsvEditorProvider.viewType) {
+            vscode.window.showWarningMessage('Reload from Disk works on an open CSV Grid Editor tab.');
+            return;
+        }
+
+        const reload = this._reloaders.get(input.uri.toString());
+        if (!reload) {
+            vscode.window.showWarningMessage('This grid cannot be reloaded (preview mode).');
+            return;
+        }
+
+        // Without this the command looks broken whenever the file is already in
+        // sync, which is exactly the confusion that made #25 hard to report.
+        const changed = await reload();
+        if (!changed) {
+            vscode.window.setStatusBarMessage('CSV Grid: already up to date', 3000);
+        }
     }
 
     constructor(private readonly context: vscode.ExtensionContext) {}
@@ -199,7 +233,7 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             watcher = vscode.workspace.createFileSystemWatcher(
                 new vscode.RelativePattern(vscode.Uri.file(path.dirname(document.uri.fsPath)), path.basename(document.uri.fsPath))
             );
-            watcher.onDidChange(async () => {
+            const reload = async (): Promise<boolean> => {
                 try {
                     const raw = await vscode.workspace.fs.readFile(document.uri);
                     const text = new TextDecoder().decode(raw);
@@ -209,15 +243,32 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
                     // on it would re-parse the CSV into fresh arrays and wipe in-memory
                     // view state (frozen rows, in particular). Only genuinely external
                     // changes differ from document.content.
-                    if (text === document.content) return;
+                    if (text === document.content) return false;
                     document.content = text;
                     webviewPanel.webview.postMessage({
                         type: 'update',
                         text: document.content,
                         delimiter: document.delimiter
                     });
-                } catch {}
-            });
+                    return true;
+                } catch {
+                    return false;
+                }
+            };
+            this._reloaders.set(document.uri.toString(), reload);
+            webviewPanel.onDidDispose(() => this._reloaders.delete(document.uri.toString()));
+
+            // Both events reload, not just onDidChange (issue #25). A rewrite in
+            // place arrives as a change, but a script that replaces the file —
+            // rmtree the folder and write it fresh, or write a temp file and move
+            // it over — arrives as a delete followed by a create. Measured on
+            // Windows: a python or PowerShell regenerate produced delete+create
+            // ~100 ms apart, so it never reached a change-only listener and the
+            // grid silently kept showing stale data. onDidDelete is deliberately
+            // not wired: the file is gone at that point, and the create that
+            // follows is what carries the new content.
+            watcher.onDidChange(() => void reload());
+            watcher.onDidCreate(() => void reload());
             webviewPanel.onDidDispose(() => watcher?.dispose());
         }
 

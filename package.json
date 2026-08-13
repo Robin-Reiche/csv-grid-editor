@@ -59,6 +59,13 @@
         ],
         "priority": "default"
       }
+    ],
+    "commands": [
+      {
+        "command": "csvViewer.reloadFromDisk",
+        "title": "Reload from Disk",
+        "category": "CSV Grid"
+      }
     ]
   },
   "scripts": {
