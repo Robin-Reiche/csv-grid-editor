@@ -2,6 +2,16 @@
 
 All notable changes to CSV Grid Editor are documented here.
 
+## [1.16.0] - 2026-08-13
+
+### Fixed
+- **The grid reloads when a script regenerates the file** - Auto-reload only reacted to a file being rewritten in place. A script that regenerates its output by deleting the file, or the whole output folder, and writing it fresh went unnoticed, so the grid kept showing the old data until you closed the tab and opened it again (reported in [#25](https://github.com/Robin-Reiche/csv-grid-editor/issues/25)). That kind of rewrite reaches the editor as a delete followed by a create, not as a change, and only the change was being handled. Both now trigger the reload, so a regenerated CSV shows up on its own.
+
+### Added
+- **CSV Grid: Reload from Disk** - A command in the Command Palette that pulls in the file on disk on demand. Worth knowing: **File: Revert File** cannot do this. VS Code only forwards a revert to an editor when the document has unsaved changes, so on a file you only changed on disk it does nothing at all, which is easy to mistake for a broken editor. The new command has no such condition and tells you when there was nothing to pull in.
+
+Thanks to [@GiacomoEV](https://github.com/GiacomoEV) for the report and for patiently answering the follow-up questions that pinned this down.
+
 ## [1.15.1] - 2026-08-11
 
 ### Fixed
