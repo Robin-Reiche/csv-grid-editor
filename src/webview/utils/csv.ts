@@ -64,6 +64,20 @@ export function tsvCell(value: string): string {
     return value;
 }
 
+// A wrapped multi-line cell is only as wide as its longest LINE, not as wide as
+// the whole value — auto-fit would otherwise size the column to every line laid
+// end to end (features/auto-fit.ts). Longest is taken by character count, which
+// is a ranking, not a measurement: the pixel width of the line this returns is
+// measured properly afterwards, the same way single-line values are.
+export function longestLine(value: string): string {
+    if (value.indexOf('\n') < 0 && value.indexOf('\r') < 0) return value;
+    let best = '';
+    for (const line of value.split(/\r\n|\r|\n/)) {
+        if (line.length > best.length) best = line;
+    }
+    return best;
+}
+
 export function colLetter(i: number): string {
     let s = '';
     let n = i;

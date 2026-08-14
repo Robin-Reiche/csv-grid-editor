@@ -4,6 +4,7 @@ import { createCombinedFilter } from './filter';
 import { dataRowIndexForNode } from './row-mapping';
 import { partitionFrozenRows, updateCountsDisplay } from './refresh';
 import { ControlCharCellRenderer } from './control-char-cell';
+import { MultilineCellEditor } from './multiline-cell-editor';
 import { refreshProfileIfOpen } from '../features/profile';
 import { pushUndo, notifyChange, updateButtons } from '../features/undo-redo';
 import { getFindCellClassRules } from '../features/find-replace';
@@ -166,6 +167,14 @@ export function buildGrid(): void {
             // otherwise draw as an anonymous tofu box. Not on the '#' gutter,
             // which renders its own pin marker.
             cellRenderer: ControlCharCellRenderer,
+            // A textarea, so a cell can be given a line break at all (issue #29).
+            // The '#' gutter is not editable and keeps no editor.
+            cellEditor:   MultilineCellEditor,
+            // Re-apply the wrap mode so it survives a rebuild, exactly like the
+            // hidden/pinned state below. Both flags move together: wrapping
+            // without autoHeight would clip every line past the first.
+            wrapText:     state.wrapText,
+            autoHeight:   state.wrapText,
             filter:       createCombinedFilter(colType),
             resizable:    true,
             suppressMovable: false,

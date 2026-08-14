@@ -1,0 +1,18 @@
+id,customer,address,note,status
+1,Nord GmbH,"Hauptstraße 12
+20095 Hamburg
+Germany
+Test","Delivery window 08:00-12:00.
+Ring the bell twice.",open
+2,Bakerly Ltd,"14 Mill Road
+Bristol BS1 4XT
+United Kingdom",Single line note,nothing special,closed
+3,Sud SARL,"3 rue du Marché
+69002 Lyon
+France","Contains a comma, a ""quote"" and a
+line break at once.",open
+4,Plain AG,Bahnhofplatz 1,8001 Zürich,,open
+5,Windows Corp,"500 Redmond Way
+Redmond WA 98052
+USA","CRLF line breaks in this row,
+the Windows flavour.",closed

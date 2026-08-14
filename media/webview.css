@@ -625,6 +625,55 @@ body.vscode-high-contrast #grid-container.cm-on {
     user-select: none;
 }
 
+/* ── Multi-line cells ── */
+/* The line-break chip. Same shape as the control-character chip above, in a
+   calmer blue: a line break inside a quoted field is legitimate content, not a
+   stray byte, so it must not read as a warning. Drawn only while wrap mode is
+   off — with wrapping on the break is rendered for real. */
+.csv-ctrl-char--nl {
+    background: rgba(94,148,214,0.18);
+    color: #7ab0e8;
+    font-weight: 400;
+}
+
+/* Wrap mode (features/wrap-text.ts). AG Grid's own .ag-cell-wrap-text sets
+   white-space: normal, which collapses a line break into a single space —
+   pre-wrap keeps the break and still wraps lines that are too long for the
+   column. */
+:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-cell-wrap-text {
+    white-space: pre-wrap !important;
+    line-height: 1.4;
+    padding-top: 3px;
+    padding-bottom: 3px;
+}
+
+/* The multi-line cell editor (grid/multiline-cell-editor.ts): a popup laid over
+   the cell, so it is free to grow past the row height while typing. Its height
+   is set inline by the editor as the content grows. */
+.csv-multiline-editor-wrap {
+    display: block;
+    box-sizing: border-box;
+}
+.csv-multiline-editor {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    /* The editor sizes itself to the content; a drag handle would fight it. */
+    resize: none;
+    overflow-y: auto;
+    padding: 2px 6px;
+    border: 1px solid var(--vscode-focusBorder, #0078d4);
+    border-radius: 2px;
+    outline: none;
+    font-family: var(--vscode-font-family, "Segoe UI", sans-serif);
+    font-size: var(--ag-font-size, 13px);
+    line-height: 1.4;
+    background: var(--vscode-input-background, var(--vscode-editor-background, #1e1e1e));
+    color: var(--vscode-input-foreground, var(--vscode-editor-foreground, #d4d4d4));
+    white-space: pre-wrap;
+    tab-size: 4;
+}
+
 /* ── Column type badge icons ── */
 /* Attached to the label (a flex container) rather than the text, so the badge
    is its own non-shrinking flex item and never gets clipped or pushed out. */

@@ -46,24 +46,42 @@ const CONTROL_NAMES: Record<number, [string, string]> = {
     0x7f: ['DEL', 'DELETE'],
 };
 
-// Tab, LF and CR are deliberately NOT marked. They are ordinary whitespace
-// inside a quoted field — parseCsv keeps them verbatim, and a Windows multi-line
-// cell would otherwise sprout a chip at every line break.
+// Tab, LF and CR are deliberately NOT marked here. They are ordinary whitespace
+// inside a quoted field — parseCsv keeps them verbatim. Line breaks do get a
+// chip of their own when the caller asks for it, see below, but on their own
+// terms: one chip per break, not one per character.
 export function isMarkedControlChar(code: number): boolean {
     if (code === 0x09 || code === 0x0a || code === 0x0d) return false;
     return code < 0x20 || code === 0x7f;
 }
 
-export function hasControlChars(value: string): boolean {
+// ── Line breaks ──────────────────────────────────────────────────────────────
+// A line break inside a quoted field is legitimate CSV content, not a stray
+// byte, so it is never a "control character" in the sense above. But the grid
+// draws each row on one fixed-height line, which makes the break invisible:
+// "a\nb" and "a b" look identical. So when wrapping is off (the default), the
+// callers below ask for line breaks to be marked too — with their own chip, so
+// the cell at least reads as multi-line (issue #29). CRLF gets ONE chip: it is
+// a single break, not two.
+const NEWLINE_ABBR = '↵';
+const NEWLINE_LABELS: Record<string, string> = {
+    '\n':   'U+000A LINE FEED',
+    '\r':   'U+000D CARRIAGE RETURN',
+    '\r\n': 'U+000D U+000A CARRIAGE RETURN + LINE FEED',
+};
+
+export function hasControlChars(value: string, markNewlines: boolean = false): boolean {
     for (let i = 0; i < value.length; i++) {
-        if (isMarkedControlChar(value.charCodeAt(i))) return true;
+        const code = value.charCodeAt(i);
+        if (markNewlines && (code === 0x0a || code === 0x0d)) return true;
+        if (isMarkedControlChar(code)) return true;
     }
     return false;
 }
 
 export type CellSegment =
     | { type: 'text';    text: string }
-    | { type: 'control'; abbr: string; label: string };
+    | { type: 'control'; abbr: string; label: string; newline?: boolean };
 
 function labelFor(code: number): { abbr: string; label: string } {
     const hex   = 'U+' + code.toString(16).toUpperCase().padStart(4, '0');
@@ -78,15 +96,27 @@ function labelFor(code: number): { abbr: string; label: string } {
 // Splits a cell value into runs of ordinary text and single control characters,
 // in order. Concatenating the text runs and the source characters reproduces the
 // input exactly — nothing is dropped, the grid only draws the pieces differently.
-export function splitControlChars(value: string): CellSegment[] {
+// With markNewlines, a line break becomes a segment of its own on the same
+// terms (CRLF as one segment, since it is one break).
+export function splitControlChars(value: string, markNewlines: boolean = false): CellSegment[] {
     const out: CellSegment[] = [];
     let text = '';
+    const flush = (): void => { if (text !== '') { out.push({ type: 'text', text }); text = ''; } };
+
     for (let i = 0; i < value.length; i++) {
+        const ch = value[i];
+        if (markNewlines && (ch === '\n' || ch === '\r')) {
+            const seq = ch === '\r' && value[i + 1] === '\n' ? '\r\n' : ch;
+            i += seq.length - 1;
+            flush();
+            out.push({ type: 'control', abbr: NEWLINE_ABBR, label: NEWLINE_LABELS[seq], newline: true });
+            continue;
+        }
         const code = value.charCodeAt(i);
-        if (!isMarkedControlChar(code)) { text += value[i]; continue; }
-        if (text !== '') { out.push({ type: 'text', text }); text = ''; }
+        if (!isMarkedControlChar(code)) { text += ch; continue; }
+        flush();
         out.push({ type: 'control', ...labelFor(code) });
     }
-    if (text !== '') out.push({ type: 'text', text });
+    flush();
     return out;
 }

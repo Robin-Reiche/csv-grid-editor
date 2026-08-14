@@ -11,7 +11,8 @@ export function getWebviewContent(
     isChunked: boolean = false,
     isMac: boolean = false,
     zoomIndex: number = 4,
-    colorMode: boolean = false
+    colorMode: boolean = false,
+    wrapText: boolean = false
 ): string {
     const nonce = getNonce();
     const mod   = isMac ? '⌘' : 'Ctrl+';
@@ -53,7 +54,7 @@ export function getWebviewContent(
     </style>
 </head>
 <body>
-    <div class="banner">Plain text view — read-only</div>
+    <div class="banner">Plain text view (read-only)</div>
     <pre id="content">Loading…</pre>
     <script nonce="${nonce}">
         const vscodeApi = acquireVsCodeApi();
@@ -117,12 +118,13 @@ export function getWebviewContent(
         <div    class="separator"></div>
         <button id="btn-profile"       title="Column Profile"><i class="codicon codicon-graph"></i></button>
         <button id="btn-columns"       title="Show / hide columns"><i class="codicon codicon-checklist"></i></button>
-        <button id="btn-colormode"     title="Color columns — distinct, theme-aware tint per column"><i class="codicon codicon-symbol-color"></i></button>
+        <button id="btn-colormode"     title="Color columns. A distinct, theme-aware tint per column"><i class="codicon codicon-symbol-color"></i></button>
+        <button id="btn-wraptext"      title="Wrap multi-line cells. Line breaks inside a cell get their own line"><i class="codicon codicon-word-wrap"></i></button>
         <div    class="separator"></div>
         <button id="btn-find-replace"  title="Find &amp; Replace (${mod}F)"><i class="codicon codicon-search"></i></button>
         <div    class="separator"></div>
-        <button id="btn-go-to-row"     title="Go to row (${mod}G)${isChunked ? ' — disabled in Paged View' : ''}"${isChunked ? ' disabled' : ''}><i class="codicon codicon-list-ordered"></i></button>
-        <button id="btn-duplicates"    title="Find duplicate rows${isChunked ? ' — disabled in Paged View' : ''}"${isChunked ? ' disabled' : ''}><i class="codicon codicon-files"></i></button>
+        <button id="btn-go-to-row"     title="Go to row (${mod}G)${isChunked ? ' (disabled in Paged View)' : ''}"${isChunked ? ' disabled' : ''}><i class="codicon codicon-list-ordered"></i></button>
+        <button id="btn-duplicates"    title="Find duplicate rows${isChunked ? ' (disabled in Paged View)' : ''}"${isChunked ? ' disabled' : ''}><i class="codicon codicon-files"></i></button>
         <div    class="separator"></div>
         <button id="btn-export"        title="Export as JSON, JSON Lines, XML or Markdown" class="text-btn"${isPreview ? ' style="display:none;"' : ''}><i class="codicon codicon-export"></i> Export</button>
         <div    class="separator"></div>
@@ -279,6 +281,7 @@ export function getWebviewContent(
         const IS_CHUNKED          = ${isChunked ? 'true' : 'false'};
         const INITIAL_ZOOM_INDEX  = ${zoomIndex};
         const INITIAL_COLOR_MODE  = ${colorMode ? 'true' : 'false'};
+        const INITIAL_WRAP_TEXT   = ${wrapText ? 'true' : 'false'};
     </script>
 
     <!-- Bundled webview logic -->

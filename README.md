@@ -4,7 +4,7 @@
 [![Installs](https://badgen.net/vs-marketplace/i/RobinReiche.csv-grid-editor)](https://marketplace.visualstudio.com/items?itemName=RobinReiche.csv-grid-editor)
 [![Rating](https://badgen.net/vs-marketplace/rating/RobinReiche.csv-grid-editor)](https://marketplace.visualstudio.com/items?itemName=RobinReiche.csv-grid-editor&ssr=false#review-details)
 
-A fast, feature-rich CSV/TSV editor for Visual Studio Code. Opens CSV files in a sortable, filterable, editable grid — right inside your editor, no external tools needed.
+A fast, feature-rich CSV/TSV editor for Visual Studio Code. Opens CSV files in a sortable, filterable, editable grid, right inside your editor, no external tools needed.
 
 ![CSV Grid Editor: open, view and edit CSV and TSV files in a grid inside VS Code](https://raw.githubusercontent.com/Robin-Reiche/csv-grid-editor/master/images/social-preview.png)
 
@@ -60,12 +60,14 @@ For files larger than 10 MB you get a quick menu to open the full file, preview 
 - **Column Resize** - Drag column borders to adjust width manually
 - **Zoom** - Scale the grid from 60% to 200% with the toolbar buttons or keyboard shortcuts. The zoom level shows in the toolbar.
 - **Control Characters** - Invisible control characters inside a value show as a small chip with the character's abbreviation instead of an unnamed box, so you can tell which one it is. Hover it for the full name. The value itself is untouched, so editing, copy and save still carry the original character.
+- **Multi-line cells** - A cell that holds a line break shows a small `↵` chip at every break, so you can see it is more than one line even though the row keeps its height. The toolbar's **Wrap multi-line cells** button switches to real wrapping, where each row grows to fit its tallest cell. The setting is remembered across files and sessions.
 - **Theme Integration** - Automatically adapts to your VS Code color theme (dark or light)
 
 ![CSV Grid Editor toolbar with auto-fit, zoom, find and replace, export and column profile buttons](https://raw.githubusercontent.com/Robin-Reiche/csv-grid-editor/master/images/toolbar.png)
 
 ### Editing
 - **Inline Editing** - Double-click any cell to edit its value inline. Changes are tracked and saved back to the file. Press `Enter` to commit and jump to the cell below in the same column, the same as Excel and Google Sheets, so you can type down a column quickly.
+- **Line breaks inside a cell** - `Alt+Enter` inserts a line break while you are editing, the same key Excel uses, and `Shift+Enter` and `Ctrl+Enter` do the same. The editor grows as the value gets taller. `Enter` still commits, so nothing changes for single-line values. The file is written the way the CSV standard asks for it, with the cell in quotes, so other tools read it back correctly.
 - **Insert & Delete rows and columns** - Right-click a row to insert above or below or to delete it, and right-click a column header to insert left or right or to delete. Select several rows (drag or `Shift`+click the `#` gutter) or several columns (`Shift`+click the headers) first to insert or delete that many at once, anchored to the selection edge, just like a spreadsheet.
 - **Undo / Redo** - Full multi-step undo and redo stack (`Ctrl+Z` / `Ctrl+Y`)
 - **Save / Save As** - Uses VS Code's native save mechanism and supports Save As to a new location
@@ -188,6 +190,8 @@ If you ever need to pull in the file on disk by hand, run **CSV Grid: Reload fro
 | `Ctrl++` / `Ctrl+=` | Zoom in |
 | `Ctrl+-` | Zoom out |
 | `Ctrl+F` / `Ctrl+H` | Open Find & Replace bar |
+| `Alt+Enter` | Insert a line break *(while editing a cell)* |
+| `Shift+Enter` / `Ctrl+Enter` | Insert a line break *(while editing a cell)* |
 | `Enter` | Next match *(in Find bar)* |
 | `Shift+Enter` | Previous match *(in Find bar)* |
 | `Esc` | Close the open menu, dropdown, popup or Find bar |

@@ -1,6 +1,7 @@
 import { state, getNumCols } from '../state';
 import { showLoader, hideLoader } from '../utils/loader';
 import { buildGrid } from '../grid/builder';
+import { longestLine } from '../utils/csv';
 
 export function measureTextWidths(): { colId: string; width: number }[] {
     const { data, colTypes } = state;
@@ -75,12 +76,17 @@ export function measureTextWidths(): { colId: string; width: number }[] {
     const ctx    = canvas.getContext('2d')!;
     ctx.font = `400 ${fontSize}px ${fontFamily}`;
 
+    // What a value takes up horizontally depends on the wrap mode: wrapped, a
+    // multi-line value only needs its longest line; unwrapped it is drawn on one
+    // line, chips and all, so the whole value counts.
+    const widthText = (v: string): string => state.wrapText ? longestLine(v) : v;
+
     const topCandidates: string[][] = [];
     for (let c = 0; c < numCols; c++) {
         const top: { val: string; w: number }[] = [];
         let minTopW = 0;
         for (let r = 0; r < bodyRows.length; r++) {
-            const val = bodyRows[r]?.[c] != null ? String(bodyRows[r][c]) : '';
+            const val = bodyRows[r]?.[c] != null ? widthText(String(bodyRows[r][c])) : '';
             if (!val) continue;
             // Use bounding-box extents when available — more accurate than
             // advance-width (.width) for glyphs that extend beyond their
