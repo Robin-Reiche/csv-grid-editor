@@ -2,6 +2,27 @@
 
 All notable changes to CSV Grid Editor are documented here.
 
+## [1.18.0] - 2026-08-19
+
+### Added
+- **Value distribution in the Column Profile panel** - Min, max, mean and median tell you the range a column covers but not the shape of what sits inside it, which is exactly the part that matters on skewed data ([#33](https://github.com/Robin-Reiche/csv-grid-editor/issues/33)). Numeric and date columns are now binned and drawn as a histogram under their detail card, with the range written below it. Hover a bar and it tells you the interval, how many rows fall into it and what share of the column that is. The overview table has a new **DIST** column with a thumbnail of the same shape for every column, so 60 columns can be scanned in one look and clicking a row still jumps to its card.
+- Bin widths are derived from the data itself (Freedman-Diaconis), not from a fixed bin count. On a column where most values cluster low and a thin tail runs far out, a fixed count would put nearly everything into one bar and show nothing. A bin holding even a single row keeps a visible sliver for the same reason. Columns with no numeric axis get frequency bars for their most common values instead, and `time` columns finally show something in the panel at all, they used to render nothing below the row and null counts.
+
+- **The Column Profile panel remembers its size and its dock side** - Dragging the panel wider or taller only held for the file that was open. Every new CSV put it back to the default width, so the same drag had to be repeated over and over. The size is now persisted like zoom, column colors and wrap, kept separately for the side docks and the bottom dock so switching between them does not carry a width over into a height. A size saved on a wide window is clamped on a narrow one, so the grid can never end up pushed off screen.
+
+- **Filter the Column Profile by name** - A search box sits next to the overview title. Type part of a column name and the overview table and the detail cards below it both shrink to what matches, with the count in the title telling you how many of how many are left. `Escape` clears it. On a 48-column file, finding the one column you care about no longer means scrolling.
+
+### Changed
+- **The Column Profile is around four times faster** - On a 116,924 row by 48 column file it took 4.5 seconds to compute, which froze the panel every time the file was opened or an edit re-triggered it. It is now about 1.2 seconds, measured on the same file, with output verified identical field by field. Three things did it: cells are only trimmed when they actually carry whitespace, numeric and date columns are summarised off a typed array sorted natively instead of a `number[]` sorted through a JavaScript comparator, and the distinct count for those columns comes off that sorted array instead of a hash set over every value.
+- One consequence worth naming: a numeric column now counts distinct **numbers** rather than distinct spellings, so `1.0` and `1.00` count once, not twice. A value that is not a number at all, an `N/A` in an otherwise numeric column, still counts on its own. Every other column type is unchanged and still counts distinct strings.
+
+### Fixed
+- **The Column Profile could fail outright on a large text column** - The length statistics spread the whole column into an argument list (`Math.min(...lengths)`), which throws a `RangeError` once the column holds more than roughly 125,000 non-empty values, and that took the entire panel down with it, not just those three numbers. It is a plain loop now.
+
+- **Also published on Open VSX** - The extension was only on the VS Code Marketplace, so in Cursor, VSCodium, Windsurf, Gitpod and Theia it did not turn up in the extension search at all. Every release now goes to both registries, and both get the same package rather than two separate builds. Asked for by [@JunchengLu218](https://github.com/JunchengLu218) in [#33](https://github.com/Robin-Reiche/csv-grid-editor/issues/33).
+
+Thanks to [@JunchengLu218](https://github.com/JunchengLu218) for the request and for pointing at Positron's Data Explorer as the reference, the two-tier layout there is what the overview table and the detail cards were already shaped like.
+
 ## [1.17.1] - 2026-08-19
 
 ### Fixed
