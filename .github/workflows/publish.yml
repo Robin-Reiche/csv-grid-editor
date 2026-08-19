@@ -1,4 +1,4 @@
-name: Publish to VS Code Marketplace
+name: Publish
 
 on:
   push:
@@ -27,5 +27,17 @@ jobs:
       - name: Compile
         run: npm run compile
 
-      - name: Publish to Marketplace
-        run: npx @vscode/vsce publish --pat ${{ secrets.VSCE_PAT }}
+      # Packaged once and sent to both registries, so the VSIX on Open VSX is
+      # byte for byte the one on the Marketplace rather than a second build.
+      - name: Package
+        run: npx @vscode/vsce package --out csv-grid-editor.vsix
+
+      # --skip-duplicate on both, so re-running the job after one registry
+      # failed does not stop at the one that already went through.
+      - name: Publish to VS Code Marketplace
+        run: npx @vscode/vsce publish --packagePath csv-grid-editor.vsix --pat ${{ secrets.VSCE_PAT }} --skip-duplicate
+
+      # Open VSX is the registry behind Cursor, VSCodium, Windsurf, Gitpod and
+      # Theia (issue #33). Namespace RobinReiche, created once with the CLI.
+      - name: Publish to Open VSX
+        run: npx ovsx publish csv-grid-editor.vsix --pat ${{ secrets.OVSX_PAT }} --skip-duplicate
