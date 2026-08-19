@@ -1,20 +1,21 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as readline from 'readline';
 import { getWebviewContent } from './webview';
+import {
+    RowPageIndex,
+    readFirstRecords,
+    countRecords,
+    readTailRecords,
+    buildPageIndex,
+    readPage
+} from './largeFileReader';
 
 const LARGE_FILE_THRESHOLD   = 10  * 1024 * 1024; // 10 MB
 const CHUNKED_THRESHOLD      = 50  * 1024 * 1024; // 50 MB
 const PREVIEW_ROW_COUNT      = 1000;
 const PAGE_SIZE              = 500;
 const CANCELLED_PREVIEW_MODE = '__cancelled__';
-
-interface RowPageIndex {
-    offsets: number[];   // byte offset of the first byte of each page's first data row
-    totalRows: number;
-    headerLine: string;
-}
 
 class CsvDocument implements vscode.CustomDocument {
     public content: string;
@@ -159,13 +160,13 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
                 content = await fs.promises.readFile(filePath, 'utf8');
                 isPreview = true;
             } else if (previewMode === 'head') {
-                content = await this.readFirstLines(filePath, PREVIEW_ROW_COUNT + 1);
-                totalLineCount = await this.countLines(filePath);
+                content = await readFirstRecords(filePath, PREVIEW_ROW_COUNT + 1);
+                totalLineCount = await countRecords(filePath);
                 isPreview = true;
             } else if (previewMode === 'tail') {
-                const result = await this.readTailLines(filePath, PREVIEW_ROW_COUNT);
+                const result = await readTailRecords(filePath, PREVIEW_ROW_COUNT);
                 content = result.content;
-                totalLineCount = result.totalLineCount;
+                totalLineCount = result.totalRecordCount;
                 isPreview = true;
             } else if (previewMode === 'chunked') {
                 isChunked = true;
@@ -184,7 +185,7 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         const doc = new CsvDocument(uri, content, delimiter, isPreview, previewMode, totalLineCount, isChunked);
 
         if (isChunked) {
-            doc.pageIndex = await this.buildPageIndex(uri.fsPath, PAGE_SIZE);
+            doc.pageIndex = await buildPageIndex(uri.fsPath, PAGE_SIZE);
         }
 
         return doc;
@@ -283,7 +284,7 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         webviewPanel.webview.onDidReceiveMessage(async (msg) => {
             if (msg.type === 'ready') {
                 if (document.isChunked && document.pageIndex) {
-                    const pageText = await this.readPage(document.uri.fsPath, document.pageIndex, 0);
+                    const pageText = await readPage(document.uri.fsPath, document.pageIndex, 0);
                     webviewPanel.webview.postMessage({
                         type: 'init',
                         text: pageText,
@@ -347,7 +348,7 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
                 let pageNum = msg.pageNumber as number;
                 if (pageNum < 0) pageNum = totalPages - 1;
                 pageNum = Math.max(0, Math.min(pageNum, totalPages - 1));
-                const pageText = await this.readPage(document.uri.fsPath, document.pageIndex, pageNum);
+                const pageText = await readPage(document.uri.fsPath, document.pageIndex, pageNum);
                 webviewPanel.webview.postMessage({
                     type: 'pageData',
                     pageNumber: pageNum,
@@ -394,138 +395,6 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
                 try { await vscode.workspace.fs.delete(context.destination); } catch {}
             }
         };
-    }
-
-    // ── File reading helpers ──
-
-    private async readFirstLines(filePath: string, lineCount: number): Promise<string> {
-        return new Promise((resolve, reject) => {
-            const lines: string[] = [];
-            const input = fs.createReadStream(filePath);
-            const rl = readline.createInterface({ input, crlfDelay: Infinity });
-            let done = false;
-
-            rl.on('line', (line) => {
-                lines.push(line);
-                if (lines.length >= lineCount) {
-                    done = true;
-                    rl.close();
-                    input.destroy();
-                    resolve(lines.join('\n'));
-                }
-            });
-
-            rl.on('close', () => { if (!done) resolve(lines.join('\n')); });
-            rl.on('error', (err) => { if (!done) reject(err); });
-        });
-    }
-
-    private async countLines(filePath: string): Promise<number> {
-        return new Promise((resolve, reject) => {
-            let count = 0;
-            const stream = fs.createReadStream(filePath, { highWaterMark: 64 * 1024 });
-            stream.on('data', (chunk: string | Buffer) => {
-                const buf = typeof chunk === 'string' ? Buffer.from(chunk) : chunk;
-                for (let i = 0; i < buf.length; i++) {
-                    if (buf[i] === 0x0A) count++;
-                }
-            });
-            stream.on('end', () => resolve(count > 0 ? count + 1 : 1));
-            stream.on('error', reject);
-        });
-    }
-
-    private async readTailLines(filePath: string, rowCount: number): Promise<{ content: string; totalLineCount: number }> {
-        return new Promise((resolve, reject) => {
-            const allLines: string[] = [];
-            const input = fs.createReadStream(filePath);
-            const rl = readline.createInterface({ input, crlfDelay: Infinity });
-
-            rl.on('line', (line) => allLines.push(line));
-
-            rl.on('close', () => {
-                const header = allLines[0] || '';
-                const tail = allLines.slice(-rowCount);
-                resolve({
-                    content: [header, ...tail].join('\n'),
-                    totalLineCount: allLines.length
-                });
-            });
-            rl.on('error', reject);
-        });
-    }
-
-    // ── F7: Chunked / Paged Mode ──
-
-    private async buildPageIndex(filePath: string, pageSize: number): Promise<RowPageIndex> {
-        return new Promise((resolve, reject) => {
-            const offsets: number[] = [];
-            let byteOffset = 0;
-            let lineIndex = 0;
-            let headerLine = '';
-            let dataRowIndex = 0;
-
-            const stream = fs.createReadStream(filePath, { encoding: 'utf8', highWaterMark: 64 * 1024 });
-            let partial = '';
-
-            stream.on('data', (chunk: string | Buffer) => {
-                const text = partial + (typeof chunk === 'string' ? chunk : chunk.toString('utf8'));
-                const lines = text.split('\n');
-                partial = lines.pop() ?? '';
-
-                for (const line of lines) {
-                    const lineBytes = Buffer.byteLength(line + '\n', 'utf8');
-                    if (lineIndex === 0) {
-                        headerLine = line;
-                    } else {
-                        if (dataRowIndex % pageSize === 0) {
-                            offsets.push(byteOffset);
-                        }
-                        dataRowIndex++;
-                    }
-                    byteOffset += lineBytes;
-                    lineIndex++;
-                }
-            });
-
-            stream.on('end', () => {
-                if (partial.trim()) {
-                    if (lineIndex > 0) {
-                        if (dataRowIndex % pageSize === 0) {
-                            offsets.push(byteOffset);
-                        }
-                    }
-                }
-                if (offsets.length === 0) offsets.push(0);
-                resolve({ offsets, totalRows: dataRowIndex, headerLine });
-            });
-
-            stream.on('error', reject);
-        });
-    }
-
-    private async readPage(filePath: string, index: RowPageIndex, pageNum: number): Promise<string> {
-        const startOffset = index.offsets[pageNum];
-        const endOffset   = index.offsets[pageNum + 1]; // undefined = read to EOF
-
-        return new Promise((resolve, reject) => {
-            const streamOpts: { start: number; end?: number; encoding: BufferEncoding } = {
-                start: startOffset,
-                encoding: 'utf8'
-            };
-            if (endOffset !== undefined) {
-                streamOpts.end = endOffset - 1;
-            }
-
-            const stream = fs.createReadStream(filePath, streamOpts);
-            let raw = '';
-            stream.on('data', (chunk: string | Buffer) => { raw += typeof chunk === 'string' ? chunk : chunk.toString('utf8'); });
-            stream.on('end', () => {
-                const lines = raw.split('\n').filter(l => l.trim() !== '');
-                resolve([index.headerLine, ...lines].join('\n'));
-            });
-            stream.on('error', reject);
-        });
     }
 
     // ── Delimiter detection ──
