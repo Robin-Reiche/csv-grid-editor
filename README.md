@@ -122,16 +122,18 @@ Click any column header to sort ascending or descending. Use the filter icon in 
 
 ### Column Profile
 - Click the graph icon in the toolbar to open the **Column Profile** panel
-- Shows an **overview table** across all columns: type, fill rate, null %, distinct value count and min/max summary
+- Shows an **overview table** across all columns: type, fill rate, null %, distinct value count, a thumbnail of the value distribution and a min/max summary
 - Click any row in the overview table to jump to its detail card
+- **Filter by column name** - Type in the search box next to the overview title to narrow both the table and the cards below it to matching columns. The title counts what is left, `Escape` clears the filter
 - Each column gets a **detail card** with statistics based on its detected type:
-  - **Integer / Float** - min, max, mean, median, standard deviation, unique count
+  - **Integer / Float** - min, max, mean, median, standard deviation, unique count and a **distribution histogram**
   - **String** - min, max and average length, top 5 most frequent values with frequency bars
   - **Boolean** - true/false count and percentage, with a visual bar chart
-  - **Date / DateTime** - earliest date, latest date, range in days
+  - **Date / DateTime** - earliest date, latest date, range in days and a **distribution histogram** over time
   - All types show total rows, unique count, null count and fill %
+- **Distribution** - Numeric and date columns are binned and drawn as a histogram, so you see the shape of the data and not only its range. Hover a bar for its interval, row count and share. Bin widths come from the data itself, which keeps skewed columns readable instead of flattening them into a single spike. Columns without a numeric axis show frequency bars for their most common values instead.
 - **Dockable** - Dock the panel to the right (default), left or bottom of the grid
-- **Resizable** - Drag the panel border to adjust its size
+- **Resizable** - Drag the panel border to adjust its size. The dock side and the size are remembered across files and sessions, with the side docks and the bottom dock keeping their own size
 - **Zoom-aware** - Panel text and spacing scale with the grid's zoom level (60 to 200%)
 - **Live Updates** - The panel re-renders automatically as the data changes, including cell edits, inserts, deletes, paste and undo
 

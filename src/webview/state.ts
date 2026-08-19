@@ -36,7 +36,17 @@ export const state = {
 
     colTypes: [] as ColType[],
     profileOpen: false,
+
+    // Column Profile panel layout. The dock side plus the size the user dragged
+    // the panel to, kept as width (left/right dock) and height (bottom dock)
+    // separately so switching sides does not carry one over into the other. 0
+    // means never resized, the CSS default applies. All three are persisted via
+    // VS Code globalState (csvGridEditor.profileDock / .profileWidth /
+    // .profileHeight) like zoom and color mode, so the panel comes back the size
+    // it was left at on the next file. See features/profile.ts.
     profileDock: 'right' as 'right' | 'bottom' | 'left',
+    profileWidth: 0,
+    profileHeight: 0,
 
     findMatches: [] as FindMatch[],
     findMatchIndex: -1,

@@ -213,6 +213,11 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         const zoomIndex = this.context.globalState.get<number>('csvGridEditor.zoomIndex', 4);
         const colorMode = this.context.globalState.get<boolean>('csvGridEditor.colorMode', false);
         const wrapText  = this.context.globalState.get<boolean>('csvGridEditor.wrapText', false);
+        const profileLayout = {
+            dock:   this.context.globalState.get<string>('csvGridEditor.profileDock', 'right'),
+            width:  this.context.globalState.get<number>('csvGridEditor.profileWidth', 0),
+            height: this.context.globalState.get<number>('csvGridEditor.profileHeight', 0)
+        };
 
         webviewPanel.webview.html = getWebviewContent(
             webviewPanel.webview,
@@ -226,7 +231,8 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             process.platform === 'darwin',
             zoomIndex,
             colorMode,
-            wrapText
+            wrapText,
+            profileLayout
         );
 
         // F3: File System Watcher — auto-reload on external changes (non-preview only)
@@ -304,6 +310,11 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
 
             } else if (msg.type === 'wrapTextChanged') {
                 this.context.globalState.update('csvGridEditor.wrapText', msg.wrapText);
+
+            } else if (msg.type === 'profileLayoutChanged') {
+                this.context.globalState.update('csvGridEditor.profileDock',   msg.dock);
+                this.context.globalState.update('csvGridEditor.profileWidth',  msg.width);
+                this.context.globalState.update('csvGridEditor.profileHeight', msg.height);
 
             } else if (msg.type === 'edit' && !document.isPreview) {
                 document.content = msg.text;

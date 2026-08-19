@@ -12,7 +12,8 @@ export function getWebviewContent(
     isMac: boolean = false,
     zoomIndex: number = 4,
     colorMode: boolean = false,
-    wrapText: boolean = false
+    wrapText: boolean = false,
+    profileLayout: { dock: string; width: number; height: number } = { dock: 'right', width: 0, height: 0 }
 ): string {
     const nonce = getNonce();
     const mod   = isMac ? '⌘' : 'Ctrl+';
@@ -282,6 +283,7 @@ export function getWebviewContent(
         const INITIAL_ZOOM_INDEX  = ${zoomIndex};
         const INITIAL_COLOR_MODE  = ${colorMode ? 'true' : 'false'};
         const INITIAL_WRAP_TEXT   = ${wrapText ? 'true' : 'false'};
+        const INITIAL_PROFILE_LAYOUT = ${JSON.stringify(profileLayout)};
     </script>
 
     <!-- Bundled webview logic -->

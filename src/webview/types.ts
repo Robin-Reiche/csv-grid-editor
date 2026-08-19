@@ -1,3 +1,5 @@
+import type { HistBin } from './utils/histogram';
+
 export type CsvRow = string[];
 
 // One undo/redo entry. Bundles the data clone with the freeze state so undo/redo
@@ -44,6 +46,11 @@ export interface ColProfile {
     minDate?: string;
     maxDate?: string;
     rangeDays?: number;
+    // Distribution (issue #33). Bins over the numeric or date values of the
+    // column. histKind tells the renderer how to label a bin bound. Absent for
+    // types that have no meaningful axis, those show frequency bars instead.
+    histogram?: HistBin[];
+    histKind?: 'number' | 'date';
 }
 
 export interface FindMatch {

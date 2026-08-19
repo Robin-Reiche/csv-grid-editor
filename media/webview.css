@@ -377,21 +377,52 @@ button .codicon {
     overflow: hidden;
     flex-shrink: 0;
 }
+.profile-ov-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 8px 4px;
+}
 .profile-overview-title {
     font-size: 0.75em;
     font-weight: 600;
     letter-spacing: 0.07em;
     text-transform: uppercase;
     color: var(--vscode-descriptionForeground, #888);
-    padding: 5px 8px 3px;
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
+.profile-ov-search {
+    flex: 1 1 84px;
+    min-width: 56px;
+    background: var(--vscode-input-background, #3c3c3c);
+    color: var(--vscode-input-foreground, #d4d4d4);
+    border: 1px solid var(--vscode-input-border, #555);
+    border-radius: 3px;
+    padding: 2px 5px;
+    font-family: inherit;
+    font-size: 0.917em;
+    outline: none;
+    box-sizing: border-box;
+}
+.profile-ov-search:focus { border-color: var(--vscode-focusBorder, #007fd4); }
+.profile-ov-search::placeholder { color: var(--vscode-input-placeholderForeground, #666); }
+.profile-ov-empty {
+    padding: 6px 8px 8px;
+    font-size: 0.833em;
+    color: var(--vscode-descriptionForeground, #888);
+}
+.profile-filtered-out { display: none !important; }
 .profile-ov-scroll { overflow-x: auto; }
 .profile-ov-scroll::-webkit-scrollbar { height: 4px; }
 .profile-ov-scroll::-webkit-scrollbar-thumb {
     background: var(--vscode-scrollbarSlider-background, #424242);
     border-radius: 2px;
 }
-.profile-ov-table { border-collapse: collapse; width: 100%; min-width: 270px; }
+.profile-ov-table { border-collapse: collapse; width: 100%; min-width: 320px; }
 .profile-ov-table thead th {
     font-size: 0.75em;
     font-weight: 600;
@@ -416,13 +447,56 @@ button .codicon {
 .profile-ov-table td:first-child { padding-left: 8px; color: var(--vscode-descriptionForeground, #888); font-size: 0.833em; }
 .profile-ov-row { cursor: pointer; }
 .profile-ov-row:hover td { background: var(--vscode-list-hoverBackground, #2a2d2e) !important; }
-.profile-ov-row:nth-child(even) td { background: rgba(255,255,255,0.02); }
+.profile-ov-row.ov-alt td { background: rgba(255,255,255,0.02); }
 .ov-col-name { max-width: 75px; overflow: hidden; text-overflow: ellipsis; display: block; }
 .ov-r { text-align: right; }
 .ov-null-cell { display: flex; align-items: center; gap: 3px; justify-content: flex-end; }
 .ov-null-bar-track { width: 24px; height: 3px; background: rgba(255,255,255,0.08); border-radius: 2px; overflow: hidden; flex-shrink: 0; }
 .ov-null-bar-fill { height: 100%; background: var(--vscode-charts-orange, #d18616); border-radius: 2px; }
 .ov-minmax { max-width: 72px; overflow: hidden; text-overflow: ellipsis; display: block; color: var(--vscode-descriptionForeground, #aaa); font-size: 0.833em; }
+
+/* ── Column distribution (issue #33) ── */
+.profile-hist {
+    display: flex;
+    align-items: flex-end;
+    gap: 1px;
+    height: 48px;
+    margin: 3px 0 2px;
+}
+.profile-hist-bar {
+    flex: 1 1 0;
+    min-width: 1px;
+    min-height: 2px;
+    background: rgba(90,171,255,0.5);
+    border-radius: 1px 1px 0 0;
+}
+.profile-hist-bar:hover { background: rgba(90,171,255,0.95); }
+.profile-hist-bar--empty { min-height: 0; }
+.profile-hist-axis {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 0.75em;
+    color: var(--vscode-descriptionForeground, #888);
+    padding-bottom: 2px;
+}
+.ov-spark-cell { width: 50px; overflow: hidden; }
+.ov-spark {
+    display: flex;
+    align-items: flex-end;
+    gap: 1px;
+    width: 44px;
+    max-width: 44px;
+    height: 13px;
+}
+.ov-spark-bar {
+    flex: 1 1 0;
+    min-width: 1px;
+    min-height: 1px;
+    background: rgba(90,171,255,0.5);
+    border-radius: 1px 1px 0 0;
+}
+.ov-spark-bar--empty { min-height: 0; }
 
 /* ── AG Grid Theme Override ── */
 .ag-theme-alpine-dark,
