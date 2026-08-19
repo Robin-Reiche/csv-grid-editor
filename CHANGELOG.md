@@ -2,6 +2,13 @@
 
 All notable changes to CSV Grid Editor are documented here.
 
+## [1.17.1] - 2026-08-19
+
+### Fixed
+- **A line break stays recognisable while wrapping** - With the wrap toggle on there was no way to tell whether a line ended because the value contains a line break or because it ran into the edge of the column. The `↵` chip is now drawn in both modes, so a break with a chip in front of it comes from the data and one without comes from the column. Reported by [@JeppeKlitgaard](https://github.com/JeppeKlitgaard) in [#29](https://github.com/Robin-Reiche/csv-grid-editor/issues/29), who builds tables by hand and wraps them to read the full text. The toggle is called **Wrap cell text** now, which is what it always did.
+- **Copying a single multi-line cell** - `Ctrl+C` on one cell put the raw value on the clipboard, so a cell with a line break arrived in Excel as three separate cells and pasting it back into the grid produced three rows. It is quoted now, the same way copying a selected range has always done it. Ordinary values are unchanged.
+- **Auto-fit makes room for the chips** - Auto-fit measured the raw value while the grid draws a chip for every control character and, since 1.17.0, for every line break. A chip is several times wider than the character it replaces, and a line break even collapses to a single space when it is measured as text, so a column with such a value came out too narrow and the value it was fitted to still ended in an ellipsis. The measurement now builds the cell exactly the way the grid draws it. Cells with chips are also kept out of the calibration step, where their mixed content skewed the correction factor for every column.
+
 ## [1.17.0] - 2026-08-14
 
 ### Added
@@ -10,7 +17,7 @@ All notable changes to CSV Grid Editor are documented here.
 - **Wrap multi-line cells** - A new toolbar toggle next to the color-columns button. With it on, cells break at their line breaks and each row grows to fit its tallest cell. It stays off by default because measuring every row costs time on large files, and the setting is remembered across files and sessions like zoom and column colors.
 
 ### Known limitation
-- The three large-file modes for files over 10 MB (**Show Head**, **Show Tail**, **Paged View**) split the file on line breaks without looking at quotes, so a cell containing one is torn apart there. Those modes are read-only previews, **Open Full File** is not affected.
+- The three large-file modes for files over 10 MB (**Show Head**, **Show Tail**, **Paged View**) split the file on line breaks without looking at quotes, so a cell containing one is torn apart there. Those modes are read-only previews, **Open Full File** is not affected. Tracked as [#32](https://github.com/Robin-Reiche/csv-grid-editor/issues/32).
 
 ## [1.16.0] - 2026-08-13
 
