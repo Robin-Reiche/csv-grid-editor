@@ -23,11 +23,13 @@ export const state = {
     // mirror of the persisted flag.
     colorMode: false,
 
-    // Wrap multi-line cells — when on, cells break at their line breaks and rows
-    // grow to fit (AG Grid wrapText + autoHeight); when off, the row height stays
-    // fixed and the renderer marks each line break with a chip instead. Persisted
-    // globally via VS Code globalState (csvGridEditor.wrapText) like colorMode.
-    // In-memory mirror of the persisted flag. See features/wrap-text.ts.
+    // Wrap cell text — when on, a value wraps at its own line breaks AND at the
+    // column edge, and rows grow to fit (AG Grid wrapText + autoHeight); when
+    // off, the row height stays fixed and anything too wide is clipped. The chip
+    // marking a real line break is drawn in both modes, so a wrap can always be
+    // told apart from a break in the data. Persisted globally via VS Code
+    // globalState (csvGridEditor.wrapText) like colorMode. In-memory mirror of
+    // the persisted flag. See features/wrap-text.ts.
     wrapText: false,
     autoFitCache: null as any,
     autoFitCacheZoom: -1,

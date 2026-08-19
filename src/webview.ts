@@ -119,7 +119,7 @@ export function getWebviewContent(
         <button id="btn-profile"       title="Column Profile"><i class="codicon codicon-graph"></i></button>
         <button id="btn-columns"       title="Show / hide columns"><i class="codicon codicon-checklist"></i></button>
         <button id="btn-colormode"     title="Color columns. A distinct, theme-aware tint per column"><i class="codicon codicon-symbol-color"></i></button>
-        <button id="btn-wraptext"      title="Wrap multi-line cells. Line breaks inside a cell get their own line"><i class="codicon codicon-word-wrap"></i></button>
+        <button id="btn-wraptext"      title="Wrap cell text. Rows grow so long values and line breaks stay readable"><i class="codicon codicon-word-wrap"></i></button>
         <div    class="separator"></div>
         <button id="btn-find-replace"  title="Find &amp; Replace (${mod}F)"><i class="codicon codicon-search"></i></button>
         <div    class="separator"></div>

@@ -60,7 +60,7 @@ For files larger than 10 MB you get a quick menu to open the full file, preview 
 - **Column Resize** - Drag column borders to adjust width manually
 - **Zoom** - Scale the grid from 60% to 200% with the toolbar buttons or keyboard shortcuts. The zoom level shows in the toolbar.
 - **Control Characters** - Invisible control characters inside a value show as a small chip with the character's abbreviation instead of an unnamed box, so you can tell which one it is. Hover it for the full name. The value itself is untouched, so editing, copy and save still carry the original character.
-- **Multi-line cells** - A cell that holds a line break shows a small `↵` chip at every break, so you can see it is more than one line even though the row keeps its height. The toolbar's **Wrap multi-line cells** button switches to real wrapping, where each row grows to fit its tallest cell. The setting is remembered across files and sessions.
+- **Multi-line cells** - A cell that holds a line break shows a small `↵` chip at every break, so you can see it is more than one line even though the row keeps its height. The toolbar's **Wrap cell text** button lets rows grow instead, so long values and line breaks are readable in full. The chip stays visible there too, which is what tells you whether a line ended because the value breaks or because it ran into the edge of the column. The setting is remembered across files and sessions.
 - **Theme Integration** - Automatically adapts to your VS Code color theme (dark or light)
 
 ![CSV Grid Editor toolbar with auto-fit, zoom, find and replace, export and column profile buttons](https://raw.githubusercontent.com/Robin-Reiche/csv-grid-editor/master/images/toolbar.png)

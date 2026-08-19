@@ -5,10 +5,10 @@
 //      must quote the cell again, and re-parsing must yield the same matrix —
 //      otherwise saving a file the grid opened would rewrite it into a
 //      different one.
-//   2. The break is visible without wrapping. splitControlChars(v, true) marks
-//      it, so a cell drawn on one fixed-height line still reads as multi-line.
-//      Called WITHOUT the flag it must behave exactly as before, since that is
-//      what the chip renderer relies on for wrap mode.
+//   2. The break is visible. splitControlChars(v, true) marks it, which is how
+//      the grid tells a real line break apart from a wrap at the column edge.
+//      Called WITHOUT the flag it must still behave exactly as it did before
+//      the flag existed, which is what the control-character tests rely on.
 //   3. Auto-fit sizes a wrapped column by the longest line, not by every line
 //      laid end to end.
 //
@@ -70,7 +70,7 @@ test('a cell edited into a multi-line value round-trips', () => {
 
 // ── display ──────────────────────────────────────────────────────────────────
 
-test('without the flag a line break is not marked (wrap mode)', () => {
+test('without the flag a line break is not marked (the old default)', () => {
     assert.strictEqual(hasControlChars('a\nb'), false);
     assert.deepStrictEqual(splitControlChars('a\nb'), [{ type: 'text', text: 'a\nb' }]);
 });

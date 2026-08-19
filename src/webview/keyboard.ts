@@ -1,4 +1,5 @@
 import { state } from './state';
+import { tsvCell } from './utils/csv';
 import { undo, redo } from './features/undo-redo';
 import { zoomIn, zoomOut } from './features/zoom';
 import { openFindBar } from './features/find-replace';
@@ -29,7 +30,11 @@ export function setupKeyboard(): void {
                 const rowNode = state.gridApi.getDisplayedRowAtIndex(state.focusedCellRowIndex);
                 if (rowNode?.data) {
                     const val = rowNode.data[state.focusedCellColId];
-                    writeToClipboard(val != null ? String(val) : '');
+                    // Quote the same way the range copy does (range-select.ts).
+                    // Without it a cell holding a line break arrives in Excel as
+                    // three separate cells, and pasting it back into the grid
+                    // creates three rows. tsvCell leaves ordinary values alone.
+                    writeToClipboard(val != null ? tsvCell(String(val)) : '');
                     e.preventDefault();
                 }
             }

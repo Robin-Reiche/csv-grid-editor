@@ -2,6 +2,7 @@ import { state, getNumCols } from '../state';
 import { showLoader, hideLoader } from '../utils/loader';
 import { buildGrid } from '../grid/builder';
 import { longestLine } from '../utils/csv';
+import { paint } from '../grid/control-char-cell';
 
 export function measureTextWidths(): { colId: string; width: number }[] {
     const { data, colTypes } = state;
@@ -76,10 +77,18 @@ export function measureTextWidths(): { colId: string; width: number }[] {
     const ctx    = canvas.getContext('2d')!;
     ctx.font = `400 ${fontSize}px ${fontFamily}`;
 
-    // What a value takes up horizontally depends on the wrap mode: wrapped, a
-    // multi-line value only needs its longest line; unwrapped it is drawn on one
-    // line, chips and all, so the whole value counts.
-    const widthText = (v: string): string => state.wrapText ? longestLine(v) : v;
+    // What a value takes up horizontally depends on the wrap mode. Wrapped, the
+    // column only has to hold the value's longest LINE, and anything past that
+    // wraps by design; unwrapped, the value is drawn on one line, chips and all,
+    // so the whole thing counts.
+    const widthText = (v: string): string => {
+        if (!state.wrapText) return v;
+        const line = longestLine(v);
+        // Every line of a multi-line value except the last one ends with a chip,
+        // and the chip needs room or it wraps onto the next line by itself. The
+        // trailing break makes the renderer draw one while measuring.
+        return line === v ? line : line + '\n';
+    };
 
     const topCandidates: string[][] = [];
     for (let c = 0; c < numCols; c++) {
@@ -176,6 +185,11 @@ export function measureTextWidths(): { colId: string; width: number }[] {
             // Handle both structures: nested (.ag-cell > .ag-cell-value) and
             // combined (.ag-cell.ag-cell-value on one element, e.g. row-index).
             const textEl: HTMLElement = cell.querySelector<HTMLElement>('.ag-cell-value') ?? cell;
+            // A cell holding chips mixes text nodes and chip spans, so
+            // textContent (which includes the chip labels) and the Range below
+            // (which covers a single text node) describe different things.
+            // Calibrating on that would skew the factor for every column.
+            if (textEl.querySelector('.csv-ctrl-char')) return;
             const text = textEl.textContent?.trim() ?? '';
             if (text.length < 8) return; // skip trivially short values
             // Find the first non-empty text node (works even with nested spans)
@@ -235,7 +249,13 @@ export function measureTextWidths(): { colId: string; width: number }[] {
         probe.style.fontWeight = '400';
         let maxBodyW = 0;
         for (const val of topCandidates[c]) {
-            probe.textContent = val;
+            // Fill the probe through the cell renderer, not with plain text: a
+            // control character or a line break is drawn as a chip, which is
+            // several times wider than the single character it replaces. Setting
+            // textContent would measure the character (a line break even
+            // collapses to one space under white-space: nowrap) and the column
+            // would come out too narrow to show the value it was fitted to.
+            paint(probe, val);
             const w = Math.ceil(probe.offsetWidth * calibFactor) + CELL_EXTRA;
             if (w > maxBodyW) maxBodyW = w;
         }

@@ -634,14 +634,31 @@ body.vscode-high-contrast #grid-container.cm-on {
     background: rgba(94,148,214,0.18);
     color: #7ab0e8;
     font-weight: 400;
+    /* Plain inline, unlike the control-character chip above. An inline-block is
+       an atomic box, and a line may break either side of one even without a
+       space there, which left the chip stranded alone on a line whenever the
+       word before it only just failed to fit. Inline makes it part of that
+       word again. line-height follows the cell so a wrapped row keeps its
+       rhythm. */
+    display: inline;
+    line-height: inherit;
 }
 
 /* Wrap mode (features/wrap-text.ts). AG Grid's own .ag-cell-wrap-text sets
-   white-space: normal, which collapses a line break into a single space —
-   pre-wrap keeps the break and still wraps lines that are too long for the
-   column. */
+   white-space: normal, which collapses a line break into a single space.
+   pre-wrap keeps every break the value really contains and still wraps a line
+   that is wider than its column, which is the mode issue #29 asked for. The two
+   stay distinguishable because the renderer marks a real break with a chip in
+   this mode too. */
 :is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-cell-wrap-text {
     white-space: pre-wrap !important;
+    /* AG Grid sets word-break: break-word here, which allows a break inside a
+       word and therefore also between the last word and the chip that follows
+       it, leaving the chip alone on a line of its own. Break at word boundaries
+       instead, and let overflow-wrap step in only for a word that would not fit
+       the column at all. */
+    word-break: normal;
+    overflow-wrap: break-word;
     line-height: 1.4;
     padding-top: 3px;
     padding-bottom: 3px;

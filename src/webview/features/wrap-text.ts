@@ -1,19 +1,26 @@
 import { state } from '../state';
 
 /**
- * Wrap multi-line cells. A toolbar toggle for how a cell that contains a line
- * break is drawn (issue #29):
+ * Wrap cell text. A toolbar toggle for how a value that does not fit its column
+ * is drawn (issue #29):
  *
- *  - OFF (default): every row keeps the fixed row height, and the cell renderer
- *    draws each line break as a small chip (grid/control-char-cell.ts) so the
- *    value still reads as multi-line without the row growing.
- *  - ON: cells break at their line breaks and each row grows to fit its tallest
- *    cell (AG Grid `wrapText` + `autoHeight`).
+ *  - OFF (default): every row keeps the fixed row height and a value too wide
+ *    for its column is clipped, as it always was.
+ *  - ON: the value wraps and the row grows to fit its tallest cell (AG Grid
+ *    `wrapText` + `autoHeight`). It breaks both at the line breaks the value
+ *    really contains and wherever a line is wider than the column.
+ *
+ * Wrapping at the column edge as well is deliberate: the author of #29 builds
+ * tables by hand, few rows with a lot of text each, and wants to see all of it.
+ * What made that ambiguous was telling a real line break apart from a wrap, and
+ * that is solved in the renderer instead: the chip for a line break is drawn in
+ * both modes (grid/control-char-cell.ts), so a break with a chip in front of it
+ * comes from the data and one without comes from the column edge.
  *
  * Off by default on purpose. `autoHeight` measures every rendered row, which
  * costs on large files, and a variable row height contradicts the fixed
  * --ag-row-height the zoom steps set (features/zoom.ts) — so this is a mode the
- * user asks for, not something a single multi-line cell forces on the file.
+ * user asks for, not something the file forces on them.
  *
  * The toggle is persisted globally (VS Code globalState) exactly like zoom and
  * color mode, so it is remembered across every CSV file and every session.
@@ -48,8 +55,6 @@ export function applyWrapText(): void {
         api.setGridOption('columnDefs', defs);
     }
 
-    // The chip is drawn only while wrapping is off, so every cell has to repaint
-    // in both directions.
     api.refreshCells({ force: true });
     // Turning autoHeight off leaves the measured heights behind; the rows only
     // go back to the fixed --ag-row-height when they are reset explicitly.
