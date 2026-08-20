@@ -2,6 +2,13 @@
 
 All notable changes to CSV Grid Editor are documented here.
 
+## [1.18.3] - 2026-08-20
+
+### Fixed
+- **Auto-fit stops cutting off the longest value in a column** - After fitting, the single widest value in a column could still end in an ellipsis, and only that one, because it is the value the column is sized to and everything else has slack ([#30](https://github.com/Robin-Reiche/csv-grid-editor/issues/30)). On a 5,235-row export the one 174-character title in the column ended at "…Kaufman Astoria Studios, New Y".
+- The cause was a step meant to help. Auto-fit widens every column before measuring, so the visible cells it calibrates its measurement against are not truncated, and it did that with 3000 px. That is wider than any editor pane, and the grid only renders the columns that are in view, so from the second column on there was nothing left on the page to compare against. The calibration was down to the first column alone, it only accepts values of eight characters or more, and on a file whose first column holds a row number it found none at all. It kept its neutral factor and corrected nothing, which was exactly the correction the widest value needed. Columns are widened to 400 px for that step now, wide enough that ordinary values are not cut off and narrow enough that several columns stay in view, and the cell measurement carries two percent on top of it for what is left over.
+- Auto-fit also got a little quicker on wide files. Two diagnostic blocks left over from chasing this scanned every row of every column on each run and only ever printed anything for one particular file.
+
 ## [1.18.2] - 2026-08-20
 
 ### Fixed
