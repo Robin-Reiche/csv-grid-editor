@@ -5,7 +5,12 @@ export function parseCsv(text: string, delimiter: string, trimFields: boolean = 
     let row: string[] = [];
     let field = '';
     let inQuotes = false;
-    const finalize = (s: string) => trimFields ? s.trim() : s;
+    // Trimming used to take line breaks with it, because a break is whitespace
+    // too: a value typed with a trailing empty line was written to the file
+    // correctly and came back a line shorter (issue #31). Only horizontal
+    // whitespace goes now, so the padding people want gone still goes and the
+    // line structure of a multi-line value survives.
+    const finalize = (s: string) => trimFields ? s.replace(/^[^\S\r\n]+|[^\S\r\n]+$/g, '') : s;
 
     for (let i = 0; i < text.length; i++) {
         const ch = text[i];

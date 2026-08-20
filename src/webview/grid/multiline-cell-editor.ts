@@ -22,14 +22,25 @@
 const MIN_WIDTH_PX = 220;
 const MAX_ROWS     = 12;
 
+// A <textarea> hands its value back with every line break normalised to LF, per
+// the HTML spec. A cell that came out of the file as CRLF therefore turned into
+// LF the moment it was edited, even when the edit never went near the break
+// (issue #31), and saving wrote back a line nobody had touched. Whatever style
+// the value carried into the editor is the style it carries out.
+export function restoreLineBreaks(original: string, edited: string): string {
+    return original.includes('\r\n') ? edited.replace(/\r?\n/g, '\r\n') : edited;
+}
+
 export class MultilineCellEditor {
     private eGui!: HTMLDivElement;
     private eTextArea!: HTMLTextAreaElement;
     private focusAfterAttached = false;
     private highlightAll = false;
+    private originalValue = '';
 
     init(params: any): void {
         const value = params.value == null ? '' : String(params.value);
+        this.originalValue = value;
 
         let start = value;
         if (params.cellStartedEdit) {
@@ -85,7 +96,7 @@ export class MultilineCellEditor {
     }
 
     getValue(): string {
-        return this.eTextArea.value;
+        return restoreLineBreaks(this.originalValue, this.eTextArea.value);
     }
 
     isPopup(): boolean {
