@@ -2,6 +2,16 @@
 
 All notable changes to CSV Grid Editor are documented here.
 
+## [1.18.1] - 2026-08-20
+
+### Fixed
+- **Show Head, Show Tail and Paged View stop tearing multi-line cells apart** - The three preview modes for files over 10 MB split the file on every line break without looking at quotes, so a cell holding a line break was read as several rows ([#32](https://github.com/Robin-Reiche/csv-grid-editor/issues/32)). Two things came out of that, and the second one is the loud one.
+- The counts were wrong everywhere. On a 12 MB file holding 90,999 rows the banner claimed 96,463 in **Show Head** and 96,462 in **Show Tail**, off by every extra line a multi-line cell brings with it, and off from each other because head and tail counted on different paths.
+- Wherever a cut landed inside a quoted cell, the quotes stopped pairing up from that point on and every comma in the rest of the buffer became a column separator. **Show Tail** on that file returned 58 rows instead of 1,000, most of them fragments of a single value standing as their own row, with 84 and 100 columns where the file has 8. **Paged View** had it per page: page 6 of the 55 MB file showed 28 rows instead of 500 and all of them were wrong, while pages 1 to 4 read perfectly fine, which is what made this easy to miss.
+- All three now count and cut **records** instead of lines, so a preview shows exactly the rows **Open Full File** would show. On the same two files: 1,000 rows in head and in tail with the real total next to them, and 835 pages holding all 417,107 rows instead of 885 pages holding 395,005 of them. This closes the known limitation noted in 1.17.0.
+- **The paged view finally says how much of the file it is showing** - **Show Head** and **Show Tail** write into the preview banner, **Paged View** never did, so the strip at the top of the grid stayed empty. It reads "Page 1 of 835, 417,107 rows in total" now and follows the paging. That number is only worth showing since the index counts records rather than lines, before this it would have claimed 442,136.
+- **Show Tail** also stopped pulling the whole file into memory. It used to build an array of every line just to take the last thousand. One scan collects the record boundaries now, then only the header and the tail range are read back.
+
 ## [1.18.0] - 2026-08-19
 
 ### Added
