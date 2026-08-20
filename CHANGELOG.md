@@ -2,6 +2,12 @@
 
 All notable changes to CSV Grid Editor are documented here.
 
+## [1.18.4] - 2026-08-20
+
+### Fixed
+- **The paged view reads the delimiter the file really uses** - A file over 50 MB written with semicolons or pipes opened in **Paged View** as a single column per row, the whole record sitting inside it ([#34](https://github.com/Robin-Reiche/csv-grid-editor/issues/34)). The delimiter is detected from the text the editor has just read, and the paged view has none of its own: its pages are served on demand, so detection looked at an empty string, found no separator to count and fell back to the comma. It reads the header line off the page index now, which is built a moment earlier and has been to disk already, so it costs nothing extra. **Show Head**, **Show Tail** and **Open Full File** were never affected, they all have their text in hand when detection runs, and a `.tsv` is still decided by its extension.
+- **Switching the delimiter by hand no longer throws you back to page 1** - The re-parse works off the text the grid was handed, and in paged mode that was always the first page. Changing the delimiter on page 6 therefore showed page 1 while the pagination bar still said page 6. Every page that arrives keeps that text in step now.
+
 ## [1.18.3] - 2026-08-20
 
 ### Fixed
