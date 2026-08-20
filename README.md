@@ -56,7 +56,7 @@ For files larger than 10 MB you get a quick menu to open the full file, preview 
 - **Interactive Grid** - Powered by AG Grid with alternating row colors and grid lines
 - **Column Type Detection** - Each column header shows a type badge (Integer, Float, Text, Boolean, Date, DateTime, Time) inferred from the column's values. The type updates automatically whenever the data changes, whether from cell edits, find and replace or undo and redo.
 - **Sort & Filter** - Click any column header to sort. Use the filter icon to search within a column. Active filters show in the toolbar with a one-click clear button.
-- **Auto-Fit Columns** - Fit all columns to their content with one click. Double-click a resize handle to auto-fit a single column.
+- **Auto-Fit Columns** - Fit all columns to their content with one click, measured across every row of the file and not just the ones on screen. Double-click a resize handle to auto-fit a single column.
 - **Column Resize** - Drag column borders to adjust width manually
 - **Zoom** - Scale the grid from 60% to 200% with the toolbar buttons or keyboard shortcuts. The zoom level shows in the toolbar.
 - **Control Characters** - Invisible control characters inside a value show as a small chip with the character's abbreviation instead of an unnamed box, so you can tell which one it is. Hover it for the full name. The value itself is untouched, so editing, copy and save still carry the original character.
@@ -67,7 +67,7 @@ For files larger than 10 MB you get a quick menu to open the full file, preview 
 
 ### Editing
 - **Inline Editing** - Double-click any cell to edit its value inline. Changes are tracked and saved back to the file. Press `Enter` to commit and jump to the cell below in the same column, the same as Excel and Google Sheets, so you can type down a column quickly.
-- **Line breaks inside a cell** - `Alt+Enter` inserts a line break while you are editing, the same key Excel uses, and `Shift+Enter` and `Ctrl+Enter` do the same. The editor grows as the value gets taller. `Enter` still commits, so nothing changes for single-line values. The file is written the way the CSV standard asks for it, with the cell in quotes, so other tools read it back correctly.
+- **Line breaks inside a cell** - `Alt+Enter` inserts a line break while you are editing, the same key Excel uses, and `Shift+Enter` and `Ctrl+Enter` do the same. The editor grows as the value gets taller. `Enter` still commits, so nothing changes for single-line values. The file is written the way the CSV standard asks for it, with the cell in quotes, so other tools read it back correctly, and it comes back into the grid unchanged: a break at the start or the end of a value survives, and a cell that arrived as CRLF is saved as CRLF even after you edit it.
 - **Insert & Delete rows and columns** - Right-click a row to insert above or below or to delete it, and right-click a column header to insert left or right or to delete. Select several rows (drag or `Shift`+click the `#` gutter) or several columns (`Shift`+click the headers) first to insert or delete that many at once, anchored to the selection edge, just like a spreadsheet.
 - **Undo / Redo** - Full multi-step undo and redo stack (`Ctrl+Z` / `Ctrl+Y`)
 - **Save / Save As** - Uses VS Code's native save mechanism and supports Save As to a new location
@@ -158,8 +158,9 @@ Opening a file larger than **10 MB** shows a Quick Pick with these options:
 | Open as Plain Text | Fast read-only raw text view |
 | Paged View | Browse in 500-row pages *(only shown for files > 50 MB)* |
 
+- All three preview modes read **records**, not lines. A cell holding a line break spans several lines in the file, so cutting on line breaks would tear it into pieces and throw off every count. Head, tail and each page therefore show exactly the rows **Open Full File** would show, and the totals match it.
 - **Head / Tail previews** show a banner with the total row count and how many rows are displayed
-- **Paged View** - A pagination bar (first / previous / next / last) lets you navigate pages efficiently without loading the entire file into memory. Editing is disabled in this mode.
+- **Paged View** - A pagination bar (first / previous / next / last) lets you navigate pages efficiently without loading the entire file into memory. The banner says which page you are on and how many rows the file holds. Editing is disabled in this mode.
 - **Plain Text View** - Displays the raw file content in a monospace editor-style view without any grid features
 
 ### Auto-Reload
@@ -235,7 +236,7 @@ Yes. Select a range with click and drag, press `Ctrl+C`, and the cells are copie
 Yes. The delimiter is auto-detected on open (comma, semicolon, tab), and `.tsv` files always use tab. You can also switch the delimiter by hand from the toolbar to comma, semicolon, tab or pipe.
 
 ### Will it handle large CSV files?
-Yes. Files over 10 MB show a quick menu to open the full file, preview just the head or tail, browse in pages or open as plain text. Paged view lets you move through very large files without loading everything into memory.
+Yes. Files over 10 MB show a quick menu to open the full file, preview just the head or tail, browse in pages or open as plain text. Paged view lets you move through very large files without loading everything into memory. Every mode reads whole records, so a cell containing a line break stays in one piece.
 
 ---
 

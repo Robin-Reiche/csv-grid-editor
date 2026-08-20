@@ -62,7 +62,7 @@ Thanks to [@JunchengLu218](https://github.com/JunchengLu218) for the request and
 - **Wrap multi-line cells** - A new toolbar toggle next to the color-columns button. With it on, cells break at their line breaks and each row grows to fit its tallest cell. It stays off by default because measuring every row costs time on large files, and the setting is remembered across files and sessions like zoom and column colors.
 
 ### Known limitation
-- The three large-file modes for files over 10 MB (**Show Head**, **Show Tail**, **Paged View**) split the file on line breaks without looking at quotes, so a cell containing one is torn apart there. Those modes are read-only previews, **Open Full File** is not affected. Tracked as [#32](https://github.com/Robin-Reiche/csv-grid-editor/issues/32).
+- The three large-file modes for files over 10 MB (**Show Head**, **Show Tail**, **Paged View**) split the file on line breaks without looking at quotes, so a cell containing one is torn apart there. Those modes are read-only previews, **Open Full File** is not affected. Tracked as [#32](https://github.com/Robin-Reiche/csv-grid-editor/issues/32) and fixed in 1.18.1.
 
 ## [1.16.0] - 2026-08-13
 
