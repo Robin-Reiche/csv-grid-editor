@@ -182,11 +182,16 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         }
 
         const delimiter = this.detectDelimiter(uri.fsPath, content);
-        const doc = new CsvDocument(uri, content, delimiter, isPreview, previewMode, totalLineCount, isChunked);
 
-        if (isChunked) {
-            doc.pageIndex = await buildPageIndex(uri.fsPath, PAGE_SIZE);
-        }
+        // The paged view learns its row total only from the index, and the preview
+        // banner needs that number, so the index is built before the document
+        // rather than hung on it afterwards. Header included, the way head and
+        // tail count it.
+        const pageIndex = isChunked ? await buildPageIndex(uri.fsPath, PAGE_SIZE) : null;
+        if (pageIndex) totalLineCount = pageIndex.totalRows + 1;
+
+        const doc = new CsvDocument(uri, content, delimiter, isPreview, previewMode, totalLineCount, isChunked);
+        doc.pageIndex = pageIndex;
 
         return doc;
     }

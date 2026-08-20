@@ -13,6 +13,15 @@ export function handlePageData(msg: { pageNumber: number; totalPages: number; te
     const pi   = document.getElementById('page-info');
     if (pi) pi.textContent = 'Page ' + (msg.pageNumber + 1) + ' / ' + msg.totalPages;
 
+    // Head and tail say how much of the file is on screen, the paged view used to
+    // say nothing at all: the banner rendered empty because only those two modes
+    // ever filled it.
+    const previewEl = document.getElementById('preview-text');
+    if (previewEl) {
+        previewEl.textContent = `Page ${(msg.pageNumber + 1).toLocaleString()} of ${msg.totalPages.toLocaleString()}, `
+            + `${Math.max(0, TOTAL_LINE_COUNT - 1).toLocaleString()} rows in total (read-only preview)`;
+    }
+
     const btnPrev  = document.getElementById('btn-page-prev')  as HTMLButtonElement | null;
     const btnFirst = document.getElementById('btn-page-first') as HTMLButtonElement | null;
     const btnNext  = document.getElementById('btn-page-next')  as HTMLButtonElement | null;

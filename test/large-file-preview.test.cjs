@@ -181,6 +181,18 @@ async function main() {
         assert.deepStrictEqual(seen, dataRows(want));
     });
 
+    // ── wiring ──────────────────────────────────────────────────────────────
+
+    await test('the paged view hands its record total to the banner', () => {
+        const root = path.join(__dirname, '..');
+        const provider = fs.readFileSync(path.join(root, 'src', 'csvEditorProvider.ts'), 'utf8');
+        assert.ok(/totalLineCount = pageIndex\.totalRows \+ 1;/.test(provider),
+            'the paged view no longer passes its row total on, the banner would read 0');
+        const pagination = fs.readFileSync(path.join(root, 'src', 'webview', 'features', 'pagination.ts'), 'utf8');
+        assert.ok(/preview-text/.test(pagination),
+            'nothing fills the preview banner in the paged view any more');
+    });
+
     console.log('');
     if (failures) {
         console.error(failures + ' large-file preview test(s) failed');
