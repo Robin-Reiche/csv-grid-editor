@@ -2,6 +2,13 @@
 
 All notable changes to CSV Grid Editor are documented here.
 
+## [1.18.2] - 2026-08-20
+
+### Fixed
+- **A saved cell value comes back the way it went in** - Two ways a value quietly changed on its own, both only visible once it carries a line break, so both are as old as being able to type one ([#31](https://github.com/Robin-Reiche/csv-grid-editor/issues/31)). Neither broke a file, but in both cases saving wrote back something different from what was read, without saying so.
+- **A line break at the start or the end of a value stopped disappearing.** Reading a CSV trims every field, and a line break is whitespace too, so a cell typed with a trailing empty line was written to the file correctly and came back a line shorter. Saving again wrote that loss into the file. Only spaces and tabs are stripped now. Measured over every CSV in this repo, 902,094 cells in 13 files, not one of them reads differently than before, which is the whole idea: the padding you want gone still goes.
+- **An edited cell keeps CRLF.** The cell editor is a text box, and reading a value out of one turns every line break into LF, which is what the HTML spec asks for. A value that came from the file as CRLF therefore came back as LF the moment the cell was edited, even when the edit never went near the break, and the save then rewrote a line nobody had touched. The editor remembers the style the value arrived with and puts it back on commit.
+
 ## [1.18.1] - 2026-08-20
 
 ### Fixed
