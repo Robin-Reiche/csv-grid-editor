@@ -58,6 +58,14 @@ export function measureTextWidths(): { colId: string; width: number }[] {
     const CELL_EXTRA   = cellPad + 20;
     const HEADER_EXTRA = cellPad + 44;
 
+    // A measurement that comes out slightly short is invisible on every value
+    // except one: the widest in the column, because that is the only value the
+    // column is sized to, and it is the one that ends in an ellipsis when the
+    // estimate misses (issue #30). Two percent of a 1,200 px column is 24 px,
+    // which nobody sees, and it is the difference between the longest title
+    // fitting and not.
+    const SAFETY = 1.02;
+
     // How many of the widest cell values to DOM-measure per column.
     // Canvas is used for a fast O(n) pre-scan; only the top-N candidates
     // are then measured with offsetWidth for pixel-perfect browser accuracy.
@@ -122,25 +130,6 @@ export function measureTextWidths(): { colId: string; width: number }[] {
         // Deduplicate (same string may appear in multiple rows)
         const deduped = [...new Set(top.map(t => t.val))];
         topCandidates.push(deduped);
-
-        // ── Diagnostic: track whether the LONGEST "I'll Be There" made the cut ──
-        {
-            let beV = '';
-            for (let r = 0; r < bodyRows.length; r++) {
-                const v = bodyRows[r]?.[c] != null ? String(bodyRows[r][c]) : '';
-                if (v.includes("I'll Be There") && v.length > beV.length) beV = v;
-            }
-            if (beV) {
-                const inTop = deduped.includes(beV);
-                const m2 = ctx.measureText(beV);
-                const cw2 = (m2.actualBoundingBoxLeft !== undefined && m2.actualBoundingBoxRight !== undefined
-                    && (Math.abs(m2.actualBoundingBoxLeft) + m2.actualBoundingBoxRight) > 0)
-                    ? Math.abs(m2.actualBoundingBoxLeft) + m2.actualBoundingBoxRight : m2.width;
-                const w2 = letterSpacing > 0 ? cw2 + (beV.length - 1) * letterSpacing : cw2;
-                const topMin = top.length > 0 ? top.reduce((mn, t) => Math.min(mn, t.w), Infinity) : 0;
-                console.log(`[AutoFit-rank] col_${c} "I'll Be There..."(len=${beV.length}) canvasScore=${w2.toFixed(1)} inTop50=${inTop} top50min=${topMin.toFixed(1)}`);
-            }
-        }
     }
 
     // ── Phase 2: exact DOM measurement ───────────────────────────────────────
@@ -256,7 +245,7 @@ export function measureTextWidths(): { colId: string; width: number }[] {
             // collapses to one space under white-space: nowrap) and the column
             // would come out too narrow to show the value it was fitted to.
             paint(probe, val);
-            const w = Math.ceil(probe.offsetWidth * calibFactor) + CELL_EXTRA;
+            const w = Math.ceil(probe.offsetWidth * calibFactor * SAFETY) + CELL_EXTRA;
             if (w > maxBodyW) maxBodyW = w;
         }
 
@@ -266,24 +255,6 @@ export function measureTextWidths(): { colId: string; width: number }[] {
             ` (headerW=${Math.ceil(headerW)}, maxBodyW=${Math.ceil(maxBodyW)})` +
             ` top1="${(topCandidates[c][0] ?? '').substring(0, 60)}"`
         );
-
-        // ── Diagnostic: force-measure the LONGEST "I'll Be There" via probe ──
-        {
-            let beV = '';
-            for (let r = 0; r < bodyRows.length; r++) {
-                const v = bodyRows[r]?.[c] != null ? String(bodyRows[r][c]) : '';
-                if (v.includes("I'll Be There") && v.length > beV.length) beV = v;
-            }
-            if (beV) {
-                const inTop = topCandidates[c].includes(beV);
-                probe.style.fontWeight = '400';
-                probe.textContent = beV;
-                const rawProbeW = probe.offsetWidth;
-                const calibW = Math.ceil(rawProbeW * calibFactor);
-                const needed = calibW + CELL_EXTRA;
-                console.log(`[AutoFit-probe] col_${c} "I'll Be There..."(len=${beV.length}) inTop50=${inTop} rawProbe=${rawProbeW} calibrated=${calibW} needed=${needed} colWidth=${finalW} ok=${needed <= finalW}`);
-            }
-        }
 
         colState.push({ colId: 'col_' + c, width: finalW });
     }
@@ -304,8 +275,8 @@ export function toggleAutoFit(): void {
 
         // ── Step 0 → Step 1 → Step 2 (sequential, each nested in previous) ─────
         //
-        // Step 0: expand all columns to 3000 px so visible cells are never
-        //   truncated when the calibration probe runs in Step 1.
+        // Step 0: widen the columns so the visible cells the calibration reads
+        //   in Step 1 are not truncated.
         // Step 1: measureTextWidths() — canvas ranking, DOM probe with calib.
         // Step 2: Phase B scrollWidth check on now-visible cells.
         //
@@ -313,9 +284,18 @@ export function toggleAutoFit(): void {
         // next step reads cell dimensions.
 
         requestAnimationFrame(() => requestAnimationFrame(() => {
-            // Step 0: pre-expand
+            // Step 0: pre-expand. Wide enough that ordinary values are not cut
+            // off, narrow enough that several columns stay inside the viewport.
+            // This used to be 3000 px, which pushed every column but the first
+            // out of the DOM: AG Grid renders only the columns in view, so the
+            // calibration below had nothing left to compare against but the
+            // first one. On a file whose first column holds short values it
+            // found none at all, fell back to a factor of 1.0 and corrected
+            // nothing, which is how the longest value in a column could still
+            // end up truncated (issue #30).
+            const CALIB_WIDTH = 400;
             const numCols = getNumCols(state.data);
-            const expandedState = Array.from({ length: numCols }, (_, i) => ({ colId: `col_${i}`, width: 3000 }));
+            const expandedState = Array.from({ length: numCols }, (_, i) => ({ colId: `col_${i}`, width: CALIB_WIDTH }));
             state.gridApi!.applyColumnState({ state: expandedState });
 
             requestAnimationFrame(() => requestAnimationFrame(() => {
