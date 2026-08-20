@@ -32,6 +32,10 @@ export function handlePageData(msg: { pageNumber: number; totalPages: number; te
     if (btnNext)  btnNext.disabled  = msg.pageNumber >= msg.totalPages - 1;
     if (btnLast)  btnLast.disabled  = msg.pageNumber >= msg.totalPages - 1;
 
+    // Switching the delimiter by hand re-splits this text (features/delimiter.ts),
+    // so it has to be the page on display. It used to keep whatever the first page
+    // held, which sent you back to page 1 while the bar still said page 6 (#34).
+    state.rawCsvText = msg.text;
     state.data = parseCsv(msg.text, state.currentDelimiter);
     buildGrid();
     hideLoader();

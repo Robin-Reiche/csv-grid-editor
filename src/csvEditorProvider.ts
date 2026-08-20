@@ -181,14 +181,18 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             content = new TextDecoder().decode(raw);
         }
 
-        const delimiter = this.detectDelimiter(uri.fsPath, content);
-
         // The paged view learns its row total only from the index, and the preview
         // banner needs that number, so the index is built before the document
         // rather than hung on it afterwards. Header included, the way head and
         // tail count it.
         const pageIndex = isChunked ? await buildPageIndex(uri.fsPath, PAGE_SIZE) : null;
         if (pageIndex) totalLineCount = pageIndex.totalRows + 1;
+
+        // The paged view holds no text of its own, its pages are served on demand,
+        // so detection used to look at an empty string, find no separator to count
+        // and fall back to the comma whatever the file used (issue #34). The index
+        // has already read the header line, which is exactly what detection wants.
+        const delimiter = this.detectDelimiter(uri.fsPath, pageIndex ? pageIndex.headerLine : content);
 
         const doc = new CsvDocument(uri, content, delimiter, isPreview, previewMode, totalLineCount, isChunked);
         doc.pageIndex = pageIndex;
