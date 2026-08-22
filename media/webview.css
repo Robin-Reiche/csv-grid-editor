@@ -1,5 +1,28 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
+/* ── Type badge palette ── */
+:root {
+    --csv-badge-num-bg:  rgba(55,148,255,0.18);
+    --csv-badge-num-fg:  #5aabff;
+    --csv-badge-str-bg:  rgba(156,220,254,0.12);
+    --csv-badge-str-fg:  #9cdcfe;
+    --csv-badge-bool-bg: rgba(78,201,176,0.18);
+    --csv-badge-bool-fg: #4ec9b0;
+    --csv-badge-date-bg: rgba(204,167,0,0.18);
+    --csv-badge-date-fg: #e5bc4b;
+}
+
+body:not(.vscode-dark):not(.vscode-high-contrast) {
+    --csv-badge-num-bg:  rgba(0,90,180,0.11);
+    --csv-badge-num-fg:  #0a5aa8;
+    --csv-badge-str-bg:  rgba(0,120,160,0.11);
+    --csv-badge-str-fg:  #0b6483;
+    --csv-badge-bool-bg: rgba(0,140,110,0.13);
+    --csv-badge-bool-fg: #0a6b58;
+    --csv-badge-date-bg: rgba(170,120,0,0.16);
+    --csv-badge-date-fg: #7d5400;
+}
+
 body {
     font-family: var(--vscode-font-family, "Segoe UI", sans-serif);
     background: var(--vscode-editor-background, #1e1e1e);
@@ -263,10 +286,10 @@ button .codicon {
     line-height: 1.5;
     font-family: var(--vscode-font-family, "Segoe UI", sans-serif);
 }
-.profile-type-badge.type-integer, .profile-type-badge.type-float { background: rgba(55,148,255,0.18); color: #5aabff; }
-.profile-type-badge.type-string  { background: rgba(156,220,254,0.12); color: #9cdcfe; }
-.profile-type-badge.type-boolean { background: rgba(78,201,176,0.18); color: #4ec9b0; }
-.profile-type-badge.type-date, .profile-type-badge.type-datetime, .profile-type-badge.type-time { background: rgba(204,167,0,0.18); color: #e5bc4b; }
+.profile-type-badge.type-integer, .profile-type-badge.type-float { background: var(--csv-badge-num-bg); color: var(--csv-badge-num-fg); }
+.profile-type-badge.type-string  { background: var(--csv-badge-str-bg); color: var(--csv-badge-str-fg); }
+.profile-type-badge.type-boolean { background: var(--csv-badge-bool-bg); color: var(--csv-badge-bool-fg); }
+.profile-type-badge.type-date, .profile-type-badge.type-datetime, .profile-type-badge.type-time { background: var(--csv-badge-date-bg); color: var(--csv-badge-date-fg); }
 
 .profile-col-name {
     font-weight: 600;
@@ -691,8 +714,8 @@ body.vscode-high-contrast #grid-container.cm-on {
     margin: 0 1px;
     border-radius: 3px;
     vertical-align: baseline;
-    background: rgba(204,167,0,0.18);
-    color: #e5bc4b;
+    background: var(--csv-badge-date-bg);
+    color: var(--csv-badge-date-fg);
     font-family: var(--vscode-font-family, "Segoe UI", sans-serif);
     /* Keeps the abbreviation out of any text selection dragged over the cell —
        copying must yield the real character, never the label. */
@@ -780,13 +803,13 @@ body.vscode-high-contrast #grid-container.cm-on {
     line-height: 1.5;
     font-family: var(--vscode-font-family, "Segoe UI", sans-serif);
 }
-:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-header-cell.col-type-integer  .ag-header-cell-label::before { content: '123';  background: rgba(55,148,255,0.18); color: #5aabff; }
-:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-header-cell.col-type-float    .ag-header-cell-label::before { content: '1.0';  background: rgba(55,148,255,0.18); color: #5aabff; }
-:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-header-cell.col-type-string   .ag-header-cell-label::before { content: 'abc';  background: rgba(156,220,254,0.12); color: #9cdcfe; }
-:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-header-cell.col-type-boolean  .ag-header-cell-label::before { content: 'T/F';  background: rgba(78,201,176,0.18); color: #4ec9b0; }
-:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-header-cell.col-type-date     .ag-header-cell-label::before { content: 'date'; background: rgba(204,167,0,0.18); color: #e5bc4b; }
-:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-header-cell.col-type-datetime .ag-header-cell-label::before { content: 'dt';   background: rgba(204,167,0,0.18); color: #e5bc4b; }
-:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-header-cell.col-type-time     .ag-header-cell-label::before { content: 'time'; background: rgba(204,167,0,0.18); color: #e5bc4b; }
+:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-header-cell.col-type-integer  .ag-header-cell-label::before { content: '123';  background: var(--csv-badge-num-bg);  color: var(--csv-badge-num-fg); }
+:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-header-cell.col-type-float    .ag-header-cell-label::before { content: '1.0';  background: var(--csv-badge-num-bg);  color: var(--csv-badge-num-fg); }
+:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-header-cell.col-type-string   .ag-header-cell-label::before { content: 'abc';  background: var(--csv-badge-str-bg);  color: var(--csv-badge-str-fg); }
+:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-header-cell.col-type-boolean  .ag-header-cell-label::before { content: 'T/F';  background: var(--csv-badge-bool-bg); color: var(--csv-badge-bool-fg); }
+:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-header-cell.col-type-date     .ag-header-cell-label::before { content: 'date'; background: var(--csv-badge-date-bg); color: var(--csv-badge-date-fg); }
+:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-header-cell.col-type-datetime .ag-header-cell-label::before { content: 'dt';   background: var(--csv-badge-date-bg); color: var(--csv-badge-date-fg); }
+:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-header-cell.col-type-time     .ag-header-cell-label::before { content: 'time'; background: var(--csv-badge-date-bg); color: var(--csv-badge-date-fg); }
 
 .ag-tooltip {
     background: var(--vscode-editorHoverWidget-background, #252526);
