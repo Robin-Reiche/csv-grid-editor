@@ -2,6 +2,15 @@
 
 All notable changes to CSV Grid Editor are documented here.
 
+## [1.18.5] - 2026-08-22
+
+### Fixed
+- **The column type badges stay readable on a light theme** - The small chips that say what a column holds (`123`, `1.0`, `abc`, `T/F`, `date`) were drawn in colors picked for a dark background, and nothing swapped them out when the editor was light ([#35](https://github.com/Robin-Reiche/csv-grid-editor/pull/35)). The label sat at a contrast of 1.3 to 2.0 against the chip behind it, depending on the theme's panel color, where 4.5 is the readable minimum. It was there, you just had to lean in. Both places the chips appear were affected, the column header and the Column Profile panel. They carry a second palette for light themes now and read between 5.0 and 5.8. Dark themes keep exactly the colors they had.
+- **The control character chip stopped disappearing with them** - The chip that names a control character in a cell (`LF`, `CR`, `TAB`) shares the colors of the date badge, so it was just as faint on a light background, 1.6 against the editor background. It reads at 5.6 now.
+- The switch keys off the same rule the grid already uses to pick its own light or dark styling, so a high contrast light theme gets the light palette too rather than falling back to the dark one.
+
+Thanks to [@yukina3230](https://github.com/yukina3230) for the change.
+
 ## [1.18.4] - 2026-08-20
 
 ### Fixed
