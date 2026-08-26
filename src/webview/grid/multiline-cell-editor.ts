@@ -1,12 +1,20 @@
+import { updateButtons } from '../features/undo-redo';
+
 // ── Cell editor: multi-line aware ────────────────────────────────────────────
 // AG Grid's stock text editor is an <input>, which cannot hold a line break — so
 // a cell could never be given one from the grid (issue #29), even though the
 // parser and the writer have carried them all along (a quoted field may span
 // lines per RFC 4180; see utils/csv.ts).
 //
-// This is a <textarea> that grows with its content and adds the three shortcuts
-// people reach for: Alt+Enter (what Excel uses), Shift+Enter and Ctrl/Cmd+Enter.
-// Plain Enter still commits, so nothing about single-line editing changes.
+// This is a <textarea> that grows with its content and adds the two shortcuts
+// people reach for: Alt+Enter (what Excel uses) and Shift+Enter. Plain Enter
+// still commits, so nothing about single-line editing changes.
+//
+// Ctrl/Cmd+Enter used to insert a break here too. It inserts a row below the
+// current one now (issue #36) — the job VS Code's own editor puts on that key,
+// and the one thing a grid has that a text editor does not is rows. Alt+Enter
+// is the break every spreadsheet agrees on, so the break kept a key people
+// already know.
 //
 // It is a POPUP editor, not an inline one: an inline editor is clipped to the
 // row height, which would hide the second line while it is being typed.
@@ -31,12 +39,83 @@ export function restoreLineBreaks(original: string, edited: string): string {
     return original.includes('\r\n') ? edited.replace(/\r?\n/g, '\r\n') : edited;
 }
 
+// Which Enter combination puts a line break into the cell instead of reaching
+// the grid. Kept out of the class so it can be asserted on without a DOM.
+// Ctrl/Cmd+Enter is deliberately absent: keyboard.ts claims it for "insert a row
+// below" (issue #36), and a key cannot mean two things at once.
+export function isLineBreakKey(e: { key: string; altKey: boolean; shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }): boolean {
+    if (e.key !== 'Enter') return false;
+    if (e.ctrlKey || e.metaKey) return false;
+    return e.altKey || e.shiftKey;
+}
+
+// ── The cell's own undo history ──────────────────────────────────────────────
+// While a cell is open for editing, undo has to mean "take back what I am typing
+// in here" and leave the editor open, the way a spreadsheet does. The browser's
+// built-in textarea undo cannot carry that on its own: setting .value from code
+// wipes its history, and this editor does exactly that when it inserts a line
+// break, which is how Alt+Enter ended up not being undoable at all.
+//
+// So the editor keeps its own. Kept as plain functions over a plain object so the
+// stepping rules can be asserted on without a DOM.
+export type TextHistory = { entries: string[]; index: number };
+
+export function newHistory(value: string): TextHistory {
+    return { entries: [value], index: 0 };
+}
+
+function countBreaks(s: string): number {
+    let n = 0;
+    for (let i = 0; i < s.length; i++) if (s[i] === '\n') n++;
+    return n;
+}
+
+// Where one undo step ends and the next begins. Word by word, which is what a
+// browser's own text field does and what VS Code does: one step per word rather
+// than one per letter (too slow to undo anything) or one for the whole edit (too
+// blunt to take back a typo). A line break, a deletion and a paste each get a
+// step of their own as well — Alt+Enter has to be undoable by itself, which is
+// the whole reason this exists.
+export function startsNewUndoStep(prev: string, next: string): boolean {
+    if (next.length < prev.length) return true;                // deletion
+    if (countBreaks(next) !== countBreaks(prev)) return true;  // line break added
+    if (next.length - prev.length > 1) return true;            // paste, not typing
+    // The space belongs to the word in front of it, so the step ends AFTER the
+    // space: the first letter of the next word opens the next one.
+    return /\s$/.test(prev);
+}
+
+// Takes a new value into the history. Anything that had been undone is dropped,
+// the way redo works everywhere. The value the editor opened with is never
+// overwritten, so the first thing typed always leaves a step to come back to.
+export function recordHistory(h: TextHistory, next: string): void {
+    const prev = h.entries[h.index];
+    if (next === prev) return;
+    h.entries.length = h.index + 1;
+    if (h.index === 0 || startsNewUndoStep(prev, next)) {
+        h.entries.push(next);
+        h.index++;
+    } else {
+        h.entries[h.index] = next;
+    }
+}
+
+// Moves one step back (-1) or forward (+1). Returns the value to show, or null
+// when there is nothing in that direction.
+export function stepHistory(h: TextHistory, delta: -1 | 1): string | null {
+    const target = h.index + delta;
+    if (target < 0 || target > h.entries.length - 1) return null;
+    h.index = target;
+    return h.entries[target];
+}
+
 export class MultilineCellEditor {
     private eGui!: HTMLDivElement;
     private eTextArea!: HTMLTextAreaElement;
     private focusAfterAttached = false;
     private highlightAll = false;
     private originalValue = '';
+    private history: TextHistory = newHistory('');
 
     init(params: any): void {
         const value = params.value == null ? '' : String(params.value);
@@ -67,10 +146,11 @@ export class MultilineCellEditor {
         this.eTextArea.rows = 1;
         this.eTextArea.spellcheck = false;
         this.eTextArea.value = start;
+        this.history = newHistory(start);
         this.eGui.appendChild(this.eTextArea);
 
         this.eTextArea.addEventListener('keydown', this.onKeyDown);
-        this.eTextArea.addEventListener('input', this.autoGrow);
+        this.eTextArea.addEventListener('input', this.onInput);
     }
 
     getGui(): HTMLElement {
@@ -79,6 +159,7 @@ export class MultilineCellEditor {
 
     afterGuiAttached(): void {
         this.autoGrow();
+        updateButtons(); // this editor's history is empty, so both go grey
         if (!this.focusAfterAttached) return;
         this.eTextArea.focus();
         if (this.highlightAll) {
@@ -111,9 +192,10 @@ export class MultilineCellEditor {
         const key = e.key;
 
         // The whole point of the feature. preventDefault as well as stopPropagation:
-        // Ctrl+Enter and Shift+Enter would otherwise ALSO insert the browser's own
-        // line break on top of ours.
-        if (key === 'Enter' && (e.altKey || e.shiftKey || e.ctrlKey || e.metaKey)) {
+        // Shift+Enter would otherwise ALSO insert the browser's own line break on
+        // top of ours. Ctrl/Cmd+Enter is not in here — it must reach the document
+        // handler that inserts a row below (keyboard.ts).
+        if (isLineBreakKey(e)) {
             e.preventDefault();
             e.stopPropagation();
             this.insertNewline();
@@ -130,13 +212,57 @@ export class MultilineCellEditor {
         }
     };
 
+    // Called by the grid's undo/redo (features/undo-redo.ts) while this editor is
+    // open. Reports whether there was a step to take, and never closes the editor:
+    // the cell's text is what is being undone here, not the last grid action.
+    undoText(): boolean {
+        return this.applyHistory(-1);
+    }
+
+    redoText(): boolean {
+        return this.applyHistory(1);
+    }
+
+    // What the toolbar's Undo and Redo buttons go by while this editor is open.
+    // Without them the buttons kept reporting the GRID's stacks, so on a file with
+    // nothing undone yet they sat greyed out while there was plenty to take back
+    // inside the cell.
+    canUndo(): boolean {
+        return this.history.index > 0;
+    }
+
+    canRedo(): boolean {
+        return this.history.index < this.history.entries.length - 1;
+    }
+
+    private applyHistory(delta: -1 | 1): boolean {
+        const value = stepHistory(this.history, delta);
+        if (value === null) return false;
+        this.eTextArea.value = value;
+        this.eTextArea.focus();
+        this.eTextArea.setSelectionRange(value.length, value.length);
+        this.autoGrow();
+        updateButtons();
+        return true;
+    }
+
+    private onInput = (): void => {
+        recordHistory(this.history, this.eTextArea.value);
+        this.autoGrow();
+        updateButtons();
+    };
+
     private insertNewline(): void {
         const ta    = this.eTextArea;
         const start = ta.selectionStart ?? ta.value.length;
         const end   = ta.selectionEnd   ?? start;
         ta.value = ta.value.slice(0, start) + '\n' + ta.value.slice(end);
         ta.selectionStart = ta.selectionEnd = start + 1;
+        // Setting .value from code fires no input event, so the break has to be
+        // taken into the history by hand or Ctrl+Z would step straight over it.
+        recordHistory(this.history, ta.value);
         this.autoGrow();
+        updateButtons();
     }
 
     // Height follows the content. 'auto' first so the textarea can also SHRINK

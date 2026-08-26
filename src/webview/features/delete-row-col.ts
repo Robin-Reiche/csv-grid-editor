@@ -1,6 +1,6 @@
 import { state, getNumCols } from '../state';
 import { pushUndo, notifyChange } from './undo-redo';
-import { refreshGrid } from '../grid/refresh';
+import { refreshGrid, focusCell } from '../grid/refresh';
 import { recomputeColTypes } from '../grid/column-type';
 import { buildGrid } from '../grid/builder';
 import {
@@ -136,6 +136,62 @@ function insertRows(anchorDisplayIndex: number, position: 'above' | 'below', cou
     refreshGrid();
     recomputeColTypes();
     notifyChange();
+}
+
+// The keyboard's entry points into the three row actions (issue #36):
+//   Ctrl/Cmd+Enter        insert below   (VS Code: insert line below)
+//   Ctrl/Cmd+Shift+Enter  insert above   (VS Code: insert line above)
+//   Ctrl/Cmd+Shift+K      delete row     (VS Code: delete line)
+// All three run the same code paths as the context menu, so a sort, a filter and
+// a multi-row selection behave identically whichever way the action was asked
+// for. focusedCellRowIndex is null while a frozen (pinned) row holds the focus —
+// builder.ts never records those — so a frozen row does nothing here, which is
+// what the context menu does there too.
+//
+// Returns the focused display row, or null if there is nothing to act on.
+function focusedRowForShortcut(): number | null {
+    if (IS_PREVIEW || !state.gridApi) return null;
+    return state.focusedCellRowIndex;
+}
+
+// The rows a row shortcut applies to: the whole gutter selection when the
+// focused row sits inside one, otherwise just the focused row. Same rule the
+// context menu uses.
+function shortcutRows(rowIndex: number): number[] {
+    const selected = getSelectedRowDisplayIndices();
+    return selected.length > 1 && selected.includes(rowIndex) ? selected : [rowIndex];
+}
+
+export function insertRowAtFocus(position: 'above' | 'below'): void {
+    // Read the anchor BEFORE committing: stopEditing() can move the focus on, and
+    // the row to insert next to is the one that was being edited, not the next one.
+    const rowIndex = focusedRowForShortcut();
+    if (rowIndex === null) return;
+
+    // Commit the half-typed value first. refreshGrid() further down replaces the
+    // row data under the open editor, and an uncommitted edit would go with it.
+    if (state.isCellEditing) state.gridApi.stopEditing();
+
+    const rows = shortcutRows(rowIndex);
+    const anchor = position === 'above' ? Math.min(...rows) : Math.max(...rows);
+    insertRows(anchor, position, rows.length);
+
+    // Land on the first row that was just inserted, the way VS Code leaves the
+    // caret on the line it made. Without this the two directions would disagree:
+    // insert-below keeps the index of the row you came from, insert-above hands
+    // that same index to the new blank row.
+    focusCell(position === 'above' ? anchor : anchor + 1, state.focusedCellColId);
+}
+
+export function deleteRowsAtFocus(): void {
+    const rowIndex = focusedRowForShortcut();
+    if (rowIndex === null) return;
+
+    // Cancel, not commit: the row is about to be deleted, so writing the typed
+    // value into it first would only add an undo step for a row that is gone.
+    if (state.isCellEditing) state.gridApi.stopEditing(true);
+
+    deleteRows(shortcutRows(rowIndex));
 }
 
 // baseIndex is the reference column (data index). 'left' inserts before it,

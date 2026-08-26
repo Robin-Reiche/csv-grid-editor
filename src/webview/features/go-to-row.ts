@@ -1,5 +1,6 @@
 import { state } from '../state';
 import { closeAllPopups } from './popups';
+import { focusCell } from '../grid/refresh';
 
 // Brief flash applied to the target row to confirm navigation. We toggle a
 // dynamic <style> tag matching .ag-row[row-index="N"] (same approach as the
@@ -111,6 +112,15 @@ function closePopover(): void {
     clearError();
 }
 
+// Dismissing without jumping — Escape, Cancel, or the shortcut pressed again.
+// The input had the browser focus, so the grid needs it back or the arrow keys
+// stay dead. NOT used by the click-outside path: a click that lands on a cell
+// focuses that cell itself, and pulling focus back here would undo it.
+function dismissPopover(): void {
+    closePopover();
+    focusCell(state.focusedCellRowIndex, state.focusedCellColId);
+}
+
 export function setupGoToRow(): void {
     if (IS_CHUNKED) return; // Button is rendered disabled — wire nothing.
 
@@ -124,12 +134,12 @@ export function setupGoToRow(): void {
     });
 
     document.getElementById('goto-go')?.addEventListener('click', jumpToRow);
-    document.getElementById('goto-cancel')?.addEventListener('click', closePopover);
+    document.getElementById('goto-cancel')?.addEventListener('click', dismissPopover);
 
     const input = document.getElementById('goto-input') as HTMLInputElement | null;
     input?.addEventListener('keydown', e => {
         if (e.key === 'Enter')  { e.preventDefault(); jumpToRow(); }
-        if (e.key === 'Escape') { e.preventDefault(); closePopover(); }
+        if (e.key === 'Escape') { e.preventDefault(); dismissPopover(); }
     });
     input?.addEventListener('input', clearError);
 
@@ -149,7 +159,7 @@ export function setupGoToRow(): void {
             e.preventDefault();
             const pop = document.getElementById('goto-popover');
             if (pop?.classList.contains('hidden')) openPopover();
-            else closePopover();
+            else dismissPopover();
         }
     });
 }

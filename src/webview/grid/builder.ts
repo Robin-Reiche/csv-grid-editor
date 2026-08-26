@@ -297,8 +297,11 @@ export function buildGrid(): void {
                 state.focusedCellRowIndex = null;
             }
         },
-        onCellEditingStarted: () => { state.isCellEditing = true; },
-        onCellEditingStopped:  () => { state.isCellEditing = false; },
+        // updateButtons on both edges: while a cell is open the Undo/Redo buttons
+        // follow that cell's own history, and on the way out they go back to the
+        // grid's stacks (features/undo-redo.ts).
+        onCellEditingStarted: () => { state.isCellEditing = true;  updateButtons(); },
+        onCellEditingStopped:  () => { state.isCellEditing = false; updateButtons(); },
 
         // Range selection (Excel-style) — hand-rolled since AG Grid Community has no
         // built-in cell-range selection.

@@ -67,8 +67,8 @@ For files larger than 10 MB you get a quick menu to open the full file, preview 
 
 ### Editing
 - **Inline Editing** - Double-click any cell to edit its value inline. Changes are tracked and saved back to the file. Press `Enter` to commit and jump to the cell below in the same column, the same as Excel and Google Sheets, so you can type down a column quickly.
-- **Line breaks inside a cell** - `Alt+Enter` inserts a line break while you are editing, the same key Excel uses, and `Shift+Enter` and `Ctrl+Enter` do the same. The editor grows as the value gets taller. `Enter` still commits, so nothing changes for single-line values. The file is written the way the CSV standard asks for it, with the cell in quotes, so other tools read it back correctly, and it comes back into the grid unchanged: a break at the start or the end of a value survives, and a cell that arrived as CRLF is saved as CRLF even after you edit it.
-- **Insert & Delete rows and columns** - Right-click a row to insert above or below or to delete it, and right-click a column header to insert left or right or to delete. Select several rows (drag or `Shift`+click the `#` gutter) or several columns (`Shift`+click the headers) first to insert or delete that many at once, anchored to the selection edge, just like a spreadsheet.
+- **Line breaks inside a cell** - `Alt+Enter` inserts a line break while you are editing, the same key Excel uses, and `Shift+Enter` does the same. The editor grows as the value gets taller. `Enter` still commits, so nothing changes for single-line values. The file is written the way the CSV standard asks for it, with the cell in quotes, so other tools read it back correctly, and it comes back into the grid unchanged: a break at the start or the end of a value survives, and a cell that arrived as CRLF is saved as CRLF even after you edit it.
+- **Insert & Delete rows and columns** - Right-click a row to insert above or below or to delete it, and right-click a column header to insert left or right or to delete. Select several rows (drag or `Shift`+click the `#` gutter) or several columns (`Shift`+click the headers) first to insert or delete that many at once, anchored to the selection edge, just like a spreadsheet. Three keys do the same without reaching for the mouse: `Ctrl+Enter` inserts a row below the one you are on, `Ctrl+Shift+Enter` inserts one above and `Ctrl+Shift+K` deletes it. They are the keys VS Code's own editor already uses for a line below, a line above and deleting a line. All three work while you are still editing a cell, an insert commits the value you typed first and a delete drops it along with the row, and with several rows selected they apply to the whole selection just like the context menu.
 - **Undo / Redo** - Full multi-step undo and redo stack (`Ctrl+Z` / `Ctrl+Y`)
 - **Save / Save As** - Uses VS Code's native save mechanism and supports Save As to a new location
 
@@ -193,8 +193,10 @@ If you ever need to pull in the file on disk by hand, run **CSV Grid: Reload fro
 | `Ctrl++` / `Ctrl+=` | Zoom in |
 | `Ctrl+-` | Zoom out |
 | `Ctrl+F` / `Ctrl+H` | Open Find & Replace bar |
-| `Alt+Enter` | Insert a line break *(while editing a cell)* |
-| `Shift+Enter` / `Ctrl+Enter` | Insert a line break *(while editing a cell)* |
+| `Alt+Enter` / `Shift+Enter` | Insert a line break *(while editing a cell)* |
+| `Ctrl+Enter` | Insert a row below the current one |
+| `Ctrl+Shift+Enter` | Insert a row above the current one |
+| `Ctrl+Shift+K` | Delete the current row *(or the selected rows)* |
 | `Enter` | Next match *(in Find bar)* |
 | `Shift+Enter` | Previous match *(in Find bar)* |
 | `Esc` | Close the open menu, dropdown, popup or Find bar |

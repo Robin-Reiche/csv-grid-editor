@@ -2,6 +2,7 @@ import { state } from '../state';
 import { pushUndo, notifyChange } from './undo-redo';
 import { scheduleRecomputeColTypes } from '../grid/column-type';
 import { dataRowIndexForFindMatch } from '../grid/row-mapping';
+import { focusCell } from '../grid/refresh';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -131,6 +132,9 @@ export function closeFindBar(): void {
     state.findMatches    = [];
     state.findMatchIndex = -1;
     refreshRows(prevRows);
+    // The find input had the browser focus, so closing the bar would otherwise
+    // leave it on nothing and the arrow keys dead until a cell was clicked.
+    focusCell(state.focusedCellRowIndex, state.focusedCellColId);
 }
 
 // ── replace ───────────────────────────────────────────────────────────────────

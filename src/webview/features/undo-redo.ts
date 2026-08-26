@@ -34,7 +34,27 @@ export function pushUndo(): void {
     updateButtons();
 }
 
+// While a cell is open for editing, undo and redo belong to that cell: they take
+// back what is being typed and leave the editor open, the way a spreadsheet does.
+// Reaching past the unfinished edit to the last committed action would undo
+// something the user is not even looking at. Both the toolbar buttons and Ctrl+Z
+// come through here, so both behave the same.
+type OpenCellEditor = {
+    undoText(): boolean;
+    redoText(): boolean;
+    canUndo(): boolean;
+    canRedo(): boolean;
+};
+
+function openCellEditor(): OpenCellEditor | null {
+    if (!state.isCellEditing || !state.gridApi) return null;
+    const open = state.gridApi.getCellEditorInstances?.() as any[] | undefined;
+    return open?.find(i => typeof i?.undoText === 'function') ?? null;
+}
+
 export function undo(): void {
+    const editor = openCellEditor();
+    if (editor) { editor.undoText(); return; }
     if (state.undoStack.length === 0) return;
     state.redoStack.push(snapshot());
     restore(state.undoStack.pop()!);
@@ -46,6 +66,8 @@ export function undo(): void {
 }
 
 export function redo(): void {
+    const editor = openCellEditor();
+    if (editor) { editor.redoText(); return; }
     if (state.redoStack.length === 0) return;
     state.undoStack.push(snapshot());
     restore(state.redoStack.pop()!);
@@ -59,8 +81,12 @@ export function redo(): void {
 export function updateButtons(): void {
     const u = document.getElementById('btn-undo') as HTMLButtonElement | null;
     const r = document.getElementById('btn-redo') as HTMLButtonElement | null;
-    if (u) u.disabled = state.undoStack.length === 0;
-    if (r) r.disabled = state.redoStack.length === 0;
+    // While a cell is open the buttons belong to that cell's own history, exactly
+    // like the keys do. Reading the grid's stacks there left them greyed out with
+    // a cell full of typing waiting to be taken back.
+    const editor = openCellEditor();
+    if (u) u.disabled = editor ? !editor.canUndo() : state.undoStack.length === 0;
+    if (r) r.disabled = editor ? !editor.canRedo() : state.redoStack.length === 0;
 }
 
 export function notifyChange(): void {
@@ -76,6 +102,14 @@ export function notifyChange(): void {
 }
 
 export function setupUndoRedo(): void {
-    document.getElementById('btn-undo')?.addEventListener('click', undo);
-    document.getElementById('btn-redo')?.addEventListener('click', redo);
+    const undoBtn = document.getElementById('btn-undo');
+    const redoBtn = document.getElementById('btn-redo');
+    // Never let the button take the browser focus. The grid commits and closes a
+    // cell editor as soon as it loses focus (stopEditingWhenCellsLoseFocus), so a
+    // plain click would close the editor first and then undo the value it had just
+    // written — which is exactly what it did before this line.
+    undoBtn?.addEventListener('mousedown', e => e.preventDefault());
+    redoBtn?.addEventListener('mousedown', e => e.preventDefault());
+    undoBtn?.addEventListener('click', undo);
+    redoBtn?.addEventListener('click', redo);
 }

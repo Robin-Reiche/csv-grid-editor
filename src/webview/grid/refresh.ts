@@ -62,8 +62,54 @@ export function syncColumnHeaders(): void {
     }
 }
 
+// Puts the browser focus back on a grid cell, clamped to what is still there.
+//
+// A rowData swap tears the cell elements down and builds them again, so the
+// browser focus that was sitting on the focused cell ends up on <body>. AG Grid
+// keeps drawing its focus ring, because its own focusedCellPosition survives, so
+// the grid LOOKS focused while every arrow key from then on goes nowhere and
+// only a mouse click puts the keyboard back in business. setFocusedCell moves
+// the real focus (it forces the browser focus, see gridApi.setFocusedCell), which
+// is the part the swap lost.
+//
+// Clamping is what makes deleting the last row land somewhere sensible: the old
+// index now points past the end, and the row that is now last is where a person
+// expects to be.
+export function focusCell(rowIndex: number | null, colId: string | null): void {
+    if (!state.gridApi || rowIndex === null || colId === null) return;
+    // Deferred one frame for the reason go-to-row already defers it: setFocusedCell
+    // races the row render and is dropped without a word when the row is not in the
+    // DOM yet, and a rowData swap is exactly that render. Queued calls keep their
+    // order, so a caller that re-focuses after us still wins.
+    requestAnimationFrame(() => {
+        if (!state.gridApi) return;
+        // Only ever take focus back while this view already has it. An external
+        // file change refreshes the grid too, and that must not pull the cursor
+        // out of whatever the user is typing in somewhere else.
+        if (!document.hasFocus()) return;
+        const row = clampRow(rowIndex, state.gridApi.getDisplayedRowCount());
+        if (row === null) return; // nothing but the header left
+        try { state.gridApi.setFocusedCell(row, colId); } catch {}
+    });
+}
+
+// The row a focus restore actually lands on, given how many rows are left.
+// Deleting the last row is the case this exists for: the remembered index now
+// points past the end, and one row up is where a person expects to be. null
+// means there is no row to focus at all.
+export function clampRow(rowIndex: number, rowCount: number): number | null {
+    if (rowCount < 1) return null;
+    return Math.max(0, Math.min(rowIndex, rowCount - 1));
+}
+
 export function refreshGrid(): void {
     if (!state.gridApi) return;
+    // Read the focus BEFORE the swap. Replacing the row data can dispatch a
+    // cellFocused event with no column, and builder.ts answers that by clearing
+    // the tracked coordinates — so after the swap there is nothing left to read.
+    const focusRow   = state.focusedCellRowIndex;
+    const focusColId = state.focusedCellColId;
+
     state.autoFitCache = null;
     state.colTypes = [];
 
@@ -79,6 +125,7 @@ export function refreshGrid(): void {
     const { body, pinnedTop } = partitionFrozenRows(rowData);
     state.gridApi.setGridOption('rowData', body);
     state.gridApi.setGridOption('pinnedTopRowData', pinnedTop);
+    focusCell(focusRow, focusColId);
     // refreshGrid only swaps rowData, so the row/column counters in the toolbar
     // and status bar would otherwise go stale after a delete/insert/paste/undo.
     updateCountsDisplay();
