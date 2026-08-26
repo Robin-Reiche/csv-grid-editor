@@ -2,6 +2,23 @@
 
 All notable changes to CSV Grid Editor are documented here.
 
+## [1.19.0] - 2026-08-26
+
+### Added
+- **`Ctrl+Enter` inserts a row below the one you are on** - Adding a row meant reaching for the mouse and the context menu, every single time ([#36](https://github.com/Robin-Reiche/csv-grid-editor/issues/36)). It is a key now, and it works while you are still editing a cell: the value you typed is committed first, then the blank row appears underneath it. An active sort, an active filter and a multi-row selection all behave exactly as they do from the context menu, because it is the same code path. A frozen row still inserts nothing, same as before.
+- The key was not free. It used to be a third way to put a line break into a cell, next to `Alt+Enter` and `Shift+Enter`, and both of those are untouched. `Alt+Enter` is the one Excel uses and the one most people already have in their fingers, so the line break kept a key nobody has to learn. `Ctrl+Enter` is what VS Code's own editor uses for a new line below, which is much closer to what it now does in the grid.
+- **`Ctrl+Shift+Enter` inserts a row above, `Ctrl+Shift+K` deletes one** - The other two keys VS Code puts on the same three jobs, so the grid does not ask anyone to learn a second set. Both follow the selection: with several rows picked in the `#` gutter they insert that many, or delete all of them, anchored to the selection edge, exactly as the context menu already did. A delete is a normal undo step, `Ctrl+Z` brings the rows back.
+
+### Fixed
+- **The arrow keys keep working after the grid changes** - Undo, redo, paste and every row insert or delete replace the grid's row data, and that quietly took the keyboard with it. The grid still drew its focus ring around a cell, so it looked ready, but the browser focus had dropped to nothing and no arrow key moved anything until a cell was clicked with the mouse again. The focus goes back onto the same cell after all of those now. Deleting the last row lands on the row that is now last, so you can keep going upwards from there.
+- Closing **Find & Replace** with `Esc` and dismissing **Go to row** with `Esc` or **Cancel** hand the keyboard back to the grid for the same reason: the text box had the focus and nothing ever took it back.
+- After an insert the focus sits on the new row, above or below, the way VS Code leaves the caret on the line it just made.
+- **`Ctrl+Shift+Z` redoes** - It never has, in any version. The check asked for a lower-case `z` while Shift was held, and a browser reports the upper-case letter whenever Shift is down, so no keystroke could ever satisfy it. Every letter shortcut accepts both cases now. Undo and redo also moved into the same early key handling the row shortcuts use, so nothing on the page gets to consume them first.
+- **`Ctrl+Z` inside an open cell takes back what you are typing** - While a cell was open for editing, `Ctrl+Z` reached past the unfinished edit and undid the last committed action instead, so typing `Alt+Enter` and then taking it back removed the row you had added a moment earlier and left the break sitting in the cell. An open cell keeps an undo of its own now: the text steps back and the editor stays open, the way a spreadsheet behaves. The steps are word by word, the way a browser's own text field and VS Code cut them, so one press takes back a word rather than a single letter or the whole edit at once. A line break, a deletion and a paste each get a step of their own, so `Alt+Enter` can be taken back without losing the words in front of it. `Ctrl+Y` and `Ctrl+Shift+Z` step forward again.
+- The toolbar's **Undo** and **Redo** buttons follow the open cell's history too, rather than sitting greyed out while the grid had nothing of its own to take back. They do the same as the keys and no longer close the editor. Clicking one used to pull the focus out of the cell, which commits the edit and shuts the editor, and the click then undid the value it had just written. Outside an open cell nothing about undo and redo changes.
+
+Thanks to [@z1lV3r](https://github.com/z1lV3r) for the request.
+
 ## [1.18.5] - 2026-08-22
 
 ### Fixed
