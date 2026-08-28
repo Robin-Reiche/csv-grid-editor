@@ -982,6 +982,37 @@ body.vscode-high-contrast #grid-container.cm-on {
 /* ── Cell focus ── */
 :is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-cell.ag-cell-focus { border-color: var(--vscode-focusBorder, #007fd4) !important; }
 
+/* ── Focused row ──
+   On a wide table the blue box around one cell is easy to lose track of: look
+   left at the row numbers and you no longer know which line you were on. So the
+   whole row gets a faint wash as well.
+
+   AG Grid already puts `ag-row-focus` on every DOM row of the focused line (one
+   per pinned container), so this needs no JS and follows the focus across the
+   frozen columns too.
+
+   Deliberately much weaker than the cell's own border: the row says "you are on
+   this line", the cell keeps saying "you are in this box". It is painted as a
+   background-IMAGE so the row's own striping (.ag-row-odd/.ag-row-even, both
+   !important background-colors) still shows through underneath, and so that
+   every cell highlight sitting on top of it (find match, duplicate row, range
+   selection, the column colour tint) keeps painting over it unchanged.
+
+   Two declarations of the same custom property on purpose: the rgba is the value
+   an engine without color-mix() keeps. */
+:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-row.ag-row-focus {
+    --csv-row-focus-tint: rgba(0, 127, 212, 0.11);
+    --csv-row-focus-tint: color-mix(in srgb, var(--vscode-focusBorder, #007fd4) 12%, transparent);
+    background-image: linear-gradient(var(--csv-row-focus-tint), var(--csv-row-focus-tint));
+}
+/* The '#' gutter is where the eye goes to answer "which line am I on", so the
+   marker is strongest there: a bar down the row's left edge and the number in
+   the accent colour. */
+:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-row-focus .ag-cell.row-index-cell {
+    box-shadow: inset 2px 0 0 var(--vscode-focusBorder, #007fd4);
+    color: var(--vscode-focusBorder, #007fd4);
+}
+
 /* ── Row index selection ── handled via dynamic <style id="_row-hl"> in builder.ts ── */
 
 /* ── Loading overlay ── */

@@ -49,6 +49,23 @@ export function isLineBreakKey(e: { key: string; altKey: boolean; shiftKey: bool
     return e.altKey || e.shiftKey;
 }
 
+// ── Getting the focus back after a Tab ───────────────────────────────────────
+// Once an edit has changed a value, AG Grid puts the browser focus back on the
+// CELL a moment later (rowRenderer.restoreFocusedCell, which runs off a
+// setTimeout). For AG Grid's own editors that is where the input sits, so it
+// lands right. This one is a popup and lives OUTSIDE the cell, so the focus
+// landed on the cell's bare div and every keystroke went nowhere. That is what
+// Tab did: it moved on, opened the next cell for editing, and then nothing typed
+// there ever arrived. Whenever the focus ends up on the cell this editor is open
+// over, it belongs in the textarea.
+//
+// Kept pure so the rule can be asserted on without a DOM. `attached` is false
+// once the editor has been closed and taken out of the page: the focus is on the
+// cell for a good reason then (Enter, Escape, a click) and must be left alone.
+export function shouldReclaimFocus(attached: boolean, active: unknown, eGridCell: unknown): boolean {
+    return attached && eGridCell != null && active === eGridCell;
+}
+
 // ── The cell's own undo history ──────────────────────────────────────────────
 // While a cell is open for editing, undo has to mean "take back what I am typing
 // in here" and leave the editor open, the way a spreadsheet does. The browser's
@@ -116,6 +133,7 @@ export class MultilineCellEditor {
     private highlightAll = false;
     private originalValue = '';
     private history: TextHistory = newHistory('');
+    private eGridCell: HTMLElement | null = null;
 
     init(params: any): void {
         const value = params.value == null ? '' : String(params.value);
@@ -149,8 +167,11 @@ export class MultilineCellEditor {
         this.history = newHistory(start);
         this.eGui.appendChild(this.eTextArea);
 
+        this.eGridCell = params.eGridCell ?? null;
+
         this.eTextArea.addEventListener('keydown', this.onKeyDown);
         this.eTextArea.addEventListener('input', this.onInput);
+        this.eTextArea.addEventListener('blur', this.onBlur);
     }
 
     getGui(): HTMLElement {
@@ -169,6 +190,15 @@ export class MultilineCellEditor {
             this.eTextArea.setSelectionRange(end, end);
         }
     }
+
+    // Deferred by a timeout on purpose: AG Grid's own restore runs off one too,
+    // so answering synchronously here would just be overwritten by it.
+    private onBlur = (): void => {
+        setTimeout(() => {
+            if (!shouldReclaimFocus(this.eTextArea.isConnected, document.activeElement, this.eGridCell)) return;
+            this.eTextArea.focus();
+        });
+    };
 
     // Called when focus returns to a cell that is already editing (Tab-back).
     focusIn(): void {
