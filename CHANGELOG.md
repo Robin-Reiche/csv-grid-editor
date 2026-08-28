@@ -2,6 +2,14 @@
 
 All notable changes to CSV Grid Editor are documented here.
 
+## [1.20.0] - 2026-08-28
+
+### Added
+- **The row you are on is marked, not just the cell** - On a wide table the blue box around a single cell is easy to lose. You look left to read the row numbers and you no longer know which line you were on. The whole row carries a faint tint of the theme's focus color now, and the `#` gutter shows the number in that color behind a thin bar, so the line you are on is findable from either edge of the table. It is deliberately much lighter than the cell's own border: the row says which line, the cell keeps saying which box. Frozen columns are covered too. Find matches, duplicate rows, the range selection and the column colors all keep painting on top of it, unchanged.
+
+### Fixed
+- **Typing works in the cell `Tab` moved to** - Type a letter into a cell and it opens for editing, the way it always has. Press `Tab` and the cell to the right opens as well, but nothing typed there arrived, and no key brought it back. The cell editor is a popup and sits outside the cell it covers. After an edit the grid hands the keyboard back to the cell itself, which for its own editors is where the input lives and for this one is an empty box that swallows every keystroke. The editor takes the keyboard back now whenever it lands there, so `Tab`, type, `Tab`, type carries across a row. `Enter`, `Esc`, clicking away and the arrow keys are untouched.
+
 ## [1.19.0] - 2026-08-26
 
 ### Added
