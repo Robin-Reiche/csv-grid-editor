@@ -13,6 +13,14 @@ const BASE_HEADER_HEIGHT  = 26;
 const BASE_FONT_SIZE      = 13;
 const BASE_CELL_PADDING   = 6;
 
+// The step the percentage label resets to when clicked. Looked up rather than
+// hard-coded so it keeps following ZOOM_STEPS if the steps are ever changed,
+// and returns -1 if 100% is no longer one of them, which switches the reset off
+// instead of jumping to some arbitrary step.
+function resetZoomIndex(): number {
+    return state.ZOOM_STEPS.indexOf(100);
+}
+
 export function applyZoom(): void {
     const pct   = state.ZOOM_STEPS[state.zoomIndex];
     const scale = pct / 100;
@@ -26,7 +34,16 @@ export function applyZoom(): void {
     // Only the text changes — the label keeps its fixed font-size and min-width,
     // so "60%" → "100%" cannot nudge the zoom-in button sideways either.
     const zoomLabel = document.getElementById('zoom-level');
-    if (zoomLabel) zoomLabel.textContent = pct + '%';
+    if (zoomLabel) {
+        zoomLabel.textContent = pct + '%';
+        // Clicking the percentage returns to 100%. The pointer and the tooltip
+        // only appear while that would do something: at 100% there is nothing to
+        // reset, so the label stays a plain readout.
+        const canReset = resetZoomIndex() >= 0 && state.zoomIndex !== resetZoomIndex();
+        zoomLabel.classList.toggle('resettable', canReset);
+        if (canReset) zoomLabel.title = 'Reset zoom to 100%';
+        else zoomLabel.removeAttribute('title');
+    }
 
     state.autoFitCache = null;
 
@@ -56,7 +73,18 @@ export function zoomOut(): void {
     }
 }
 
+export function resetZoom(): void {
+    const target = resetZoomIndex();
+    if (target < 0 || state.zoomIndex === target) return;
+    state.zoomIndex = target;
+    applyZoom();
+    persistZoom();
+}
+
 export function setupZoom(): void {
     document.getElementById('btn-zoom-in')?.addEventListener('click',  zoomIn);
     document.getElementById('btn-zoom-out')?.addEventListener('click', zoomOut);
+    // The percentage between the two buttons is the reset. applyZoom() decides
+    // whether it currently looks clickable; resetZoom() is a no-op at 100%.
+    document.getElementById('zoom-level')?.addEventListener('click', resetZoom);
 }
