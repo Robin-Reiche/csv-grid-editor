@@ -1159,7 +1159,7 @@ body.vscode-high-contrast #grid-container.cm-on {
 .col-ctx-item:hover { background: var(--vscode-menu-selectionBackground, #094771); color: var(--vscode-menu-selectionForeground, #fff); }
 .col-ctx-separator { height: 1px; margin: 3px 0; background: var(--vscode-menu-border, #454545); pointer-events: none; }
 .col-ctx-item.danger { color: var(--vscode-errorForeground, #f48771); }
-.col-ctx-item.danger:hover { background: var(--vscode-inputValidation-errorBackground, #5a1d1d); color: #fff; }
+.col-ctx-item.danger:hover { background: var(--vscode-inputValidation-errorBackground, #5a1d1d); color: var(--vscode-errorForeground, #f48771); }
 .col-ctx-item .codicon { font-size: 16px; width: 16px; flex-shrink: 0; font-weight: normal; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
 
 /* ── Row Context Menu ── */
@@ -1177,12 +1177,12 @@ body.vscode-high-contrast #grid-container.cm-on {
 .row-ctx-item { display: flex; align-items: center; gap: 8px; padding: 5px 12px; font-size: 12px; cursor: pointer; color: var(--vscode-menu-foreground, #ccc); }
 .row-ctx-item:hover { background: var(--vscode-menu-selectionBackground, #094771); color: var(--vscode-menu-selectionForeground, #fff); }
 .row-ctx-item.danger { color: var(--vscode-errorForeground, #f48771); }
-.row-ctx-item.danger:hover { background: var(--vscode-inputValidation-errorBackground, #5a1d1d); color: #fff; }
+.row-ctx-item.danger:hover { background: var(--vscode-inputValidation-errorBackground, #5a1d1d); color: var(--vscode-errorForeground, #f48771); }
 .row-ctx-item .codicon { font-size: 16px; width: 16px; flex-shrink: 0; font-weight: normal; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
 
 /* AG Grid context menu danger items */
 .ag-menu-option.ctx-danger .ag-menu-option-text { color: var(--vscode-errorForeground, #f48771); }
-.ag-menu-option.ctx-danger:hover .ag-menu-option-text { color: #fff; }
+.ag-menu-option.ctx-danger:hover .ag-menu-option-text { color: var(--vscode-errorForeground, #f48771); }
 .ag-menu-option.ctx-danger:hover { background-color: var(--vscode-inputValidation-errorBackground, #5a1d1d) !important; }
 
 /* ── Find & Replace Bar ── */
