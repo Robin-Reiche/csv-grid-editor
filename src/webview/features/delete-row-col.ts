@@ -253,14 +253,23 @@ function showContextMenu(x: number, y: number, rowIndex: number | null, colId: s
 
     // ── Copy ──────────────────────────────────────────────────────────────────
     if (hasMultiSelection()) {
-        // A range is selected — offer range copy, with and without header row.
-        const copyRange = makeRowItem('Copy', 'codicon-copy');
-        copyRange.addEventListener('click', () => { copySelection(false); hideMenu(); });
-        menu.appendChild(copyRange);
-
-        const copyWithHeader = makeRowItem('Copy with header', 'codicon-copy');
-        copyWithHeader.addEventListener('click', () => { copySelection(true); hideMenu(); });
-        menu.appendChild(copyWithHeader);
+        // A range is selected - offer range copy, with and without header row, in
+        // each of the two clipboard formats. Copy is tab-separated (what Excel and
+        // Google Sheets paste back as columns, and what Ctrl+C gives); Copy as CSV
+        // is comma-separated for pasting into a file, a snippet or a ticket. The
+        // format is named in the label rather than hidden behind a remembered
+        // setting, so what lands on the clipboard is never a surprise.
+        const copyVariants: Array<[string, boolean, 'tsv' | 'csv']> = [
+            ['Copy',                    false, 'tsv'],
+            ['Copy with header',        true,  'tsv'],
+            ['Copy as CSV',             false, 'csv'],
+            ['Copy as CSV with header', true,  'csv'],
+        ];
+        for (const [label, withHeader, format] of copyVariants) {
+            const item = makeRowItem(label, 'codicon-copy');
+            item.addEventListener('click', () => { copySelection(withHeader, format); hideMenu(); });
+            menu.appendChild(item);
+        }
 
         const sep = document.createElement('div');
         sep.className = 'col-ctx-separator';

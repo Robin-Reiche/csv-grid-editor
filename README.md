@@ -89,6 +89,7 @@ For files larger than 10 MB you get a quick menu to open the full file, preview 
   - `Shift+click` and `Shift`+arrow keys extend the selection, `Ctrl+A` selects everything
   - `Ctrl+C` copies the selection as tab-separated values (TSV) that paste straight into Excel or Google Sheets
   - Right-click → **Copy with header** to include the column headers in the copy
+  - Right-click → **Copy as CSV** or **Copy as CSV with header** puts the same selection on the clipboard comma-separated, ready to paste into a CSV file, a code snippet or an issue. Values holding a comma, a quote or a line break are quoted, so the block reads back as exactly the cells you copied.
   - `Delete` / `Backspace` clears every cell in the selection
   - The status bar shows the selection size plus live `Count / Sum / Avg / Min / Max`
 - **Export as JSON** - Convert the current filtered and sorted view to a JSON array of objects via the native VS Code save dialog. Column headers become the keys and numbers and booleans come out typed, while values that would lose information (IDs with leading zeros, very large numbers) stay strings. Columns you have hidden in the column chooser are left out, the same as copy.
@@ -232,7 +233,7 @@ Install CSV Grid Editor and open any `.csv` or `.tsv` file. It opens straight in
 Double-click any cell to edit it inline, then save with `Ctrl+S`. Changes are written back to the file and you can undo with `Ctrl+Z`. You never have to leave the editor or open a spreadsheet app.
 
 ### Can I copy and paste between this grid and Excel or Google Sheets?
-Yes. Select a range with click and drag, press `Ctrl+C`, and the cells are copied as tab-separated values that paste cleanly into Excel or Google Sheets. Right-click then **Copy with header** to include the column names.
+Yes. Select a range with click and drag, press `Ctrl+C`, and the cells are copied as tab-separated values that paste cleanly into Excel or Google Sheets. Right-click then **Copy with header** to include the column names, or **Copy as CSV** if you need the selection comma-separated instead.
 
 ### Does it work with semicolon, tab or pipe delimited files?
 Yes. The delimiter is auto-detected on open (comma, semicolon, tab), and `.tsv` files always use tab. You can also switch the delimiter by hand from the toolbar to comma, semicolon, tab or pipe.

@@ -69,6 +69,25 @@ export function tsvCell(value: string): string {
     return value;
 }
 
+// The clipboard formats a selection can be copied in.
+export type ClipboardFormat = 'tsv' | 'csv';
+
+// Serialize a rectangular block of cells for the clipboard.
+//
+// TSV stays the default (Ctrl+C, the plain "Copy" item): tabs are what Excel and
+// Google Sheets read back as columns, and pasting a comma-separated block into
+// them lands the whole row in one cell. CSV is the explicit choice, offered as
+// its own context-menu item for pasting into anything that expects a real CSV -
+// a file, a code snippet, a ticket. It is always comma-separated regardless of
+// the delimiter the open file uses, because that is what the label promises.
+//
+// Both quote per RFC 4180, so a value carrying the separator, a double quote or
+// a line break survives the round trip.
+export function toClipboardBlock(rows: CsvRow[], format: ClipboardFormat): string {
+    if (format === 'csv') return toCsv(rows, ',');
+    return rows.map(row => row.map(cell => tsvCell(String(cell))).join('\t')).join('\n');
+}
+
 // A wrapped multi-line cell is only as wide as its longest LINE, not as wide as
 // the whole value — auto-fit would otherwise size the column to every line laid
 // end to end (features/auto-fit.ts). Longest is taken by character count, which

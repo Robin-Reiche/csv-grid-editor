@@ -1,7 +1,8 @@
 import { state } from '../state';
 import { pushUndo, notifyChange } from './undo-redo';
 import { recomputeColTypes } from '../grid/column-type';
-import { tsvCell } from '../utils/csv';
+import { toClipboardBlock } from '../utils/csv';
+import type { ClipboardFormat } from '../utils/csv';
 import { closeAllPopups } from './popups';
 
 // ── Excel-style range selection for the main grid ─────────────────────────────
@@ -188,30 +189,30 @@ export function hasMultiSelection(): boolean {
     return selActive && selCellCount > 1;
 }
 
-export function copySelection(withHeader = false): void {
+// Copy the current selection. The format is the caller's choice - Ctrl+C and the
+// plain "Copy" item stay on TSV so the block pastes into Excel and Google Sheets
+// as columns; the "Copy as CSV" items ask for CSV explicitly. Quoting for both
+// lives in toClipboardBlock().
+export function copySelection(withHeader = false, format: ClipboardFormat = 'tsv'): void {
     if (!state.gridApi || !selActive) return;
     const cols = displayedColIds();
     const selCols = cols.filter(id => selColIds.has(id));
     const rowMap = displayRowToOrig();
 
-    const lines: string[] = [];
+    const rows: string[][] = [];
     if (withHeader) {
         const header = state.data[0] ?? [];
-        lines.push(selCols.map(colId => {
-            const ci = parseInt(colId.slice(4), 10);
-            return tsvCell(String(header[ci] ?? ''));
-        }).join('\t'));
+        rows.push(selCols.map(colId => String(header[parseInt(colId.slice(4), 10)] ?? '')));
     }
     for (let r = selRowLo; r <= selRowHi; r++) {
         const orig = rowMap[r];
         const dataRow = orig != null && orig >= 0 ? state.data[orig] : undefined;
-        lines.push(selCols.map(colId => {
-            const ci = parseInt(colId.slice(4), 10);
-            const v = dataRow?.[ci];
-            return tsvCell(v != null ? String(v) : '');
-        }).join('\t'));
+        rows.push(selCols.map(colId => {
+            const v = dataRow?.[parseInt(colId.slice(4), 10)];
+            return v != null ? String(v) : '';
+        }));
     }
-    writeClipboard(lines.join('\n'));
+    writeClipboard(toClipboardBlock(rows, format));
 }
 
 // ── delete (clear cells) ──────────────────────────────────────────────────────
