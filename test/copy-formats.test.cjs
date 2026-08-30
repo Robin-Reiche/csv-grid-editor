@@ -74,8 +74,16 @@ test('empty cells stay empty rather than becoming quotes', () => {
 });
 
 // ── round trip ───────────────────────────────────────────────────────────────
-// What copy writes has to parse back to the exact cells it came from - that is
-// what makes the block usable in another CSV file and in this grid's own paste.
+// What copy writes has to parse back to the exact cells it came from, which is
+// what makes a copied block usable anywhere else.
+//
+// For TSV that "anywhere else" includes this grid: features/paste.ts reads the
+// clipboard with a tab delimiter, so a TSV block pastes back in as the cells it
+// came from. A CSV block does not - it carries no tabs at all, so the whole line
+// arrives in one cell. That is not a regression, paste has been TSV-only since
+// v1.5.0 and external CSV text never pasted correctly either, but it is why
+// Ctrl+C and the plain "Copy" item stay on TSV and why "Copy as CSV" is
+// documented for a file, a snippet or a ticket rather than for pasting back in.
 
 test('a block with every awkward character round-trips through csv', () => {
     const rows = [

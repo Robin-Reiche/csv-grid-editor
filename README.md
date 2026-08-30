@@ -58,7 +58,7 @@ For files larger than 10 MB you get a quick menu to open the full file, preview 
 - **Sort & Filter** - Click any column header to sort. Use the filter icon to search within a column. Active filters show in the toolbar with a one-click clear button.
 - **Auto-Fit Columns** - Fit all columns to their content with one click, measured across every row of the file and not just the ones on screen. Double-click a resize handle to auto-fit a single column.
 - **Column Resize** - Drag column borders to adjust width manually
-- **Zoom** - Scale the grid from 60% to 200% with the toolbar buttons or keyboard shortcuts. The zoom level shows in the toolbar, and clicking it takes you straight back to 100%.
+- **Zoom** - Scale the grid from 60% to 200% with the toolbar buttons or keyboard shortcuts. The zoom level shows in the toolbar and brightens as soon as you are away from 100%. Click it, or press `Ctrl+0`, to go straight back.
 - **Control Characters** - Invisible control characters inside a value show as a small chip with the character's abbreviation instead of an unnamed box, so you can tell which one it is. Hover it for the full name. The value itself is untouched, so editing, copy and save still carry the original character.
 - **Multi-line cells** - A cell that holds a line break shows a small `↵` chip at every break, so you can see it is more than one line even though the row keeps its height. The toolbar's **Wrap cell text** button lets rows grow instead, so long values and line breaks are readable in full. The chip stays visible there too, which is what tells you whether a line ended because the value breaks or because it ran into the edge of the column. The setting is remembered across files and sessions.
 - **Theme Integration** - Automatically adapts to your VS Code color theme (dark or light)
@@ -193,6 +193,7 @@ If you ever need to pull in the file on disk by hand, run **CSV Grid: Reload fro
 | `Delete` / `Backspace` | Clear the selected cells |
 | `Ctrl++` / `Ctrl+=` | Zoom in |
 | `Ctrl+-` | Zoom out |
+| `Ctrl+0` | Reset zoom to 100% |
 | `Ctrl+F` / `Ctrl+H` | Open Find & Replace bar |
 | `Alt+Enter` / `Shift+Enter` | Insert a line break *(while editing a cell)* |
 | `Ctrl+Enter` | Insert a row below the current one |

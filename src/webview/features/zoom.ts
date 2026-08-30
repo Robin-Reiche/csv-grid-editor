@@ -39,9 +39,18 @@ export function applyZoom(): void {
         // Clicking the percentage returns to 100%. The pointer and the tooltip
         // only appear while that would do something: at 100% there is nothing to
         // reset, so the label stays a plain readout.
-        const canReset = resetZoomIndex() >= 0 && state.zoomIndex !== resetZoomIndex();
+        //
+        // The tooltip names the shortcut as well, because that is what carries
+        // the feature: clicking a percentage to reset is a pattern almost no
+        // other program uses (Excel, Sheets, Figma and Photoshop all open a
+        // chooser instead), so the click alone is not something anyone arrives
+        // expecting. The keyboard is, and one accidental hover then teaches it.
+        // The text is rendered server-side in webview.ts, which knows whether
+        // this is a Mac and spells the modifier the same way the zoom buttons do.
+        const resetIdx = resetZoomIndex();
+        const canReset = resetIdx >= 0 && state.zoomIndex !== resetIdx;
         zoomLabel.classList.toggle('resettable', canReset);
-        if (canReset) zoomLabel.title = 'Reset zoom to 100%';
+        if (canReset) zoomLabel.title = zoomLabel.dataset.resetTitle ?? 'Reset zoom to 100%';
         else zoomLabel.removeAttribute('title');
     }
 

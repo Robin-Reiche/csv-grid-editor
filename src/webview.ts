@@ -114,7 +114,7 @@ export function getWebviewContent(
         <button id="btn-clear-filters" title="Clear all filters" style="display:none;"><i class="codicon codicon-filter-filled"></i><span class="filter-clear-label">Clear</span></button>
         <div    class="separator" id="sep-filters" style="display:none;"></div>
         <button id="btn-zoom-out" title="Decrease size (${mod}-)"><i class="codicon codicon-zoom-out"></i></button>
-        <span   id="zoom-level"  class="zoom-level">100%</span>
+        <span   id="zoom-level"  class="zoom-level" data-reset-title="Reset zoom to 100% (${mod}0)">100%</span>
         <button id="btn-zoom-in"  title="Increase size (${mod}+)"><i class="codicon codicon-zoom-in"></i></button>
         <div    class="separator"></div>
         <button id="btn-profile"       title="Column Profile"><i class="codicon codicon-graph"></i></button>

@@ -1,7 +1,7 @@
 import { state } from './state';
 import { tsvCell } from './utils/csv';
 import { undo, redo } from './features/undo-redo';
-import { zoomIn, zoomOut } from './features/zoom';
+import { zoomIn, zoomOut, resetZoom } from './features/zoom';
 import { openFindBar } from './features/find-replace';
 import { insertRowAtFocus, deleteRowsAtFocus } from './features/delete-row-col';
 
@@ -112,6 +112,13 @@ export function setupKeyboard(): void {
 
         if ((e.ctrlKey || e.metaKey) && (e.key === '+' || e.key === '=')) { zoomIn();  e.preventDefault(); }
         if ((e.ctrlKey || e.metaKey) && e.key === '-') { zoomOut(); e.preventDefault(); }
+        // Back to 100%. The zoom is remembered across files and sessions, so a
+        // size set once on a wide file follows you everywhere until you undo it,
+        // and stepping back was up to five presses of the key above. `key` is
+        // '0' for the number row and for NumPad 0 with NumLock on, which covers
+        // both the browser shortcut people know (Ctrl+0) and VS Code's own
+        // Reset Zoom (Ctrl+NumPad0) in one condition.
+        if ((e.ctrlKey || e.metaKey) && e.key === '0') { resetZoom(); e.preventDefault(); }
         if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'h') && !state.isCellEditing) { e.preventDefault(); openFindBar(); }
     });
 }

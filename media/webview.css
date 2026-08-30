@@ -104,10 +104,14 @@ button .codicon {
     border-radius: 3px;
 }
 
-/* Only at a zoom other than 100%, where clicking actually does something. */
-.zoom-level.resettable { cursor: pointer; }
+/* Only at a zoom other than 100%, where clicking actually does something. The
+   label goes to full opacity there and stays there, rather than brightening on
+   hover: a control whose only hint is the hover state is a control nobody finds,
+   because nobody hovers what they have already read as a plain readout. Off
+   100% the number visibly wakes up, at 100% it goes quiet again, so the change
+   in the toolbar is itself the invitation to click. */
+.zoom-level.resettable { cursor: pointer; opacity: 1; }
 .zoom-level.resettable:hover {
-    opacity: 1;
     background: var(--vscode-toolbar-hoverBackground, rgba(255,255,255,0.1));
 }
 

@@ -2,6 +2,16 @@
 
 All notable changes to CSV Grid Editor are documented here.
 
+## [1.21.0] - 2026-08-30
+
+### Added
+- **Copy a selection as CSV** - The right-click menu on a selected block gains **Copy as CSV** and **Copy as CSV with header** next to the two it already had. Same cells, comma instead of tab. Tabs are what Excel and Google Sheets read back as columns, so `Ctrl+C` and the plain **Copy** keep them, and the new pair is for the other half of the job: pasting into a real CSV file, a code snippet or a ticket. Values holding a comma, a quote or a line break are quoted per RFC 4180, so the block reads back as exactly the cells it came from. Note that a CSV block cannot be pasted back into this grid, which reads the clipboard as tab-separated, the same as it always has.
+- **Click the zoom percentage to go back to 100%** - The zoom is remembered across files and sessions, so a size set once on a wide file followed you everywhere, and stepping back was up to five presses. The percentage between the two zoom buttons is now the way back: it brightens the moment you are away from 100%, and one click returns the grid to normal size. At 100% it goes quiet again and stays a plain readout, because there is nothing to reset.
+- **`Ctrl+0` resets the zoom** - The same thing from the keyboard, which is where most people expect it: `Ctrl+0` is the reset in Firefox, Chrome, Edge and Word, and `Ctrl+NumPad0` is VS Code's own. Both work. Clicking a percentage to reset is a pattern almost nothing else uses, so the click alone would have stayed unfound; the tooltip on the label names the key, which is what turns one stumbled-upon hover into a shortcut you keep.
+
+### Fixed
+- **The delete entries stay readable while you point at them** - Hovering **Delete row** or **Delete column** forced the label to white on top of the theme's error background. On a dark theme that background is a deep red and it read fine. On a light theme it is a pale pink, so the label all but vanished and the entry looked disabled exactly while the pointer was on it. The hover keeps the theme's error color now, which VS Code pairs with that background in both.
+
 ## [1.20.0] - 2026-08-28
 
 ### Added
