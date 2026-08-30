@@ -85,6 +85,32 @@ button .codicon {
     cursor: default;
 }
 
+/* The zoom percentage is also the reset control: click it to return to 100%.
+   The padding is there at every zoom level, not just while hovering, so the
+   hover background has room without the label growing and shoving the zoom
+   buttons sideways.
+
+   The width has to hold the widest label ("100%", "200%") including that
+   padding, or a three-character "80%" contracts the span and drags everything
+   to its right along with it every time you step past 100%. `flex: none` keeps
+   the toolbar from taking the width back when it runs short of room. */
+.zoom-level {
+    font-size: 11px;
+    flex: none;
+    min-width: 40px;
+    text-align: center;
+    opacity: 0.6;
+    padding: 2px 4px;
+    border-radius: 3px;
+}
+
+/* Only at a zoom other than 100%, where clicking actually does something. */
+.zoom-level.resettable { cursor: pointer; }
+.zoom-level.resettable:hover {
+    opacity: 1;
+    background: var(--vscode-toolbar-hoverBackground, rgba(255,255,255,0.1));
+}
+
 .toolbar .separator {
     width: 1px;
     height: 14px;
