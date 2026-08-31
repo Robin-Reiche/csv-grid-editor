@@ -1218,11 +1218,6 @@ body.vscode-high-contrast #grid-container.cm-on {
 .row-ctx-item.danger:hover { background: var(--vscode-inputValidation-errorBackground, #5a1d1d); color: var(--vscode-errorForeground, #f48771); }
 .row-ctx-item .codicon { font-size: 16px; width: 16px; flex-shrink: 0; font-weight: normal; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
 
-/* AG Grid context menu danger items */
-.ag-menu-option.ctx-danger .ag-menu-option-text { color: var(--vscode-errorForeground, #f48771); }
-.ag-menu-option.ctx-danger:hover .ag-menu-option-text { color: var(--vscode-errorForeground, #f48771); }
-.ag-menu-option.ctx-danger:hover { background-color: var(--vscode-inputValidation-errorBackground, #5a1d1d) !important; }
-
 /* ── Find & Replace Bar ── */
 .find-bar {
     display: flex;

@@ -51,10 +51,14 @@ const dangerHover = rules().filter(r =>
 console.log('danger menu item contrast');
 
 test('the danger hover rules are still in the stylesheet', () => {
-    // Three of them: the column header menu, the row/cell menu and the AG Grid
-    // menu. If a rename drops one, this test would otherwise pass vacuously.
-    assert.strictEqual(dangerHover.length, 3,
-        `expected 3 danger :hover rules with a colour, found ${dangerHover.length}: ` +
+    // Two of them: the column header menu and the row/cell menu. Those are the
+    // only two menus the extension draws, and both are its own markup. There
+    // used to be a third for AG Grid's context menu, but that menu is Enterprise
+    // only and the class was never put on an element, so the rules could not
+    // match anything and were dropped. If a rename drops one of the remaining
+    // two, this test would otherwise pass vacuously.
+    assert.strictEqual(dangerHover.length, 2,
+        `expected 2 danger :hover rules with a colour, found ${dangerHover.length}: ` +
         dangerHover.map(r => r.selector).join(' | '));
 });
 
