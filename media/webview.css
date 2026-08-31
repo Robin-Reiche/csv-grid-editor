@@ -1179,6 +1179,8 @@ body.vscode-high-contrast #grid-container.cm-on {
     z-index: 200;
     min-width: 140px;
     padding: 2px 0;
+    max-height: calc(100vh - 8px);
+    overflow-y: auto;
     background: var(--vscode-menu-background, #252526);
     border: 1px solid var(--vscode-menu-border, #454545);
     border-radius: 3px;
@@ -1198,6 +1200,12 @@ body.vscode-high-contrast #grid-container.cm-on {
     z-index: 200;
     min-width: 140px;
     padding: 2px 0;
+    /* A right-click menu is built per click and can outgrow a short editor
+       pane, at which point the entries past the edge are simply gone: nothing
+       about a clipped menu looks clipped. Scroll instead, so every entry stays
+       reachable however little room the pane has. */
+    max-height: calc(100vh - 8px);
+    overflow-y: auto;
     background: var(--vscode-menu-background, #252526);
     border: 1px solid var(--vscode-menu-border, #454545);
     border-radius: 3px;

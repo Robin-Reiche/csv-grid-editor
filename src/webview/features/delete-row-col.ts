@@ -421,14 +421,23 @@ function showContextMenu(x: number, y: number, rowIndex: number | null, colId: s
 
     if (menu.children.length === 0) return;
 
-    // Position — keep menu on screen
+    // Position — keep menu on screen. The Math.max floor matters: this menu is
+    // built per right-click and a fully populated one (four copy items, freeze,
+    // two inserts, two deletes, separators) is tall enough that in a short
+    // editor pane `vh - mh - 4` goes negative. Without the floor the menu was
+    // placed above the top edge and its first entries were unreachable — you
+    // could not tell, because a clipped menu still looks like a whole one. The
+    // column menu next door has always clamped this way (freeze-columns.ts);
+    // this one never did, and gained two entries when Copy as CSV landed. The
+    // max-height in the stylesheet handles the remaining case, a menu taller
+    // than the pane itself, by scrolling instead of hiding the overflow.
     menu.classList.remove('hidden');
     const vw = window.innerWidth;
     const vh = window.innerHeight;
     const mw = menu.offsetWidth || 160;
     const mh = menu.offsetHeight || 80;
-    menu.style.left = Math.min(x, vw - mw - 4) + 'px';
-    menu.style.top  = Math.min(y, vh - mh - 4) + 'px';
+    menu.style.left = Math.max(4, Math.min(x, vw - mw - 4)) + 'px';
+    menu.style.top  = Math.max(4, Math.min(y, vh - mh - 4)) + 'px';
 
     // Close on next click outside
     const closeHandler = (evt: MouseEvent) => {

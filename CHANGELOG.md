@@ -10,6 +10,7 @@ All notable changes to CSV Grid Editor are documented here.
 - **`Ctrl+0` resets the zoom** - The same thing from the keyboard, which is where most people expect it: `Ctrl+0` is the reset in Firefox, Chrome, Edge and Word, and `Ctrl+NumPad0` is VS Code's own. Both work. Clicking a percentage to reset is a pattern almost nothing else uses, so the click alone would have stayed unfound; the tooltip on the label names the key, which is what turns one stumbled-upon hover into a shortcut you keep.
 
 ### Fixed
+- **A long right-click menu no longer hides its own top entries** - The row menu is built per click and grows with what you have selected. Fully populated it outgrows a short editor pane, and it was placed by pushing it up until it fit, with nothing stopping it from going past the top edge. The entries up there were simply gone, and a clipped menu looks exactly like a whole one, so the copy entries appeared not to exist. It is clamped to the pane now, the way the column menu next door always was, and a menu taller than the pane scrolls instead of losing its ends.
 - **The delete entries stay readable while you point at them** - Hovering **Delete row** or **Delete column** forced the label to white on top of the theme's error background. On a dark theme that background is a deep red and it read fine. On a light theme it is a pale pink, so the label all but vanished and the entry looked disabled exactly while the pointer was on it. The hover keeps the theme's error color now, which VS Code pairs with that background in both.
 
 ## [1.20.0] - 2026-08-28
