@@ -42,7 +42,11 @@ export function parseCsv(text: string, delimiter: string, trimFields: boolean = 
         }
     }
     row.push(finalize(field));
-    if (row.some(f => f !== '')) rows.push(row);
+    // A last line with nothing in it is a trailing blank line, not a row, and is
+    // dropped. Except when it is the only line and holds a delimiter: that is a
+    // header of unnamed columns, ",,,," is five of them. Dropping it opened the
+    // file as an empty table and lost every column the moment it was read back.
+    if (row.some(f => f !== '') || (rows.length === 0 && row.length > 1)) rows.push(row);
     return rows;
 }
 

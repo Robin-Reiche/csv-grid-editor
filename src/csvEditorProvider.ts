@@ -20,6 +20,10 @@ const CANCELLED_PREVIEW_MODE = '__cancelled__';
 class CsvDocument implements vscode.CustomDocument {
     public content: string;
     public pageIndex: RowPageIndex | null = null;
+    // The text we know the file on disk holds: what was read on open, what we
+    // last saved, or the outside change we last loaded. The watcher compares
+    // against this, not only against content, see reload() below.
+    public diskText: string;
 
     constructor(
         public readonly uri: vscode.Uri,
@@ -31,6 +35,7 @@ class CsvDocument implements vscode.CustomDocument {
         public readonly isChunked: boolean = false
     ) {
         this.content = content;
+        this.diskText = content;
     }
 
     dispose(): void {}
@@ -251,7 +256,7 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             watcher = vscode.workspace.createFileSystemWatcher(
                 new vscode.RelativePattern(vscode.Uri.file(path.dirname(document.uri.fsPath)), path.basename(document.uri.fsPath))
             );
-            const reload = async (): Promise<boolean> => {
+            const reload = async (fromWatcher = false): Promise<boolean> => {
                 try {
                     const raw = await vscode.workspace.fs.readFile(document.uri);
                     const text = new TextDecoder().decode(raw);
@@ -262,7 +267,18 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
                     // view state (frozen rows, in particular). Only genuinely external
                     // changes differ from document.content.
                     if (text === document.content) return false;
+                    // The same echo, arriving late. The watcher reports a save only
+                    // after the write, and with auto-save on the next edit can land
+                    // in between: the editor has moved on, the disk still holds the
+                    // save, and the comparison above sees a difference. Taking that
+                    // for an outside change reset the grid to the saved text and threw
+                    // away the newest edit, all of it when the saved text was a header
+                    // of blank names like ",,,,". A disk that holds what we last knew
+                    // it holds has nothing new to say. Only the watcher waits like
+                    // this: Reload from Disk is the explicit request for the disk.
+                    if (fromWatcher && text === document.diskText) return false;
                     document.content = text;
+                    document.diskText = text;
                     webviewPanel.webview.postMessage({
                         type: 'update',
                         text: document.content,
@@ -285,8 +301,8 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             // grid silently kept showing stale data. onDidDelete is deliberately
             // not wired: the file is gone at that point, and the create that
             // follows is what carries the new content.
-            watcher.onDidChange(() => void reload());
-            watcher.onDidCreate(() => void reload());
+            watcher.onDidChange(() => void reload(true));
+            watcher.onDidCreate(() => void reload(true));
             webviewPanel.onDidDispose(() => watcher?.dispose());
         }
 
@@ -375,6 +391,9 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             vscode.window.showWarningMessage('Cannot save in preview mode. Open the full file to edit.');
             return;
         }
+        // Recorded before the write, so the watcher event it causes is known as
+        // ours however late it arrives (see reload in resolveCustomEditor).
+        document.diskText = document.content;
         await vscode.workspace.fs.writeFile(document.uri, new TextEncoder().encode(document.content));
     }
 
@@ -385,6 +404,7 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
     async revertCustomDocument(document: CsvDocument, _cancellation: vscode.CancellationToken): Promise<void> {
         const raw = await vscode.workspace.fs.readFile(document.uri);
         document.content = new TextDecoder().decode(raw);
+        document.diskText = document.content;
 
         const panel = this._webviews.get(document.uri.toString());
         if (panel) {

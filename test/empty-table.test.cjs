@@ -73,6 +73,25 @@ test('the first row matches the header width and ends the empty state', () => {
     assert.strictEqual(emptyTableKind(out), null);
 });
 
+test('a header of blank column names reopens with its columns', () => {
+    // Add column five times and save: the file holds ",,,,". That is five
+    // unnamed columns, and it used to read back as no table at all, because the
+    // parser drops a last line with nothing in it as a trailing blank line.
+    const blank = [['', '', '', '', '']];
+    assert.strictEqual(toCsv(blank, ','), ',,,,');
+    assert.deepStrictEqual(parseCsv(',,,,', ','), blank);
+    assert.strictEqual(emptyTableKind(parseCsv(',,,,', ',')), 'no-rows');
+    assert.deepStrictEqual(parseCsv(';;', ';'), [['', '', '']]);
+});
+
+test('a trailing blank line after real rows is still dropped', () => {
+    // The rule the fix above must not break: a file ending in an empty or
+    // delimiter-only line does not grow a phantom row on every open.
+    assert.deepStrictEqual(parseCsv('a,b\n1,2\n', ','), [['a', 'b'], ['1', '2']]);
+    assert.deepStrictEqual(parseCsv('a,b\n1,2\n,', ','), [['a', 'b'], ['1', '2']]);
+    assert.deepStrictEqual(parseCsv('', ','), []);
+});
+
 test('a table started from nothing saves and reopens as what was typed', () => {
     // Add column, rename it, Add row, type a value: what reaches the file has to
     // come back as the same table.
