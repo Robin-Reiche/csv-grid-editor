@@ -1,4 +1,4 @@
-import { state, getNumCols } from '../state';
+import { state, getNumCols, emptyTableKind } from '../state';
 import { pushUndo, notifyChange } from './undo-redo';
 import { refreshGrid, focusCell } from '../grid/refresh';
 import { recomputeColTypes } from '../grid/column-type';
@@ -20,7 +20,7 @@ import {
 } from './range-select';
 import { freezeRows, unfreezeRow, unfreezeAllRows, frozenRowCount } from './freeze-rows';
 import { closeAllPopups } from './popups';
-import { addFirstRow } from './empty-state';
+import { addFirstRow, addFirstColumn } from './empty-state';
 
 // ── Data mutations ────────────────────────────────────────────────────────────
 
@@ -429,6 +429,12 @@ function showContextMenu(x: number, y: number, rowIndex: number | null, colId: s
 
     if (menu.children.length === 0) return;
 
+    openMenuAt(menu, x, y);
+}
+
+// Shows a built menu at the pointer and closes it on the next click outside.
+// Shared by the cell menu above and the empty-area menu below.
+function openMenuAt(menu: HTMLElement, x: number, y: number): void {
     // Position — keep menu on screen. The Math.max floor matters: this menu is
     // built per right-click and a fully populated one (four copy items, freeze,
     // two inserts, two deletes, separators) is tall enough that in a short
@@ -455,6 +461,66 @@ function showContextMenu(x: number, y: number, rowIndex: number | null, colId: s
         }
     };
     setTimeout(() => document.addEventListener('mousedown', closeHandler, true), 0);
+}
+
+// ── Empty-area menu (issue #40) ───────────────────────────────────────────────
+// Right-clicking beside the last column or below the last row landed on no cell,
+// so the browser's own Cut / Copy / Paste menu came up, with nothing in it that
+// applies. That space is exactly where a person reaches to make the table
+// bigger, and in a table started from nothing it is most of the view. It now
+// offers to add a column at the right end and a row at the bottom.
+
+// Whether a right-click landed on empty grid surface rather than on something
+// that has its own menu or needs the browser's. Cells and header cells have
+// their own menus. The cell editor is a popup outside its cell, and text fields
+// (the editor, filter inputs) keep the browser menu so Cut / Copy / Paste still
+// work on the text being typed.
+function isEmptyGridArea(target: HTMLElement): boolean {
+    if (target.closest('.ag-cell, .ag-header-cell, .ag-popup, .ag-menu')) return false;
+    if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return false;
+    return !!target.closest('.ag-root, .empty-state-page');
+}
+
+function showEmptyAreaMenu(x: number, y: number): void {
+    const menu = document.getElementById('row-context-menu') as HTMLElement | null;
+    if (!menu) return;
+    closeAllPopups('row-context-menu');
+    menu.innerHTML = '';
+
+    const kind = emptyTableKind(state.data);
+
+    const addCol = makeRowItem('Add column', 'codicon-add');
+    addCol.addEventListener('click', () => {
+        hideMenu();
+        if (kind === 'no-columns') addFirstColumn();
+        else insertColumns(getNumCols(state.data) - 1, 'right', 1);
+    });
+    menu.appendChild(addCol);
+
+    // A row needs a column to live in, and a displayed row to go under. With
+    // every row filtered out or frozen there is nothing on screen to add below,
+    // so the entry is left out rather than adding a row nobody can see.
+    const shownRows = state.gridApi?.getDisplayedRowCount() ?? 0;
+    if (kind === 'no-rows' || (kind === null && shownRows > 0)) {
+        const addRow = makeRowItem('Add row', 'codicon-add');
+        addRow.addEventListener('click', () => {
+            hideMenu();
+            if (kind === 'no-rows') { addFirstRow(); return; }
+            insertRows(shownRows - 1, 'below', 1);
+            // Land on the new row, the way Ctrl+Enter does.
+            focusCell(shownRows, state.focusedCellColId ?? firstDisplayedColId());
+        });
+        menu.appendChild(addRow);
+    }
+
+    openMenuAt(menu, x, y);
+}
+
+// The first data column on screen, skipping the '#' gutter and hidden columns.
+function firstDisplayedColId(): string {
+    const first = (state.gridApi?.getAllDisplayedColumns?.() ?? [])
+        .find((c: any) => c.getColId() !== 'row-index');
+    return first ? first.getColId() : 'col_0';
 }
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
@@ -503,7 +569,15 @@ export function setupDeleteRowCol(): void {
     container.addEventListener('contextmenu', (e: MouseEvent) => {
         const target = e.target as HTMLElement;
         const cell = target.closest('.ag-cell') as HTMLElement | null;
-        if (!cell) return; // outside grid cells — let browser handle normally
+        if (!cell) {
+            // Beside or below the table: offer to grow it. Anything else outside
+            // the cells (text fields, popups) keeps the browser's own menu.
+            if (!IS_PREVIEW && isEmptyGridArea(target)) {
+                e.preventDefault();
+                showEmptyAreaMenu(e.clientX, e.clientY);
+            }
+            return;
+        }
 
         e.preventDefault();
 
