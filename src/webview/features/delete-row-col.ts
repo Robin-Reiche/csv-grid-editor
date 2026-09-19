@@ -20,6 +20,7 @@ import {
 } from './range-select';
 import { freezeRows, unfreezeRow, unfreezeAllRows, frozenRowCount } from './freeze-rows';
 import { closeAllPopups } from './popups';
+import { addFirstRow } from './empty-state';
 
 // ── Data mutations ────────────────────────────────────────────────────────────
 
@@ -166,7 +167,14 @@ export function insertRowAtFocus(position: 'above' | 'below'): void {
     // Read the anchor BEFORE committing: stopEditing() can move the focus on, and
     // the row to insert next to is the one that was being edited, not the next one.
     const rowIndex = focusedRowForShortcut();
-    if (rowIndex === null) return;
+    if (rowIndex === null) {
+        // A table with a header and no rows has no cell to hold the focus, so
+        // there is no row to insert next to. The key starts the first row
+        // instead, the same as the button in the empty grid (issue #40). It does
+        // nothing anywhere else: addFirstRow only acts on a table with no rows.
+        addFirstRow();
+        return;
+    }
 
     // Commit the half-typed value first. refreshGrid() further down replaces the
     // row data under the open editor, and an uncommitted edit would go with it.

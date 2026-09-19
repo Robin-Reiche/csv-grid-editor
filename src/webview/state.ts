@@ -93,3 +93,16 @@ export function getNumCols(rows: CsvRow[]): number {
     }
     return max;
 }
+
+// What an empty table is missing, or null when it has columns and rows (issue
+// #40). Every way of adding to a table was anchored to something already there:
+// a row to insert next to, a cell to right-click, a header to open the column
+// menu on. With nothing there, there was no way in at all. The grid asks this to
+// decide what to offer instead.
+//   'no-columns'  an empty file, or every column deleted: offer the first column
+//   'no-rows'     a header and nothing under it: offer the first row
+export function emptyTableKind(rows: CsvRow[]): 'no-columns' | 'no-rows' | null {
+    if (getNumCols(rows) === 0) return 'no-columns';
+    if (rows.length <= 1) return 'no-rows';
+    return null;
+}

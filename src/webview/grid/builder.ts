@@ -1,5 +1,6 @@
-import { state, getNumCols } from '../state';
+import { state, getNumCols, emptyTableKind } from '../state';
 import { getColumnType, scheduleRecomputeColTypes } from './column-type';
+import { NoRowsOverlay, renderNoColumns } from '../features/empty-state';
 import { createCombinedFilter } from './filter';
 import { dataRowIndexForNode } from './row-mapping';
 import { partitionFrozenRows, updateCountsDisplay } from './refresh';
@@ -111,7 +112,20 @@ function makeComparator(colType: string): (a: string, b: string) => number {
 let dblclickWired = false;
 
 export function buildGrid(): void {
-    if (!state.data?.length) return;
+    // No columns to build: an empty file, or every column deleted. This used to
+    // return and leave a blank area with nothing to click (issue #40). Tear down
+    // any grid still standing, since undoing back to an empty file arrives here
+    // with the old grid up, and offer the first column in its place.
+    if (emptyTableKind(state.data) === 'no-columns') {
+        state.gridApi?.destroy();
+        state.gridApi = null;
+        state.focusedCellColId    = null;
+        state.focusedCellRowIndex = null;
+        renderNoColumns(document.getElementById('grid-container')!);
+        updateCountsDisplay();
+        updateButtons();
+        return;
+    }
 
     const headerRow = state.data[0];
     const bodyRows  = state.data.slice(1);
@@ -237,6 +251,10 @@ export function buildGrid(): void {
         // Codicon glyphs as inline SVG — defined in GRID_ICONS at the top of
         // this file. AG Grid's own icon font is blocked in VS Code webviews.
         icons: GRID_ICONS,
+        // A header with no rows under it offers "Add row" here instead of the
+        // bare "No Rows To Show" (issue #40). Every other empty view keeps
+        // AG Grid's text, see features/empty-state.ts.
+        noRowsOverlayComponent: NoRowsOverlay,
         animateRows: false,
         // Ctrl+click a second/third header to sort by multiple columns.
         multiSortKey: 'ctrl',

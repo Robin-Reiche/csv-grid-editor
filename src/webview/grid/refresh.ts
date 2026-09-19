@@ -1,5 +1,6 @@
-import { state, getNumCols } from '../state';
+import { state, getNumCols, emptyTableKind } from '../state';
 import { applyColorMode } from '../features/color-mode';
+import { buildGrid } from './builder';
 
 // Splits a freshly-built rowData array into the scrollable body and the frozen
 // reference rows (AG Grid renders the latter in a fixed pinned-top band). Frozen
@@ -103,7 +104,11 @@ export function clampRow(rowIndex: number, rowCount: number): number | null {
 }
 
 export function refreshGrid(): void {
-    if (!state.gridApi) return;
+    // No grid to refresh (the file was empty, then content arrived by undo, redo
+    // or an edit in another editor), or no columns left to show (undo back to an
+    // empty file). Swapping rows cannot fix either, the column set itself has to
+    // be built or torn down, and only buildGrid does that (issue #40).
+    if (!state.gridApi || emptyTableKind(state.data) === 'no-columns') { buildGrid(); return; }
     // Read the focus BEFORE the swap. Replacing the row data can dispatch a
     // cellFocused event with no column, and builder.ts answers that by clearing
     // the tracked coordinates — so after the swap there is nothing left to read.
@@ -125,6 +130,13 @@ export function refreshGrid(): void {
     const { body, pinnedTop } = partitionFrozenRows(rowData);
     state.gridApi.setGridOption('rowData', body);
     state.gridApi.setGridOption('pinnedTopRowData', pinnedTop);
+    // AG Grid keeps an overlay that is already up instead of building it again.
+    // One that said "No Rows To Show" because the only row was frozen would stay
+    // that way once the row is deleted, without the Add row button. Rebuild it.
+    if (emptyTableKind(state.data) === 'no-rows') {
+        state.gridApi.hideOverlay();
+        state.gridApi.showNoRowsOverlay();
+    }
     focusCell(focusRow, focusColId);
     // refreshGrid only swaps rowData, so the row/column counters in the toolbar
     // and status bar would otherwise go stale after a delete/insert/paste/undo.
