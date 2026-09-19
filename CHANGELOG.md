@@ -2,6 +2,12 @@
 
 All notable changes to CSV Grid Editor are documented here.
 
+## [1.22.0] - 2026-09-19
+
+### Added
+- **Start a table from nothing** - A new, empty CSV could not be filled in at all, and one with only a header row could not get its first data row ([#40](https://github.com/Robin-Reiche/csv-grid-editor/issues/40)). Every way of adding was anchored to something already there: insert row needs a row to go next to, the row menu needs a cell to right-click and `Ctrl+Enter` needs a cell to start from. An empty file showed a blank area with nothing to click. It now shows **Add column** where the table would be, and a header with nothing under it shows **Add row** instead of "No Rows To Show". `Ctrl+Enter` adds that first row too, and both are ordinary undo steps. A filter that matches nothing still says "No Rows To Show", since there are rows, they are just not shown.
+- **Right-click beside or below the table to make it bigger** - That space landed on no cell, so VS Code's own Cut, Copy and Paste menu came up with nothing in it that applied. It is where a person reaches to grow a table, and in a table started from nothing it is most of the view. It now offers **Add column** at the right end and **Add row** at the bottom, which goes through the same insert as the other row entries, so a sort or a filter behaves as it does everywhere else. Right-clicking inside a cell you are typing in keeps the usual menu, so Cut, Copy and Paste still work on the text.
+
 ## [1.21.0] - 2026-08-30
 
 ### Added
