@@ -21,6 +21,7 @@ import {
 import { freezeRows, unfreezeRow, unfreezeAllRows, frozenRowCount } from './freeze-rows';
 import { closeAllPopups } from './popups';
 import { addFirstRow, addFirstColumn } from './empty-state';
+import { resetDuplicatesState } from './duplicates';
 
 // ── Data mutations ────────────────────────────────────────────────────────────
 
@@ -141,7 +142,15 @@ function insertRows(anchorDisplayIndex: number, position: 'above' | 'below', cou
 
     state.isAutoFitted = false;
     state.autoFitCache = null;
-    refreshGrid();
+    // Adding a row ends "Show only duplicates", as every edit does. It has to
+    // end before the new row is looked for, not in notifyChange below: the
+    // view's own filter hides a blank row, so the row would not be found and
+    // the column filters would be cleared for nothing. Leaving the view builds
+    // the rows from state.data, which already holds the new row, so it stands
+    // in for the refresh.
+    const rebuilt = state.dupShowOnly;
+    resetDuplicatesState();
+    if (!rebuilt) refreshGrid();
     // Clears a filter that would hide the new rows, the way the sort was
     // flattened above.
     const first = revealAddedRow(insertAt);

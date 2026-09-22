@@ -7,7 +7,8 @@
 // the last row had been deleted, Ctrl+Enter did nothing, because the focus the
 // deleted row left behind still looked like a row to insert next to. That same
 // focus made a second Ctrl+Shift+K record an empty undo step and write the
-// file again.
+// file again. In the "Show only duplicates" view Ctrl+Enter cleared the column
+// filters although the view itself was what hid the new row.
 //
 // Run after `tsc -p ./`:  node test/ui-rows.test.cjs
 
@@ -131,6 +132,43 @@ runSuite('rows (browser)', [
             const status = document.getElementById('status').textContent;
             t.check(!!t.cell(0, 0) && status === '1 records', 'the new row is shown (status "' + status + '")');
             t.check(t.focusedRow() === 0, 'the focus is on it (row ' + t.focusedRow() + ')');
+        }`,
+    },
+    {
+        name: 'insert in the duplicates view with a filter on',
+        csv: 'city,n\nBerlin,1\nParis,\nBerlin,1\nRome,4',
+        steps: `async (t, csv) => {
+            ${FRAMES}
+            const press = ${PRESS};
+            await t.init(csv);
+            const shown = () => [0, 1, 2, 3, 4].map(i => t.cell(i, 0) ? t.cell(i, 0).textContent : '-').join(',');
+            // Untick 4 in the n column. (Blank) stays ticked, so a blank row
+            // passes this filter.
+            t.click(t.header(1).querySelector('.ag-header-cell-filter-button, .ag-header-cell-menu-button'));
+            await t.wait(300);
+            const four = [...document.querySelectorAll('.csv-filter-value-row')].find(r => r.textContent === '4');
+            t.check(!!four, 'the filter lists 4');
+            const cb = four.querySelector('input');
+            cb.checked = false;
+            cb.dispatchEvent(new Event('change'));
+            await t.wait(300);
+            document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+            await t.wait(200);
+            t.check(shown() === 'Berlin,Paris,Berlin,-,-', 'Rome is filtered out (' + shown() + ')');
+
+            document.getElementById('btn-duplicates').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(300);
+            document.getElementById('dup-only-toggle').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(300);
+            t.check(shown() === 'Berlin,Berlin,-,-,-', 'the view shows the two duplicates (' + shown() + ')');
+
+            await t.focusCell(0, 0);
+            await press(t, 'Enter', { ctrlKey: true });
+            t.check(t.lastEdit() === 'city,n\\nBerlin,1\\n,\\nParis,\\nBerlin,1\\nRome,4',
+                'Ctrl+Enter adds the row under the first Berlin (' + JSON.stringify(t.lastEdit()) + ')');
+            t.check(shown() === 'Berlin,,Paris,Berlin,-', 'the new row is shown and Rome stays filtered out (' + shown() + ')');
+            t.check(document.getElementById('btn-clear-filters').style.display !== 'none', 'the filter is still on');
+            t.check(t.focusedRow() === 1, 'the focus is on the new row (row ' + t.focusedRow() + ')');
         }`,
     },
 ]);

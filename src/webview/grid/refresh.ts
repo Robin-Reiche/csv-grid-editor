@@ -125,11 +125,14 @@ export function clampRow(rowIndex: number, rowCount: number): number | null {
 // worse surprise. A filter that lets blank rows through is left alone. Both
 // ways of adding a blank row come through here: inserting next to a row
 // (features/delete-row-col.ts) and starting the first row of an empty table
-// (features/empty-state.ts).
+// (features/empty-state.ts). Only column filters count. The "Show only
+// duplicates" view hides rows too, but clearing the column filters cannot
+// bring back a row that view hides. An insert ends that view before it gets
+// here.
 export function revealAddedRow(dataIndex: number): number | null {
     if (!state.gridApi) return null;
     const shown = displayIndexOfDataRow(dataIndex);
-    if (shown !== null || !state.gridApi.isAnyFilterPresent()) return shown;
+    if (shown !== null || !state.gridApi.isColumnFilterPresent()) return shown;
     state.gridApi.setFilterModel(null);
     return displayIndexOfDataRow(dataIndex);
 }
