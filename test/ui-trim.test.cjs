@@ -7,6 +7,9 @@
 // them. Switching the setting while a sort or a filter is active must leave
 // both working. None of this may ever write to the file.
 //
+// Also here: a Shift or Ctrl click on a checkbox is a selection gesture and
+// must not flip the value.
+//
 // Run after `tsc -p ./`:  node test/ui-trim.test.cjs
 
 const { runSuite } = require('./ui/harness.cjs');
@@ -173,6 +176,33 @@ runSuite('spaces around values (browser)', [
             t.check(md.includes('|  Berlin  |') && md.includes('|  city  |'),
                 'with spaces shown the export keeps them in names and values alike (' + JSON.stringify(md) + ')');
             t.check(t.sent('edit').length === 0, 'exporting wrote nothing');
+        },
+    },
+    {
+        name: 'checkbox with a modifier',
+        csv: 'name,active,n,note\na,true,1,x\nb,false,2,y\nc,true,3,z\nd,false,4,w',
+        settings: { boolCheckboxes: true },
+        steps: async (t, csv) => {
+            await t.init(csv);
+            const clickBox = async (row, col, mods) => {
+                const box = t.box(row, col);
+                ['mousedown', 'mouseup', 'click'].forEach(ty => box.dispatchEvent(new MouseEvent(ty,
+                    Object.assign({ bubbles: true, cancelable: true, button: 0, detail: 1 }, mods))));
+                await t.wait(200);
+            };
+            await t.focusCell(0, 0);
+            await clickBox(2, 1, { shiftKey: true });
+            const selected = document.querySelectorAll('#grid-container .cell-range-sel').length;
+            t.check(selected > 1, 'Shift+click on a box extends the selection (' + selected + ' cells)');
+            t.check(t.sent('edit').length === 0, 'Shift+click on a box does not flip it (' + JSON.stringify(t.lastEdit()) + ')');
+            await clickBox(3, 1, { ctrlKey: true });
+            await clickBox(3, 1, { metaKey: true });
+            await clickBox(3, 1, { altKey: true });
+            t.check(t.sent('edit').length === 0, 'Ctrl, Cmd or Alt+click on a box does not flip it ('
+                + t.sent('edit').length + ' edits)');
+            await clickBox(3, 1, {});
+            t.check(t.sent('edit').length === 1 && /d,true,4,w/.test(t.lastEdit()),
+                'a plain click still flips it');
         },
     },
 ]);
