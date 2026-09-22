@@ -33,7 +33,14 @@ export function parseCsv(text: string, delimiter: string, trimFields: boolean = 
             } else {
                 field += ch;
             }
-        } else if (ch === '"') {
+        } else if (ch === '"' && field === '') {
+            // A quote opens a quoted field only as the field's first character.
+            // Further in it is part of the value, as in 5" disk: read as an
+            // opening quote it swallowed the delimiters and line breaks after it
+            // and merged the rest of the file into one cell. Excel and Python's
+            // csv read it the same way. field is also empty right after a
+            // quoted "" closes, but a quote there would have made it an escaped
+            // "" inside the field, so this cannot reopen one by mistake.
             inQuotes = true;
         } else if (ch === delimiter) {
             row.push(finalize(field));
