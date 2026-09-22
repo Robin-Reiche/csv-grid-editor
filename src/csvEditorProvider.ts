@@ -166,8 +166,10 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             // The record scanners need the delimiter to tell a quote that opens a
             // field from an inch mark inside a value. Detection only reads the
             // first line, so reading that line up front gives the same answer the
-            // document gets below.
-            scanDelimiter = this.detectDelimiter(filePath, await readFirstLine(filePath));
+            // document gets below. Plain text and the full file never scan.
+            if (previewMode === 'head' || previewMode === 'tail' || previewMode === 'chunked') {
+                scanDelimiter = this.detectDelimiter(filePath, await readFirstLine(filePath));
+            }
 
             if (previewMode === 'plaintext') {
                 content = await fs.promises.readFile(filePath, 'utf8');
