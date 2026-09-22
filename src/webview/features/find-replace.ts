@@ -3,6 +3,7 @@ import { pushUndo, notifyChange } from './undo-redo';
 import { scheduleRecomputeColTypes } from '../grid/column-type';
 import { dataRowIndexForFindMatch } from '../grid/row-mapping';
 import { focusCell } from '../grid/refresh';
+import type { FindMatch } from '../types';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -42,7 +43,19 @@ function refreshRows(rowIndices: Set<number>): void {
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
-function execFind(): void {
+// The columns find looks in: the ones on screen, in screen order. A hidden
+// column used to be searched too, so the counter included matches nobody could
+// see and Replace All rewrote cells the user had put out of view.
+function searchCols(): any[] {
+    return (state.gridApi.getAllDisplayedColumns() as any[])
+        .filter(c => c.getColId() !== 'row-index' && c.getColDef().field)
+        .map(c => c.getColDef());
+}
+
+// `after` is the cell a replace just changed. The search then starts on the
+// first match past it in screen order, so the counter moves on instead of
+// jumping back to the top or landing on the same cell again.
+function execFind(after?: { rowIndex: number; colField: string }): void {
     debounceTimer = null;
     if (!state.gridApi) return;
 
@@ -60,9 +73,8 @@ function execFind(): void {
         return;
     }
 
-    // Cache column list once — calling getColumnDefs() inside forEachNode is expensive
-    const cols = (state.gridApi.getColumnDefs() as any[])
-        .filter(col => col.colId !== 'row-index' && col.field);
+    // Cache column list once, reading it inside forEachNode is expensive
+    const cols = searchCols();
 
     const lowerNeedle = cs ? '' : needle.toLowerCase();
 
@@ -83,13 +95,23 @@ function execFind(): void {
         }
     });
 
-    if (state.findMatches.length) state.findMatchIndex = 0;
+    if (state.findMatches.length) {
+        state.findMatchIndex = 0;
+        if (after) {
+            const colPos = new Map<string, number>(cols.map((c, i) => [c.field, i]));
+            const afterCol = colPos.get(after.colField) ?? -1;
+            const next = state.findMatches.findIndex(m =>
+                m.rowIndex > after.rowIndex
+                || (m.rowIndex === after.rowIndex && (colPos.get(m.colField) ?? -1) > afterCol));
+            if (next >= 0) state.findMatchIndex = next;
+        }
+    }
     countEl.textContent = state.findMatches.length
         ? (state.findMatchIndex + 1) + ' / ' + state.findMatches.length
         : '0 matches';
 
     if (state.findMatchIndex >= 0) {
-        state.gridApi.ensureIndexVisible(state.findMatches[0].rowIndex, 'middle');
+        state.gridApi.ensureIndexVisible(state.findMatches[state.findMatchIndex].rowIndex, 'middle');
     }
 
     const newRows = new Set(state.findMatches.map(m => m.rowIndex));
@@ -139,25 +161,41 @@ export function closeFindBar(): void {
 
 // ── replace ───────────────────────────────────────────────────────────────────
 
+// Replaces `regex` in one matched cell and returns the grid row it lives on.
+// The replacement comes back from a function so it is inserted exactly as
+// typed. Handed over as a plain string, "$$" became "$" and "$&" pasted in the
+// matched text. The grid's row objects are copies of state.data, so the new
+// value is written to both, otherwise the grid kept showing the old value and
+// the next search found it again.
+function replaceInCell(m: FindMatch, regex: RegExp, repl: string): any {
+    const colIdx = parseInt(m.colField.replace('col_', ''));
+    const dataIndex = dataRowIndexForFindMatch(m);
+    const newVal = String(state.data[dataIndex][colIdx] ?? '').replace(regex, () => repl);
+    state.data[dataIndex][colIdx] = newVal;
+    const node = state.gridApi?.getRowNode(String(dataIndex));
+    if (node?.data && Number(node.data._origIndex) === dataIndex) {
+        node.data[m.colField] = newVal;
+        return node;
+    }
+    return null;
+}
+
 function replaceOne(): void {
     if (state.findMatchIndex < 0 || IS_PREVIEW) return;
     const needle = (document.getElementById('find-input') as HTMLInputElement).value;
     const repl   = (document.getElementById('replace-input') as HTMLInputElement).value;
     const cs     = isCaseSensitive();
     const m      = state.findMatches[state.findMatchIndex];
-    const colIdx = parseInt(m.colField.replace('col_', ''));
-    const dataIndex = dataRowIndexForFindMatch(m);
-    const oldVal = String(state.data[dataIndex][colIdx] ?? '');
-    // Replace only the FIRST occurrence of needle within the cell value
-    const newVal = oldVal.replace(
-        new RegExp(escapeRegExp(needle), cs ? '' : 'i'),
-        repl
-    );
+    // The column was hidden since the search ran. Search again rather than
+    // change a cell the user can no longer see.
+    if (!searchCols().some(c => c.field === m.colField)) { execFind(); return; }
     pushUndo();
-    state.data[dataIndex][colIdx] = newVal;
+    // Replace only the FIRST occurrence of needle within the cell value
+    const node = replaceInCell(m, new RegExp(escapeRegExp(needle), cs ? '' : 'i'), repl);
+    if (node) state.gridApi.refreshCells({ rowNodes: [node], force: true });
     notifyChange();
     scheduleRecomputeColTypes();
-    execFind();
+    execFind(m);
 }
 
 function replaceAll(): void {
@@ -165,15 +203,19 @@ function replaceAll(): void {
     const needle = (document.getElementById('find-input') as HTMLInputElement).value;
     const repl   = (document.getElementById('replace-input') as HTMLInputElement).value;
     const cs     = isCaseSensitive();
+    // Search again first. The matches on hand may predate a column being
+    // hidden or the last keystroke in the find box.
+    execFind();
+    if (!state.findMatches.length) return;
     // Global regex — replaces ALL occurrences within each matching cell
     const regex  = new RegExp(escapeRegExp(needle), cs ? 'g' : 'gi');
     pushUndo();
+    const nodes: any[] = [];
     state.findMatches.forEach(m => {
-        const colIdx = parseInt(m.colField.replace('col_', ''));
-        const dataIndex = dataRowIndexForFindMatch(m);
-        const oldVal = String(state.data[dataIndex][colIdx] ?? '');
-        state.data[dataIndex][colIdx] = oldVal.replace(regex, repl);
+        const node = replaceInCell(m, regex, repl);
+        if (node) nodes.push(node);
     });
+    if (nodes.length) state.gridApi.refreshCells({ rowNodes: nodes, force: true });
     notifyChange();
     scheduleRecomputeColTypes();
     execFind();
