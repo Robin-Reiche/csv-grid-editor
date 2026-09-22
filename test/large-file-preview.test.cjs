@@ -85,57 +85,57 @@ async function main() {
     // ── counting ────────────────────────────────────────────────────────────
 
     await test('the total counts records, not lines', async () => {
-        assert.strictEqual(await countRecords(file), expected.length);
+        assert.strictEqual(await countRecords(file, ','), expected.length);
     });
 
     await test('a missing trailing newline does not change the total', async () => {
-        assert.strictEqual(await countRecords(noNewline), expected.length);
+        assert.strictEqual(await countRecords(noNewline, ','), expected.length);
     });
 
     await test('head and tail agree on the total', async () => {
-        const tail = await readTailRecords(file, 3);
-        assert.strictEqual(tail.totalRecordCount, await countRecords(file));
+        const tail = await readTailRecords(file, 3, ',');
+        assert.strictEqual(tail.totalRecordCount, await countRecords(file, ','));
     });
 
     // ── head ────────────────────────────────────────────────────────────────
 
     await test('head returns whole records', async () => {
-        const rows = parseCsv(await readFirstRecords(file, 4), ',');
+        const rows = parseCsv(await readFirstRecords(file, 4, ','), ',');
         assert.deepStrictEqual(rows, expected.slice(0, 4));
     });
 
     await test('head stops on a record boundary even mid-quote', async () => {
-        const rows = parseCsv(await readFirstRecords(file, 3), ',');
+        const rows = parseCsv(await readFirstRecords(file, 3, ','), ',');
         assert.strictEqual(rows.length, 3);
         assert.strictEqual(rows[2][2], 'two\nlines');
     });
 
     await test('head asked for more records than the file holds returns all of them', async () => {
-        assert.deepStrictEqual(parseCsv(await readFirstRecords(file, 999), ','), expected);
+        assert.deepStrictEqual(parseCsv(await readFirstRecords(file, 999, ','), ','), expected);
     });
 
     // ── tail ────────────────────────────────────────────────────────────────
 
     await test('tail returns the header plus the last records', async () => {
-        const { content } = await readTailRecords(file, 3);
+        const { content } = await readTailRecords(file, 3, ',');
         assert.deepStrictEqual(parseCsv(content, ','), [expected[0], ...expected.slice(-3)]);
     });
 
     await test('tail works without a trailing newline', async () => {
-        const { content, totalRecordCount } = await readTailRecords(noNewline, 2);
+        const { content, totalRecordCount } = await readTailRecords(noNewline, 2, ',');
         assert.strictEqual(totalRecordCount, expected.length);
         assert.deepStrictEqual(parseCsv(content, ','), [expected[0], ...expected.slice(-2)]);
     });
 
     await test('tail asked for more records than the file holds returns all of them', async () => {
-        const { content } = await readTailRecords(file, 999);
+        const { content } = await readTailRecords(file, 999, ',');
         assert.deepStrictEqual(parseCsv(content, ','), expected);
     });
 
     // ── paged view ──────────────────────────────────────────────────────────
 
     await test('pages cover every data record exactly once, in order', async () => {
-        const index = await buildPageIndex(file, 2);
+        const index = await buildPageIndex(file, 2, ',');
         assert.strictEqual(index.totalRows, expected.length - 1);
         const seen = [];
         for (let p = 0; p < index.offsets.length; p++) {
@@ -148,13 +148,13 @@ async function main() {
     });
 
     await test('a page never cuts a multi-line value in half', async () => {
-        const index = await buildPageIndex(file, 1);
+        const index = await buildPageIndex(file, 1, ',');
         const rows = parseCsv(await readPage(file, index, 1), ',');
         assert.deepStrictEqual(rows[1], expected[2]);
     });
 
     await test('the last record without a trailing newline still gets a page', async () => {
-        const index = await buildPageIndex(noNewline, 2);
+        const index = await buildPageIndex(noNewline, 2, ',');
         assert.strictEqual(index.totalRows, expected.length - 1);
         const seen = [];
         for (let p = 0; p < index.offsets.length; p++) {
@@ -168,17 +168,54 @@ async function main() {
     await test('quote state survives a chunk boundary, including a split "" pair', async () => {
         const text = fs.readFileSync(boundary, 'utf8');
         const want = parseCsv(text, ',');
-        assert.strictEqual(await countRecords(boundary), want.length);
-        assert.deepStrictEqual(parseCsv(await readFirstRecords(boundary, want.length), ','), want);
-        const { content, totalRecordCount } = await readTailRecords(boundary, 2);
+        assert.strictEqual(await countRecords(boundary, ','), want.length);
+        assert.deepStrictEqual(parseCsv(await readFirstRecords(boundary, want.length, ','), ','), want);
+        const { content, totalRecordCount } = await readTailRecords(boundary, 2, ',');
         assert.strictEqual(totalRecordCount, want.length);
         assert.deepStrictEqual(parseCsv(content, ','), [want[0], ...want.slice(-2)]);
-        const index = await buildPageIndex(boundary, 1);
+        const index = await buildPageIndex(boundary, 1, ',');
         const seen = [];
         for (let p = 0; p < index.offsets.length; p++) {
             seen.push(...dataRows(parseCsv(await readPage(boundary, index, p), ',')));
         }
         assert.deepStrictEqual(seen, dataRows(want));
+    });
+
+    // ── a quote inside a value ──────────────────────────────────────────────
+
+    // The grid reads a " only at the start of a field as an opening quote, so
+    // 5" disk is plain text. The scanner used to open a quoted section at any
+    // quote, and on such a file the counts and pages stopped matching the grid.
+    // A quote after a space behind the delimiter still opens a field, in both.
+    await test('inch marks and a space before a quote split records the way the grid does', async () => {
+        const lines = ['size;n;note'];
+        for (let i = 0; i < 9; i++) lines.push(i + '" disk;' + i + '; "a;b\nc"');
+        const text = lines.join('\n') + '\n';
+        const inch = fixture('inch-marks.csv', text);
+        const want = parseCsv(text, ';');
+        assert.strictEqual(want.length, 10, 'the fixture no longer parses to ten records');
+        assert.strictEqual(await countRecords(inch, ';'), want.length);
+        assert.deepStrictEqual(parseCsv(await readFirstRecords(inch, 4, ';'), ';'), want.slice(0, 4));
+        const { content, totalRecordCount } = await readTailRecords(inch, 2, ';');
+        assert.strictEqual(totalRecordCount, want.length);
+        assert.deepStrictEqual(parseCsv(content, ';'), [want[0], ...want.slice(-2)]);
+        const index = await buildPageIndex(inch, 3, ';');
+        assert.strictEqual(index.totalRows, want.length - 1);
+        const seen = [];
+        for (let p = 0; p < index.offsets.length; p++) {
+            const rows = parseCsv(await readPage(inch, index, p), ';');
+            assert.ok(rows.length - 1 <= 3, 'page ' + p + ' holds more rows than the page size');
+            seen.push(...dataRows(rows));
+        }
+        assert.deepStrictEqual(seen, dataRows(want));
+    });
+
+    await test('the provider detects the delimiter before it scans', async () => {
+        const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'csvEditorProvider.ts'), 'utf8');
+        assert.ok(/scanDelimiter = this\.detectDelimiter\(filePath, await readFirstLine\(filePath\)\)/.test(src),
+            'the scanners are no longer told the file\'s delimiter');
+        const { readFirstLine } = require('../out/largeFileReader.js');
+        assert.strictEqual(await readFirstLine(file), 'id,city,note');
     });
 
     // ── wiring ──────────────────────────────────────────────────────────────

@@ -9,6 +9,7 @@ import {
     countRecords,
     readTailRecords,
     buildPageIndex,
+    readFirstLine,
     readPage
 } from './largeFileReader';
 
@@ -110,6 +111,7 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         let previewMode = 'full';
         let totalLineCount = 0;
         let isChunked = false;
+        let scanDelimiter = ',';
 
         if (fileSize > LARGE_FILE_THRESHOLD) {
             const sizeMB = (fileSize / (1024 * 1024)).toFixed(2);
@@ -161,16 +163,21 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
 
             previewMode = choice.id;
             const filePath = uri.fsPath;
+            // The record scanners need the delimiter to tell a quote that opens a
+            // field from an inch mark inside a value. Detection only reads the
+            // first line, so reading that line up front gives the same answer the
+            // document gets below.
+            scanDelimiter = this.detectDelimiter(filePath, await readFirstLine(filePath));
 
             if (previewMode === 'plaintext') {
                 content = await fs.promises.readFile(filePath, 'utf8');
                 isPreview = true;
             } else if (previewMode === 'head') {
-                content = await readFirstRecords(filePath, PREVIEW_ROW_COUNT + 1);
-                totalLineCount = await countRecords(filePath);
+                content = await readFirstRecords(filePath, PREVIEW_ROW_COUNT + 1, scanDelimiter);
+                totalLineCount = await countRecords(filePath, scanDelimiter);
                 isPreview = true;
             } else if (previewMode === 'tail') {
-                const result = await readTailRecords(filePath, PREVIEW_ROW_COUNT);
+                const result = await readTailRecords(filePath, PREVIEW_ROW_COUNT, scanDelimiter);
                 content = result.content;
                 totalLineCount = result.totalRecordCount;
                 isPreview = true;
@@ -191,7 +198,7 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         // banner needs that number, so the index is built before the document
         // rather than hung on it afterwards. Header included, the way head and
         // tail count it.
-        const pageIndex = isChunked ? await buildPageIndex(uri.fsPath, PAGE_SIZE) : null;
+        const pageIndex = isChunked ? await buildPageIndex(uri.fsPath, PAGE_SIZE, scanDelimiter) : null;
         if (pageIndex) totalLineCount = pageIndex.totalRows + 1;
 
         // The paged view holds no text of its own, its pages are served on demand,
