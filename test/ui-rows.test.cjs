@@ -1,0 +1,60 @@
+// Browser tests for inserting rows with the keyboard.
+//
+// With a column filter on, Ctrl+Enter added the new blank row to the file but
+// the filter hid it, and the focus landed on the next row the filter let
+// through, so whatever was typed next replaced that row.
+//
+// Run after `tsc -p ./`:  node test/ui-rows.test.cjs
+
+const { runSuite } = require('./ui/harness.cjs');
+
+const CITIES = 'city,n\nBerlin,1\nHanoi,2\nParis,3\nRome,4';
+
+// Runs inside the page: presses a row shortcut on the focused cell.
+const PRESS = `async (t, key, mods) => {
+    const target = document.querySelector('#grid-container .ag-cell-focus') || document.body;
+    target.dispatchEvent(new KeyboardEvent('keydown', Object.assign({ key, bubbles: true, cancelable: true }, mods)));
+    await t.wait(400);
+}`;
+
+runSuite('rows (browser)', [
+    {
+        name: 'insert with a filter on',
+        csv: CITIES,
+        steps: `async (t, csv) => {
+            const press = ${PRESS};
+            await t.init(csv);
+            // Untick Paris in the city column's value filter.
+            t.click(t.header(0).querySelector('.ag-header-cell-filter-button, .ag-header-cell-menu-button'));
+            await t.wait(300);
+            const paris = [...document.querySelectorAll('.csv-filter-value-row')].find(r => r.textContent === 'Paris');
+            t.check(!!paris, 'the filter lists Paris');
+            const cb = paris.querySelector('input');
+            cb.checked = false;
+            cb.dispatchEvent(new Event('change'));
+            await t.wait(300);
+            document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+            await t.wait(200);
+            const shown = () => [0, 1, 2, 3, 4, 5].map(i => t.cell(i, 0) ? t.cell(i, 0).textContent : '-').join(',');
+            t.check(shown() === 'Berlin,Hanoi,Rome,-,-,-', 'Paris is filtered out (' + shown() + ')');
+
+            await t.focusCell(0, 0);
+            await press(t, 'Enter', { ctrlKey: true });
+            t.check(t.lastEdit() === 'city,n\\nBerlin,1\\n,\\nHanoi,2\\nParis,3\\nRome,4',
+                'Ctrl+Enter adds the row under Berlin (' + JSON.stringify(t.lastEdit()) + ')');
+            const focused = document.querySelector('#grid-container .ag-cell-focus');
+            t.check(t.focusedRow() === 1 && focused && focused.textContent === '',
+                'the focus is on the new blank row (row ' + t.focusedRow() + ', "' + (focused && focused.textContent) + '")');
+            t.check(t.cell(1, 0) && t.cell(1, 0).textContent === '', 'the new row is shown (' + shown() + ')');
+
+            // Typing now fills the new row and leaves Hanoi alone.
+            await t.pressEnter();
+            const ta = document.querySelector('#grid-container textarea');
+            t.check(!!ta, 'Enter opens the editor on the new row');
+            if (ta) { ta.value = 'Oslo'; ta.dispatchEvent(new Event('input', { bubbles: true })); }
+            await t.pressEnter();
+            t.check(t.lastEdit() === 'city,n\\nBerlin,1\\nOslo,\\nHanoi,2\\nParis,3\\nRome,4',
+                'the typed value lands in the new row (' + JSON.stringify(t.lastEdit()) + ')');
+        }`,
+    },
+]);
