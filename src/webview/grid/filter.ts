@@ -1,9 +1,24 @@
 import type { ColType } from '../types';
+import { state } from '../state';
+import { trimPadding } from '../utils/csv';
 
 // `join` is the operator linking this condition to the previous one in the
 // list (unused on the first condition). Conditions with join 'or' start a new
 // OR-group; AND binds tighter than OR.
 type Condition = { type: string; value: string; join: 'and' | 'or' };
+
+// The value a row is listed and matched under: what the grid shows for it, so
+// with "Hide spaces around values" on ' Berlin ' and 'Berlin' are one entry and
+// with it off they are two. The list and doesFilterPass both go through here,
+// which is what keeps a ticked value from hiding its rows. A value made of
+// nothing but whitespace counts as blank either way. '' means blank.
+// `trimmed` is the setting to key under, the same rule as shownValue in
+// control-char-cell.ts but passed in, because _syncKeys needs the old keys too.
+function filterKey(raw: unknown, trimmed: boolean): string {
+    if (raw == null) return '';
+    const s = String(raw);
+    return s.trim() === '' ? '' : trimmed ? trimPadding(s) : s;
+}
 
 export function createCombinedFilter(colType: ColType): any {
     return class {
@@ -17,6 +32,8 @@ export function createCombinedFilter(colType: ColType): any {
         truncated = false;
         _renderValuesList: (() => void) | null = null;
         _displayedValues: string[] = [];
+        // The trimDisplay setting the keys above were made under. See _syncKeys.
+        _keyedTrimmed = state.settings.trimDisplay;
 
         init(params: any) {
             this.params = params;
@@ -32,10 +49,11 @@ export function createCombinedFilter(colType: ColType): any {
             const field = this.params.column.getColId();
             const vals = new Set<string>();
             this.hasBlank = false;
+            this._keyedTrimmed = state.settings.trimDisplay;
             this.params.api.forEachNode((n: any) => {
-                const v = n.data[field];
-                if (v == null || String(v).trim() === '') { this.hasBlank = true; return; }
-                vals.add(String(v));
+                const key = filterKey(n.data[field], this._keyedTrimmed);
+                if (key === '') { this.hasBlank = true; return; }
+                vals.add(key);
             });
             let arr = Array.from(vals);
             if (colType === 'integer' || colType === 'float') {
@@ -85,6 +103,28 @@ export function createCombinedFilter(colType: ColType): any {
                     { id: 'notblank',    label: 'Is not blank' },
                 ];
             }
+        }
+
+        // Switching "Hide spaces around values" changes what a value is keyed
+        // under, so the list and the ticks made under the old setting are
+        // carried over to the new keys: a new key stays ticked when any row
+        // behind it was ticked before. Everything that reads the keys calls
+        // this first, so the filter never compares keys of two kinds.
+        _syncKeys() {
+            if (this._keyedTrimmed === state.settings.trimDisplay) return;
+            const field = this.params.column.getColId();
+            const checked = new Set<string>();
+            if (this.checkedValues.has('__blank__')) checked.add('__blank__');
+            this.params.api.forEachNode((n: any) => {
+                const v = n.data[field];
+                const newKey = filterKey(v, state.settings.trimDisplay);
+                if (newKey !== '' && this.checkedValues.has(filterKey(v, this._keyedTrimmed))) checked.add(newKey);
+            });
+            this._buildValueList();
+            this.checkedValues = checked;
+            // The panel is kept between openings, so its list is redrawn here
+            // rather than showing the old keys the next time it opens.
+            this._renderValuesList?.();
         }
 
         // ── condition evaluation ───────────────────────────────────────────────
@@ -148,6 +188,7 @@ export function createCombinedFilter(colType: ColType): any {
         }
 
         _valuesPassingCondition(): string[] {
+            this._syncKeys();
             return this.allValues.filter(v => this._passesConditions(v));
         }
 
@@ -394,6 +435,7 @@ export function createCombinedFilter(colType: ColType): any {
         getGui() { return this.eGui; }
 
         isFilterActive() {
+            this._syncKeys();
             if (this._hasAnyActiveCondition()) return true;
             const allChecked = this.allValues.every(v => this.checkedValues.has(v));
             return this.hasBlank ? !(allChecked && this.checkedValues.has('__blank__')) : !allChecked;
@@ -401,8 +443,8 @@ export function createCombinedFilter(colType: ColType): any {
 
         doesFilterPass(params: any) {
             const field   = this.params.column.getColId();
-            const raw     = params.data[field];
-            const valStr  = raw != null ? String(raw).trim() : '';
+            this._syncKeys();
+            const valStr  = filterKey(params.data[field], this._keyedTrimmed);
             const isBlank = valStr === '';
 
             // 1. Checkbox filter
@@ -418,6 +460,7 @@ export function createCombinedFilter(colType: ColType): any {
         }
 
         getModel() {
+            this._syncKeys();
             if (!this.isFilterActive()) return null;
             return {
                 conditions: this.conditions.map(c => ({ type: c.type, value: c.value, join: c.join })),

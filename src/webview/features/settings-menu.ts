@@ -4,6 +4,7 @@ import { closeAllPopups } from './popups';
 import { applyColorMode } from './color-mode';
 import { applyBoolCheckboxes } from './bool-checkbox';
 import { syncColumnHeaders } from '../grid/refresh';
+import { reapplySortAndFilter } from '../grid/builder';
 
 /**
  * Settings menu (issue #41).
@@ -83,7 +84,7 @@ const ITEMS: SettingItem[] = [
         key: 'trimDisplay', group: 'View',
         label: 'Hide spaces around values',
         hint: 'Leaves leading and trailing spaces off the screen. The file keeps them.',
-        apply: () => { redrawCells(); syncColumnHeaders(); dropAutoFit(); },
+        apply: () => { redrawCells(); syncColumnHeaders(); dropAutoFit(); reapplySortAndFilter(); },
     },
     {
         key: 'enterMovesDown', group: 'Editing',
