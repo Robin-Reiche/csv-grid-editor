@@ -14,9 +14,9 @@ const fs = require('fs');
 const path = require('path');
 const { BOOL_PAIRS, readBool, flipBoolValue } = require('../out/webview/utils/bool-values.js');
 
-// recomputeColTypes paints header classes and fires an event, so it needs the
-// two pieces of a document it touches. Nothing here renders.
-global.document = { querySelector: () => null, dispatchEvent: () => {} };
+// recomputeColTypes fires an event when a type changes, so it needs that piece
+// of a document. Nothing here renders.
+global.document = { dispatchEvent: () => {} };
 global.CustomEvent = class { constructor(name) { this.type = name; } };
 
 const { getColumnType, recomputeColTypes } = require('../out/webview/grid/column-type.js');
@@ -156,7 +156,9 @@ test('a column whose type is worked out again gets redrawn', () => {
     const refreshed = [];
     state.data = [['answer'], ['yes'], ['no'], ['yes']];
     state.colTypes = [];
-    state.gridApi = { refreshCells: (opts) => refreshed.push(opts) };
+    // A changed type is also written into the column defs for the header badge.
+    // This grid has none, so there is nothing to write.
+    state.gridApi = { refreshCells: (opts) => refreshed.push(opts), getColumnDefs: () => [] };
 
     recomputeColTypes();
     assert.strictEqual(state.colTypes[0], 'boolean');

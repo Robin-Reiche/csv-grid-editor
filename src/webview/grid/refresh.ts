@@ -1,6 +1,6 @@
 import { state, getNumCols, emptyTableKind } from '../state';
 import { buildGrid } from './builder';
-import { recomputeColTypes } from './column-type';
+import { recomputeColTypes, TYPE_LABELS } from './column-type';
 import { shownValue } from './control-char-cell';
 
 // Splits a freshly-built rowData array into the scrollable body and the frozen
@@ -45,6 +45,9 @@ export function partitionFrozenRows<T extends { _origIndex?: number }>(
 // header row is editable data (rename column), but refreshGrid only swaps
 // rowData — so after undo/redo restores state.data[0] the header labels must be
 // re-synced WITHOUT a full buildGrid (which would drop widths/sort/freeze).
+// The type badge (the col-type-<type> header class) and the tooltip come from
+// state.colTypes here too. Every def this pushes is drawn as it stands, so a
+// def still holding the type it was built with would bring the old badge back.
 export function syncColumnHeaders(): void {
     if (!state.gridApi) return;
     const header = state.data[0] ?? [];
@@ -55,7 +58,12 @@ export function syncColumnHeaders(): void {
         if (typeof d.field === 'string' && d.field.indexOf('col_') === 0) {
             const ci   = parseInt(d.field.slice(4), 10);
             const name = shownValue(header[ci] ?? '');
-            if (d.headerName !== name) { d.headerName = name; changed = true; }
+            const type = state.colTypes[ci] ?? 'string';
+            const cls  = 'col-type-' + type;
+            const tip  = TYPE_LABELS[type] ?? 'Text';
+            if (d.headerName !== name)   { d.headerName = name;   changed = true; }
+            if (d.headerClass !== cls)   { d.headerClass = cls;   changed = true; }
+            if (d.headerTooltip !== tip) { d.headerTooltip = tip; changed = true; }
         }
     }
     if (changed) {

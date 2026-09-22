@@ -1,5 +1,5 @@
 import { state, getNumCols, emptyTableKind } from '../state';
-import { getColumnType, scheduleRecomputeColTypes } from './column-type';
+import { getColumnType, scheduleRecomputeColTypes, TYPE_LABELS } from './column-type';
 import { NoRowsOverlay, renderNoColumns } from '../features/empty-state';
 import { createCombinedFilter } from './filter';
 import { dataRowIndexForNode } from './row-mapping';
@@ -20,11 +20,6 @@ import {
     onCellMouseOverHandler,
     clearRangeSelection,
 } from '../features/range-select';
-
-const TYPE_LABELS: Record<string, string> = {
-    integer: 'Integer', float: 'Float / Decimal', string: 'Text',
-    boolean: 'Boolean', date: 'Date', datetime: 'Date & Time', time: 'Time'
-};
 
 // ── Grid icons ───────────────────────────────────────────────────────────
 // AG Grid header icons are rendered as inline SVG built from the official

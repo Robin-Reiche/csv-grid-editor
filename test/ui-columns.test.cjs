@@ -4,7 +4,9 @@
 // add, remove or rename a column. An outside change to the file, undo and
 // redo of a column insert or delete all arrive that way. The grid kept the
 // old columns: a restored column stayed invisible, a removed one stayed on
-// screen and renamed headers kept their old names.
+// screen and renamed headers kept their old names. The type badge and the
+// header tooltip went stale after an undo, a rename or the "Hide spaces"
+// switch, while the cells already used the new type.
 //
 // Run after `tsc -p ./`:  node test/ui-columns.test.cjs
 
@@ -16,6 +18,12 @@ const HELPERS = `
     t.names = () => [0, 1, 2, 3].map(i => {
         const h = t.header(i);
         return h ? h.querySelector('.ag-header-cell-text').textContent : '-';
+    }).join('|');
+    t.types = () => [0, 1, 2, 3].map(i => {
+        const h = t.header(i);
+        if (!h) return '-';
+        const c = [...h.classList].find(k => k.indexOf('col-type-') === 0);
+        return c ? c.slice(9) : '?';
     }).join('|');
     t.col = (col) => {
         const out = [];
@@ -41,11 +49,38 @@ const HELPERS = `
         document.getElementById(id).dispatchEvent(new MouseEvent('click', { bubbles: true }));
         await t.wait(400);
     };
+    t.edit = async (row, col, value) => {
+        await t.focusCell(row, col);
+        await t.pressEnter();
+        const ta = document.querySelector('#grid-container textarea');
+        if (!ta) { t.check(false, 'Enter opens the editor on ' + row + ',' + col); return; }
+        ta.value = value;
+        ta.dispatchEvent(new Event('input', { bubbles: true }));
+        await t.pressEnter();
+        await t.wait(300);
+    };
+    // The header tooltip is AG Grid's own popup, shown after a hover.
+    t.tip = async (col) => {
+        const h = t.header(col);
+        const r = h.getBoundingClientRect();
+        const o = { bubbles: true, clientX: r.left + 10, clientY: r.top + 5 };
+        h.dispatchEvent(new MouseEvent('mouseover', o));
+        h.dispatchEvent(new MouseEvent('mouseenter', Object.assign({}, o, { bubbles: false })));
+        h.dispatchEvent(new MouseEvent('mousemove', o));
+        await t.wait(700);
+        const el = document.querySelector('.ag-tooltip, .ag-tooltip-custom');
+        const text = el ? el.textContent : null;
+        h.dispatchEvent(new MouseEvent('mouseleave', Object.assign({}, o, { bubbles: false })));
+        h.dispatchEvent(new MouseEvent('mouseout', o));
+        await t.wait(300);
+        return text;
+    };
 `;
 
 const steps = (body) => `async (t, csv) => { ${HELPERS} await t.init(csv); ${body} }`;
 
 runSuite('columns (browser)', [
+    // ── the column set follows the data ─────────────────────────────────────
     {
         name: 'an outside change adds a column',
         csv: 'a,b\n1,2\n3,4',
@@ -140,6 +175,53 @@ runSuite('columns (browser)', [
             await t.update('a,b\\n1,2');
             await t.update('a,b,x\\n1,2,3');
             t.check(t.names() === 'a|b|x|-', 'a column that comes back later is a new one and is shown (' + t.names() + ')');
+        `),
+    },
+
+    // ── the type badge and tooltip follow the type ──────────────────────────
+    {
+        name: 'type badge after undo of a column delete',
+        csv: 'name,active,amount\na,true,1\nb,false,2\nc,true,3',
+        steps: steps(`
+            t.check(t.types() === 'string|boolean|integer|-', 'the types at open (' + t.types() + ')');
+            await t.colMenu('col_0', 'col-ctx-delete');
+            t.check(t.types() === 'boolean|integer|-|-', 'after the delete (' + t.types() + ')');
+            await t.button('btn-undo');
+            t.check(t.types() === 'string|boolean|integer|-', 'after the undo (' + t.types() + ')');
+            const tip = await t.tip(1);
+            t.check(tip === 'Boolean', 'the tooltip agrees (' + tip + ')');
+        `),
+    },
+    {
+        name: 'type badge after a rename',
+        csv: 'k,v\na,x\nb,1\nc,2\nd,3\ne,4',
+        steps: steps(`
+            t.check(t.types() === 'string|string|-|-', 'one word among four numbers is text (' + t.types() + ')');
+            await t.edit(0, 1, '5');
+            t.check(t.types() === 'string|integer|-|-', 'the edit makes it a number column (' + t.types() + ')');
+            let tip = await t.tip(1);
+            t.check(tip === 'Integer', 'the tooltip follows the edit (' + tip + ')');
+            document.getElementById('col-context-menu').dataset.colId = 'col_1';
+            document.getElementById('col-ctx-rename').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(200);
+            document.getElementById('rename-input').value = 'value';
+            document.getElementById('rename-ok').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(300);
+            t.check(t.names() === 'k|value|-|-', 'the column is renamed (' + t.names() + ')');
+            t.check(t.types() === 'string|integer|-|-', 'and keeps its badge (' + t.types() + ')');
+            tip = await t.tip(1);
+            t.check(tip === 'Integer', 'and its tooltip (' + tip + ')');
+        `),
+    },
+    {
+        name: 'type badge after the Hide spaces switch',
+        csv: 'k, v \na,x\nb,1\nc,2\nd,3\ne,4',
+        steps: steps(`
+            await t.edit(0, 1, '5');
+            t.check(t.types() === 'string|integer|-|-', 'the edit makes it a number column (' + t.types() + ')');
+            await t.setSetting('trimDisplay', false);
+            t.check(t.names() === 'k| v |-|-', 'the header shows its spaces (' + JSON.stringify(t.names()) + ')');
+            t.check(t.types() === 'string|integer|-|-', 'and keeps its badge (' + t.types() + ')');
         `),
     },
 ]);
