@@ -124,9 +124,16 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
 
     async openCustomDocument(
         uri: vscode.Uri,
-        _openContext: vscode.CustomDocumentOpenContext,
+        openContext: vscode.CustomDocumentOpenContext,
         _token: vscode.CancellationToken
     ): Promise<CsvDocument> {
+        // Hot exit: VS Code saved the unsaved edits with backupCustomDocument
+        // and now hands them back. Reading the file instead brought the tab
+        // back dirty but with the old content. The edits were gone.
+        if (openContext.backupId) {
+            return this.restoreBackup(uri, openContext.backupId);
+        }
+
         const stat = await vscode.workspace.fs.stat(uri);
         const fileSize = stat.size;
 
@@ -230,6 +237,23 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         doc.pageIndex = pageIndex;
         doc.hasBom = hasBom;
 
+        return doc;
+    }
+
+    // Only an editable document gets backed up (a preview never turns dirty),
+    // so a restore always opens in full mode and skips the size question.
+    private async restoreBackup(uri: vscode.Uri, backupId: string): Promise<CsvDocument> {
+        const backup = decodeFile(await vscode.workspace.fs.readFile(vscode.Uri.parse(backupId)));
+        const doc = new CsvDocument(uri, backup.text, this.detectDelimiter(uri.fsPath, backup.text), false, 'full', 0, false);
+        doc.hasBom = backup.hasBom;
+        // The watcher and Reload from Disk compare against the file, not
+        // against the restored edits. A file deleted since the backup holds
+        // nothing. Failing the restore over that would lose the edits too.
+        try {
+            doc.diskText = decodeFile(await vscode.workspace.fs.readFile(uri)).text;
+        } catch {
+            doc.diskText = '';
+        }
         return doc;
     }
 

@@ -1,5 +1,8 @@
 // Regression guards for how the extension reads, saves and restores a file:
 //
+// - Hot exit. VS Code backs up unsaved edits on quit and hands the backup back
+//   on restart. The provider used to ignore it and read the file from disk, so
+//   the tab came back dirty with the old content and the edits were gone.
 // - Save As from Show Head, Show Tail or Paged View. Those hold only part of
 //   the file (the paged view holds nothing) and Save As wrote exactly that: a
 //   truncated or empty copy, without a word.
@@ -131,6 +134,45 @@ const tick = () => new Promise(r => setTimeout(r, 20));
 async function main() {
     console.log('reading, saving and restoring a file');
 
+    await test('hot exit brings the unsaved edits back, not the file on disk', async () => {
+        const p = file('hot.csv', 'h\nold\n');
+        const before = await open(p);
+        await before.edit('h\nUNSAVED EDIT\n');
+        const backupPath = path.join(tmpDir, 'hot.backup');
+        const backup = await before.backup(backupPath);
+
+        const after = await open(p, { backupId: backup.id });
+        assert.strictEqual(after.doc.content, 'h\nUNSAVED EDIT\n', 'the restored tab lost the unsaved edits');
+        await after.ready();
+        const init = after.posted.find(m => m.type === 'init');
+        assert.strictEqual(init && init.text, 'h\nUNSAVED EDIT\n', 'the grid was handed the old disk content');
+    });
+
+    await test('a restored backup still knows what the disk holds', async () => {
+        // The watcher and Reload from Disk compare against the real file, so
+        // the restored edits must not be taken for the file's own text.
+        const p = file('hot2.csv', 'h\nold\n');
+        const before = await open(p);
+        await before.edit('h\nedited\n');
+        const backup = await before.backup(path.join(tmpDir, 'hot2.backup'));
+        const after = await open(p, { backupId: backup.id });
+        const reload = after.provider._reloaders.get(after.uri.toString());
+        assert.strictEqual(await reload(), true, 'Reload from Disk thought the restored edits were the file');
+        assert.strictEqual(after.doc.content, 'h\nold\n');
+    });
+
+    await test('hot exit of a large file skips the size question', async () => {
+        const p = file('hot-large.csv', 'h\nold\n');
+        const before = await open(p);
+        await before.edit('h\nedited\n');
+        const backup = await before.backup(path.join(tmpDir, 'hot-large.backup'));
+        fakeSize = 60 * 1024 * 1024;
+        quickPickChoice = 'head';
+        const after = await open(p, { backupId: backup.id });
+        assert.strictEqual(after.doc.isPreview, false, 'a backup of an editable document came back as a read-only preview');
+        assert.strictEqual(after.doc.content, 'h\nedited\n');
+    });
+
     for (const mode of ['head', 'tail', 'chunked', 'plaintext']) {
         await test(`Save As from ${mode} writes the whole file`, async () => {
             const text = 'id,name\n' + Array.from({ length: 1500 }, (_, i) => `${i},row ${i}`).join('\n') + '\n';
@@ -169,6 +211,17 @@ async function main() {
         const dest = path.join(tmpDir, 'bom-saveas-copy.csv');
         await t.saveAs(dest);
         assert.ok(fs.readFileSync(dest).equals(EXCEL), 'Save As changed the bytes of an unedited file');
+    });
+
+    await test('a hot exit backup keeps the byte order mark through the restore', async () => {
+        const p = file('bom-backup.csv', EXCEL);
+        const before = await open(p);
+        await before.edit('name,city\nJürgen,Köln\nAnna,Wien\n');
+        const backup = await before.backup(path.join(tmpDir, 'bom.backup'));
+        const after = await open(p, { backupId: backup.id });
+        assert.strictEqual(after.doc.content, 'name,city\nJürgen,Köln\nAnna,Wien\n');
+        await after.save();
+        assert.deepStrictEqual([...fs.readFileSync(p).subarray(0, 3)], [...BOM], 'the restored document lost the BOM');
     });
 
     await test('a file without a byte order mark does not gain one', async () => {
