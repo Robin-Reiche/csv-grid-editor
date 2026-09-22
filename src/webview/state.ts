@@ -1,4 +1,5 @@
 import type { CsvRow, ColType, FindMatch, UndoSnapshot } from './types';
+import { SETTING_DEFAULTS, type Settings } from './settings';
 
 export const state = {
     currentDelimiter: ',',
@@ -15,30 +16,21 @@ export const state = {
     zoomIndex: 4,
     isAutoFitted: false,
 
-    // Column color mode — when on, every data column gets a distinct, theme-adaptive
-    // background tint so columns are easier to tell apart. Persisted globally via
-    // VS Code globalState (csvGridEditor.colorMode), exactly like zoomIndex, so the
-    // toggle is remembered across every CSV file and every session. The actual
-    // colors are pure CSS (features/color-mode.ts + media/webview.css). In-memory
-    // mirror of the persisted flag.
-    colorMode: false,
+    // The switches in the settings menu (color mode, row highlight, type badges,
+    // number alignment, empty-cell marks, checkboxes, space trimming, Enter
+    // behaviour). Each is remembered in VS Code globalState as
+    // csvGridEditor.<key>, and this is the in-memory mirror. See settings.ts for the
+    // list and features/settings-menu.ts for what each one does.
+    settings: { ...SETTING_DEFAULTS } as Settings,
 
     // Wrap cell text — when on, a value wraps at its own line breaks AND at the
     // column edge, and rows grow to fit (AG Grid wrapText + autoHeight); when
     // off, the row height stays fixed and anything too wide is clipped. The chip
     // marking a real line break is drawn in both modes, so a wrap can always be
     // told apart from a break in the data. Persisted globally via VS Code
-    // globalState (csvGridEditor.wrapText) like colorMode. In-memory mirror of
+    // globalState (csvGridEditor.wrapText) like the settings. In-memory mirror of
     // the persisted flag. See features/wrap-text.ts.
     wrapText: false,
-
-    // Checkboxes for true/false columns — when on, a cell holding one of the
-    // known true/false words is drawn as a box instead of the word (issue #41).
-    // Display only: the file keeps its own spelling, and clicking a box writes
-    // back the opposite word of the same pair. Persisted globally via VS Code
-    // globalState (csvGridEditor.boolCheckboxes) like colorMode and wrapText.
-    // In-memory mirror of the persisted flag. See features/bool-checkbox.ts.
-    boolCheckboxes: false,
 
     autoFitCache: null as any,
     autoFitCacheZoom: -1,

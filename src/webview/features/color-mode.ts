@@ -1,9 +1,10 @@
 import { state, getNumCols } from '../state';
 
 /**
- * Column color mode. A toolbar toggle that gives every data column a distinct,
- * theme-adaptive background tint (header stronger, body fainter) so columns are
- * easy to tell apart, similar to Rainbow CSV but readable on any VS Code theme.
+ * Column color mode. A switch in the settings menu that gives every data column
+ * a distinct, theme-adaptive background tint (header stronger, body fainter) so
+ * columns are easy to tell apart, similar to Rainbow CSV but readable on any
+ * VS Code theme.
  *
  * How the colors work (see also media/webview.css → "Column Color Mode"):
  *  - Each column gets one hue via golden-angle rotation (137.5°), which keeps
@@ -18,8 +19,10 @@ import { state, getNumCols } from '../state';
  *    which are !important and higher in the cascade — keep painting clearly on
  *    top. The row-number gutter (col-id "row-index") is never tinted.
  *
- * The toggle is persisted globally (VS Code globalState) exactly like zoom, so
- * it is remembered across every CSV file and every session.
+ * It used to be a toolbar button. It moved into the settings menu because it is
+ * set once and left, not switched while reading. The menu remembers it under the
+ * same globalState key as before (csvGridEditor.colorMode), so nobody loses the
+ * choice they had made. See features/settings-menu.ts.
  */
 
 const HUE_STYLE_ID = 'cm-col-hues';
@@ -29,14 +32,6 @@ const GOLDEN_ANGLE = 137.50776405003785;
 // Start offset so column 0 isn't pure red.
 const START_HUE = 25;
 
-function persistColorMode(): void {
-    vscodeApi.postMessage({ type: 'colorModeChanged', colorMode: state.colorMode });
-}
-
-function updateButton(): void {
-    document.getElementById('btn-colormode')?.classList.toggle('btn-active', state.colorMode);
-}
-
 // Toggles the `cm-on` class on the grid container (which gates all tint CSS) and,
 // when on, (re)generates the per-column hue rules for the current column count.
 // Safe to call before the grid has data (numCols 0 → empty rule set, class only).
@@ -45,10 +40,10 @@ function updateButton(): void {
 export function applyColorMode(): void {
     const container = document.getElementById('grid-container');
     if (!container) return;
-    container.classList.toggle('cm-on', state.colorMode);
+    container.classList.toggle('cm-on', state.settings.colorMode);
 
     let styleEl = document.getElementById(HUE_STYLE_ID) as HTMLStyleElement | null;
-    if (!state.colorMode) {
+    if (!state.settings.colorMode) {
         styleEl?.remove();
         return;
     }
@@ -64,18 +59,4 @@ export function applyColorMode(): void {
         css += `#grid-container.cm-on [col-id="col_${c}"]{--cm-h:${hue};}`;
     }
     styleEl.textContent = css;
-}
-
-function toggleColorMode(): void {
-    state.colorMode = !state.colorMode;
-    updateButton();
-    applyColorMode();
-    persistColorMode();
-}
-
-export function setupColorMode(): void {
-    state.colorMode = !!INITIAL_COLOR_MODE;
-    updateButton();
-    applyColorMode();
-    document.getElementById('btn-colormode')?.addEventListener('click', toggleColorMode);
 }

@@ -2,7 +2,7 @@ import { state, getNumCols } from '../state';
 import { showLoader, hideLoader } from '../utils/loader';
 import { buildGrid } from '../grid/builder';
 import { longestLine } from '../utils/csv';
-import { paint } from '../grid/control-char-cell';
+import { paint, shownValue } from '../grid/control-char-cell';
 
 export function measureTextWidths(): { colId: string; width: number }[] {
     const { data, colTypes } = state;
@@ -229,8 +229,10 @@ export function measureTextWidths(): { colId: string; width: number }[] {
         // Header: bold, measure exactly
         probe.style.fontSize   = fontSize + 'px';
         probe.style.fontWeight = '600';
-        probe.textContent      = headerRow?.[c] ?? '';
-        const badgePx = badgeWidthCache[colTypes[c]] ?? badgeWidthCache['string'];
+        probe.textContent      = shownValue(headerRow?.[c] ?? '');
+        // No room for a badge when the type badges are switched off in the menu.
+        const badgePx = !state.settings.typeBadges ? 0
+            : badgeWidthCache[colTypes[c]] ?? badgeWidthCache['string'];
         const headerW = probe.offsetWidth + HEADER_EXTRA + badgePx;
 
         // Cells: measure the top-N candidates (calibFactor corrects systematic
@@ -244,7 +246,7 @@ export function measureTextWidths(): { colId: string; width: number }[] {
             // textContent would measure the character (a line break even
             // collapses to one space under white-space: nowrap) and the column
             // would come out too narrow to show the value it was fitted to.
-            paint(probe, val);
+            paint(probe, shownValue(val));
             const w = Math.ceil(probe.offsetWidth * calibFactor * SAFETY) + CELL_EXTRA;
             if (w > maxBodyW) maxBodyW = w;
         }

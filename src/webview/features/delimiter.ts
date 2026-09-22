@@ -35,7 +35,7 @@ export function setupDelimiterBadge(): void {
             // so the rows are the same rows at the same positions — re-anchor the
             // frozen rows across the re-parse instead of losing them.
             const frozen = frozenRowPositions();
-            state.data = parseCsv(state.rawCsvText, state.currentDelimiter);
+            state.data = parseCsv(state.rawCsvText, state.currentDelimiter, false);
             reanchorFrozenRows(frozen);
             state.hiddenCols.clear(); // re-parse may change the column set — drop index-based hide state
             state.autoFitCache = null;

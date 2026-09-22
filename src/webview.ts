@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { SETTING_DEFAULTS, type Settings } from './webview/settings';
 
 export function getWebviewContent(
     webview: vscode.Webview,
@@ -11,9 +12,8 @@ export function getWebviewContent(
     isChunked: boolean = false,
     isMac: boolean = false,
     zoomIndex: number = 4,
-    colorMode: boolean = false,
+    settings: Settings = { ...SETTING_DEFAULTS },
     wrapText: boolean = false,
-    boolCheckboxes: boolean = false,
     profileLayout: { dock: string; width: number; height: number } = { dock: 'right', width: 0, height: 0 }
 ): string {
     const nonce = getNonce();
@@ -120,7 +120,6 @@ export function getWebviewContent(
         <div    class="separator"></div>
         <button id="btn-profile"       title="Column Profile"><i class="codicon codicon-graph"></i></button>
         <button id="btn-columns"       title="Show / hide columns"><i class="codicon codicon-checklist"></i></button>
-        <button id="btn-colormode"     title="Color columns. A distinct, theme-aware tint per column"><i class="codicon codicon-symbol-color"></i></button>
         <button id="btn-wraptext"      title="Wrap cell text. Rows grow so long values and line breaks stay readable"><i class="codicon codicon-word-wrap"></i></button>
         <div    class="separator"></div>
         <button id="btn-find-replace"  title="Find &amp; Replace (${mod}F)"><i class="codicon codicon-search"></i></button>
@@ -291,9 +290,8 @@ export function getWebviewContent(
         const FILENAME       = '${fileName.replace(/'/g, "\\'")}';
         const IS_CHUNKED          = ${isChunked ? 'true' : 'false'};
         const INITIAL_ZOOM_INDEX  = ${zoomIndex};
-        const INITIAL_COLOR_MODE  = ${colorMode ? 'true' : 'false'};
         const INITIAL_WRAP_TEXT   = ${wrapText ? 'true' : 'false'};
-        const INITIAL_BOOL_CHECKBOXES = ${boolCheckboxes ? 'true' : 'false'};
+        const INITIAL_SETTINGS    = ${JSON.stringify(settings)};
         const INITIAL_PROFILE_LAYOUT = ${JSON.stringify(profileLayout)};
     </script>
 

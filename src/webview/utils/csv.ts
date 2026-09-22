@@ -1,16 +1,24 @@
 import type { CsvRow } from '../types';
 
+// Spaces and tabs at either end of a value. Line breaks are left alone: they are
+// whitespace too, but a value typed with a trailing empty line has to keep it
+// (issue #31).
+export function trimPadding(s: string): string {
+    return s.replace(/^[^\S\r\n]+|[^\S\r\n]+$/g, '');
+}
+
+// trimFields defaults to true for the callers that want clean values out of a
+// string, such as the tests. The grid itself reads files with it off: a value
+// is kept exactly as the file has it, spaces included, and the settings menu
+// decides whether the spaces are SHOWN (grid/control-char-cell.ts). Trimming at
+// read time meant the first edit anywhere wrote the whole file back without
+// them.
 export function parseCsv(text: string, delimiter: string, trimFields: boolean = true): CsvRow[] {
     const rows: CsvRow[] = [];
     let row: string[] = [];
     let field = '';
     let inQuotes = false;
-    // Trimming used to take line breaks with it, because a break is whitespace
-    // too: a value typed with a trailing empty line was written to the file
-    // correctly and came back a line shorter (issue #31). Only horizontal
-    // whitespace goes now, so the padding people want gone still goes and the
-    // line structure of a multi-line value survives.
-    const finalize = (s: string) => trimFields ? s.replace(/^[^\S\r\n]+|[^\S\r\n]+$/g, '') : s;
+    const finalize = (s: string) => trimFields ? trimPadding(s) : s;
 
     for (let i = 0; i < text.length; i++) {
         const ch = text[i];

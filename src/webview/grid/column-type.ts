@@ -80,8 +80,8 @@ export function recomputeColTypes(): void {
     // value: a true/false column is drawn as checkboxes when that mode is on
     // (features/bool-checkbox.ts). refreshGrid drops the types and has them
     // worked out again afterwards, so without this the cells would keep
-    // whatever they were drawn as while the type was unknown - after an undo,
-    // the words instead of the boxes.
+    // whatever they were drawn as while the type was unknown. After an undo that
+    // meant the words instead of the boxes.
     state.gridApi?.refreshCells({ columns: changed, force: true });
     document.dispatchEvent(new CustomEvent('csv-col-types-changed'));
 }

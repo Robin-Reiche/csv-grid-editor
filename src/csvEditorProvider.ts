@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { getWebviewContent } from './webview';
+import { SETTING_DEFAULTS, isSettingKey, type Settings, type SettingKey } from './webview/settings';
 import {
     RowPageIndex,
     readFirstRecords,
@@ -226,9 +227,11 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
 
         const fileName  = path.basename(document.uri.fsPath);
         const zoomIndex = this.context.globalState.get<number>('csvGridEditor.zoomIndex', 4);
-        const colorMode = this.context.globalState.get<boolean>('csvGridEditor.colorMode', false);
+        const settings = { ...SETTING_DEFAULTS } as Settings;
+        for (const key of Object.keys(SETTING_DEFAULTS) as SettingKey[]) {
+            settings[key] = this.context.globalState.get<boolean>('csvGridEditor.' + key, SETTING_DEFAULTS[key]);
+        }
         const wrapText  = this.context.globalState.get<boolean>('csvGridEditor.wrapText', false);
-        const boolCheckboxes = this.context.globalState.get<boolean>('csvGridEditor.boolCheckboxes', false);
         const profileLayout = {
             dock:   this.context.globalState.get<string>('csvGridEditor.profileDock', 'right'),
             width:  this.context.globalState.get<number>('csvGridEditor.profileWidth', 0),
@@ -246,9 +249,8 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             document.isChunked,
             process.platform === 'darwin',
             zoomIndex,
-            colorMode,
+            settings,
             wrapText,
-            boolCheckboxes,
             profileLayout
         );
 
@@ -333,14 +335,16 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             } else if (msg.type === 'zoomChanged') {
                 this.context.globalState.update('csvGridEditor.zoomIndex', msg.zoomIndex);
 
-            } else if (msg.type === 'colorModeChanged') {
-                this.context.globalState.update('csvGridEditor.colorMode', msg.colorMode);
+            // The settings menu. Only the keys in settings.ts and only real
+            // booleans get written: the webview is the other side of a trust
+            // boundary, and globalState is shared by every file.
+            } else if (msg.type === 'settingChanged') {
+                if (isSettingKey(msg.key) && typeof msg.value === 'boolean') {
+                    this.context.globalState.update('csvGridEditor.' + msg.key, msg.value);
+                }
 
             } else if (msg.type === 'wrapTextChanged') {
                 this.context.globalState.update('csvGridEditor.wrapText', msg.wrapText);
-
-            } else if (msg.type === 'boolCheckboxesChanged') {
-                this.context.globalState.update('csvGridEditor.boolCheckboxes', msg.boolCheckboxes);
 
             } else if (msg.type === 'profileLayoutChanged') {
                 this.context.globalState.update('csvGridEditor.profileDock',   msg.dock);

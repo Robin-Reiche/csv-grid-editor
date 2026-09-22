@@ -32,7 +32,7 @@ function colIndexOf(params: any): number {
 
 // What this cell should draw: true or false for a box, null for plain text.
 export function boolCellState(params: any): boolean | null {
-    if (!state.boolCheckboxes) return null;
+    if (!state.settings.boolCheckboxes) return null;
     const c = colIndexOf(params);
     if (c < 0 || state.colTypes[c] !== 'boolean') return null;
     return readBool(params?.value == null ? '' : String(params.value));

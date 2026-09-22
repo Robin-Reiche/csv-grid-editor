@@ -4,11 +4,12 @@ import { NoRowsOverlay, renderNoColumns } from '../features/empty-state';
 import { createCombinedFilter } from './filter';
 import { dataRowIndexForNode } from './row-mapping';
 import { partitionFrozenRows, updateCountsDisplay } from './refresh';
-import { ControlCharCellRenderer } from './control-char-cell';
+import { ControlCharCellRenderer, shownValue } from './control-char-cell';
 import { MultilineCellEditor } from './multiline-cell-editor';
 import { refreshProfileIfOpen } from '../features/profile';
 import { pushUndo, notifyChange, updateButtons } from '../features/undo-redo';
 import { getFindCellClassRules } from '../features/find-replace';
+import { getCellMarkClassRules } from '../features/cell-marks';
 import { attachHeaderContextMenus } from '../features/freeze-columns';
 import { applyZoom } from '../features/zoom';
 import { applyGridTheme } from '../features/theme';
@@ -170,7 +171,7 @@ export function buildGrid(): void {
         const colType   = getColumnType(bodyRows, c);
         state.colTypes[c] = colType;
         const colDef: any = {
-            headerName:   headerRow[c] ?? '',
+            headerName:   shownValue(headerRow[c] ?? ''),
             field:        'col_' + c,
             headerClass:  'col-type-' + colType,
             headerTooltip: TYPE_LABELS[colType] ?? 'Text',
@@ -225,6 +226,7 @@ export function buildGrid(): void {
     const cellClassRules = {
         ...getFindCellClassRules(),
         ...getRangeCellClassRules(),
+        ...getCellMarkClassRules(),
         'cell-dup-row': (p: any) =>
             state.dupRowSet.size > 0
             && p.data?._origIndex != null
@@ -269,7 +271,9 @@ export function buildGrid(): void {
         // the cell below (Excel / Google Sheets behaviour). Deliberately NOT
         // enterNavigatesVertically: that variant hijacks Enter on a focused (not
         // editing) cell, which today is what opens the cell for editing.
-        enterNavigatesVerticallyAfterEdit: true,
+        // Switchable in the settings menu (enterMovesDown), for people who
+        // expect Enter to commit and stay in the cell.
+        enterNavigatesVerticallyAfterEdit: state.settings.enterMovesDown,
 
         // Issue #5 — give AG Grid a row id so a rowData swap (refreshGrid: delete
         // row, paste, insert, undo/redo, find-replace) does an incremental,

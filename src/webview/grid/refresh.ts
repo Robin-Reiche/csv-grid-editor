@@ -2,6 +2,7 @@ import { state, getNumCols, emptyTableKind } from '../state';
 import { applyColorMode } from '../features/color-mode';
 import { buildGrid } from './builder';
 import { recomputeColTypes } from './column-type';
+import { shownValue } from './control-char-cell';
 
 // Splits a freshly-built rowData array into the scrollable body and the frozen
 // reference rows (AG Grid renders the latter in a fixed pinned-top band). Frozen
@@ -54,7 +55,7 @@ export function syncColumnHeaders(): void {
     for (const d of defs) {
         if (typeof d.field === 'string' && d.field.indexOf('col_') === 0) {
             const ci   = parseInt(d.field.slice(4), 10);
-            const name = header[ci] ?? '';
+            const name = shownValue(header[ci] ?? '');
             if (d.headerName !== name) { d.headerName = name; changed = true; }
         }
     }

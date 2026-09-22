@@ -840,6 +840,9 @@ body.vscode-high-contrast #grid-container.cm-on {
 :is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-header-cell.col-type-date     .ag-header-cell-label::before { content: 'date'; background: var(--csv-badge-date-bg); color: var(--csv-badge-date-fg); }
 :is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-header-cell.col-type-datetime .ag-header-cell-label::before { content: 'dt';   background: var(--csv-badge-date-bg); color: var(--csv-badge-date-fg); }
 :is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-header-cell.col-type-time     .ag-header-cell-label::before { content: 'time'; background: var(--csv-badge-date-bg); color: var(--csv-badge-date-fg); }
+/* "Type badges in the header" off: no badge. The type is still in the header
+   tooltip, so it stays one hover away. */
+#grid-container.type-badges-off .ag-header-cell .ag-header-cell-label::before { content: none !important; }
 
 .ag-tooltip {
     background: var(--vscode-editorHoverWidget-background, #252526);
@@ -1030,7 +1033,9 @@ body.vscode-high-contrast #grid-container.cm-on {
 
    Two declarations of the same custom property on purpose: the rgba is the value
    an engine without color-mix() keeps. */
-:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-row.ag-row-focus {
+/* "Highlight the current row" in the settings menu puts row-focus-off on the
+   grid container, which takes both of these out. */
+:is(.ag-theme-alpine-dark, .ag-theme-alpine):not(.row-focus-off) .ag-row.ag-row-focus {
     --csv-row-focus-tint: rgba(0, 127, 212, 0.11);
     --csv-row-focus-tint: color-mix(in srgb, var(--vscode-focusBorder, #007fd4) 12%, transparent);
     background-image: linear-gradient(var(--csv-row-focus-tint), var(--csv-row-focus-tint));
@@ -1038,7 +1043,7 @@ body.vscode-high-contrast #grid-container.cm-on {
 /* The '#' gutter is where the eye goes to answer "which line am I on", so the
    marker is strongest there: a bar down the row's left edge and the number in
    the accent colour. */
-:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-row-focus .ag-cell.row-index-cell {
+:is(.ag-theme-alpine-dark, .ag-theme-alpine):not(.row-focus-off) .ag-row-focus .ag-cell.row-index-cell {
     box-shadow: inset 2px 0 0 var(--vscode-focusBorder, #007fd4);
     color: var(--vscode-focusBorder, #007fd4);
 }
@@ -1507,10 +1512,22 @@ body.vscode-high-contrast #grid-container.cm-on {
     border-radius: 4px;
     box-shadow: 0 4px 12px rgba(0,0,0,.45);
     font-family: var(--vscode-font-family, "Segoe UI", sans-serif);
-    color: var(--vscode-editor-foreground, #d4d4d4);
+    /* The menu's own foreground, paired with the menu background above. The
+       editor foreground belongs to the editor background and can be a dark
+       text on a light theme whose menus are dark. */
+    color: var(--vscode-menu-foreground, var(--vscode-editor-foreground, #d4d4d4));
 }
+.settings-popover { overflow-y: auto; }
 .settings-popover.hidden { display: none; }
-.settings-list { max-height: 320px; overflow-y: auto; }
+.settings-group {
+    padding: 8px 6px 2px;
+    font-size: 11px;
+    font-weight: 600;
+    opacity: 0.7;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+.settings-group:first-child { padding-top: 2px; }
 .settings-item {
     display: flex;
     align-items: flex-start;
@@ -1566,6 +1583,27 @@ body.vscode-high-contrast #grid-container.cm-on {
             mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cmask id='m'%3E%3Crect width='16' height='16' rx='3' fill='white'/%3E%3Cpath d='M4 8.4l2.7 2.7L12.2 5.4' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/mask%3E%3Crect width='16' height='16' rx='3' mask='url(%23m)'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
 }
 .csv-bool-box--clickable { cursor: pointer; }
+
+/* ── Align numbers to the right (settings menu) ── */
+:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-cell.csv-num-cell {
+    text-align: right;
+    justify-content: flex-end;
+}
+
+/* ── Mark empty cells (settings menu) ──
+   A diagonal hatch in the cell's own text color, faded. Hatching rather than a
+   flat tint so it cannot be mistaken for a row stripe, a column color or a
+   selection, all of which are flat. Painted on a pseudo-element so the cell's
+   own background, and every highlight on it, stays untouched underneath. */
+:is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-cell.csv-empty-cell::after {
+    content: '';
+    position: absolute;
+    inset: 3px;
+    border-radius: 2px;
+    background-image: repeating-linear-gradient(135deg, currentColor 0 1px, transparent 1px 6px);
+    opacity: 0.22;
+    pointer-events: none;
+}
 .csv-bool-box--clickable:hover { opacity: 0.7; }
 .goto-error {
     margin-top: 6px;

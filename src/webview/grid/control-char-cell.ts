@@ -1,5 +1,16 @@
+import { state } from '../state';
 import { hasControlChars, splitControlChars } from '../utils/control-chars';
+import { trimPadding } from '../utils/csv';
 import { boolCellState, paintBoolCheckbox, toggleBoolCell } from '../features/bool-checkbox';
+
+// What the grid SHOWS for a value, as opposed to what it holds. With "Hide
+// spaces around values" on (the default, and what the grid always looked like)
+// the padding a file puts around a value is left off the screen. The value
+// keeps it, so the file is written back with it. Used for cells, column names
+// and the auto-fit measurement, which all have to agree on what is drawn.
+export function shownValue(value: string): string {
+    return state.settings.trimDisplay ? trimPadding(value) : value;
+}
 
 // ── Cell renderer: labelled control characters ───────────────────────────────
 // Draws the value with each control character replaced by a chip showing its
@@ -80,12 +91,13 @@ export class ControlCharCellRenderer {
         this.params = params;
         const value   = valueOf(params);
         const checked = boolCellState(params);
-        const key     = (checked === null ? 't' : checked ? '1' : '0') + '\u0000' + value;
+        const shown   = shownValue(value);
+        const key     = (checked === null ? 't' : checked ? '1' : '0') + '\u0000' + shown;
         // Unchanged → leave the DOM alone, for the same reason.
         if (key === this.painted) return;
         this.painted = key;
         if (checked === null) {
-            paint(this.eGui, value);
+            paint(this.eGui, shown);
         } else {
             paintBoolCheckbox(this.eGui, value, checked, IS_PREVIEW ? null : () => toggleBoolCell(this.params));
         }
