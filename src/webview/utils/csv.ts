@@ -13,11 +13,18 @@ export function trimPadding(s: string): string {
 // decides whether the spaces are SHOWN (grid/control-char-cell.ts). Trimming at
 // read time meant the first edit anywhere wrote the whole file back without
 // them.
-export function parseCsv(text: string, delimiter: string, trimFields: boolean = true): CsvRow[] {
+//
+// fromFile is set only by the callers that read a file. It decides one thing,
+// whether a last line of only spaces is dropped, see the end of the function.
+// Paste reads the clipboard through here too and leaves it off.
+export function parseCsv(text: string, delimiter: string, trimFields: boolean = true, fromFile: boolean = false): CsvRow[] {
     const rows: CsvRow[] = [];
     let row: string[] = [];
     let field = '';
     let inQuotes = false;
+    // Whether a quoted field has turned up on the current line. Only the last
+    // line needs it, see the blank line rule below.
+    let lineQuoted = false;
     const finalize = (s: string) => trimFields ? trimPadding(s) : s;
 
     for (let i = 0; i < text.length; i++) {
@@ -33,8 +40,21 @@ export function parseCsv(text: string, delimiter: string, trimFields: boolean = 
             } else {
                 field += ch;
             }
-        } else if (ch === '"') {
+        } else if (ch === '"' && /^[ \t]*$/.test(field)) {
+            // A quote opens a quoted field only as the field's first character,
+            // spaces and tabs before it aside. Further in it is part of the
+            // value, as in 5" disk: read as an opening quote it swallowed the
+            // delimiters and line breaks after it and merged the rest of the file
+            // into one cell. Excel and Python's csv read it the same way. The
+            // padding is allowed because hand-written files put a space after
+            // the comma, as in name, "Smith, John". That value has always
+            // been read as one quoted field. field is also empty right after a
+            // quoted "" closes, but a quote there would have made it an escaped
+            // "" inside the field, so this cannot reopen one by mistake.
+            // largeFileReader.ts makes the same call byte by byte and has to
+            // stay in step with this one.
             inQuotes = true;
+            lineQuoted = true;
         } else if (ch === delimiter) {
             row.push(finalize(field));
             field = '';
@@ -45,6 +65,7 @@ export function parseCsv(text: string, delimiter: string, trimFields: boolean = 
             if (row.length > 0) rows.push(row);
             row = [];
             field = '';
+            lineQuoted = false;
         } else {
             field += ch;
         }
@@ -54,7 +75,14 @@ export function parseCsv(text: string, delimiter: string, trimFields: boolean = 
     // dropped. Except when it is the only line and holds a delimiter: that is a
     // header of unnamed columns, ",,,," is five of them. Dropping it opened the
     // file as an empty table and lost every column the moment it was read back.
-    if (row.some(f => f !== '') || (rows.length === 0 && row.length > 1)) rows.push(row);
+    // In a file a last line of only spaces or tabs counts as blank too. The grid
+    // reads with trimming off. That turned such a line, often left behind by an
+    // editor, into an extra row that looked empty. Spaces someone wrote in
+    // quotes, as in "   ", are a value and keep their row. On the clipboard the
+    // spaces are what the user copied: dropping them made a paste of spaces do
+    // nothing and skipped the last row of a pasted block.
+    const blank = (f: string) => f === '' || (fromFile && !lineQuoted && trimPadding(f) === '');
+    if (row.some(f => !blank(f)) || (rows.length === 0 && row.length > 1)) rows.push(row);
     return rows;
 }
 

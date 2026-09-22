@@ -18,12 +18,23 @@ const TAB   = 0x09;
 // stop pairing up and everything after it is parsed into the wrong columns
 // (issue #32). Every reader below walks the file through this scanner instead.
 // It tracks quote state exactly the way the grid's parser does (see
-// webview/utils/csv.ts): outside quotes a " opens a quoted section, inside one
-// "" is a literal quote and a single " closes it, and only \n ends a record.
-// Scanning bytes rather than characters is safe because ", \n and \r are ASCII
-// and never appear inside a multi-byte UTF-8 sequence.
+// webview/utils/csv.ts): a " opens a quoted section only at the start of a
+// field, spaces and tabs before it aside. Inside one "" is a literal quote and
+// a single " closes it. Only \n ends a record. A " further into a field is
+// part of the value, as in 5" disk. Telling the two apart takes the delimiter,
+// which is why every reader below asks for it. Scanning bytes rather than
+// characters is safe because ", \n, \r and the delimiters the provider detects
+// are ASCII and never appear inside a multi-byte UTF-8 sequence.
 class RecordScanner {
     private inQuotes = false;
+    // Whether the current field holds anything but leading spaces or tabs,
+    // which decides whether a " opens a quoted section or is just a character.
+    private fieldHasContent = false;
+    private readonly delimiter: number;
+
+    constructor(delimiter: string) {
+        this.delimiter = delimiter.charCodeAt(0);
+    }
     // A " seen inside quotes whose meaning depends on the next byte, which can
     // sit in the next chunk: "" is a literal quote, anything else closes.
     private pendingQuote = false;
@@ -46,17 +57,29 @@ class RecordScanner {
 
             if (this.pendingQuote) {
                 this.pendingQuote = false;
-                if (b === QUOTE) continue;   // "" — a literal quote, still inside
+                if (b === QUOTE) {           // "": a literal quote, still inside
+                    this.fieldHasContent = true;
+                    continue;
+                }
                 this.inQuotes = false;       // the quote closed the field
             }
 
             if (this.inQuotes) {
+                // Spaces inside quotes are still only spaces to the parser, so
+                // after " " a quote may open the field again there too.
                 if (b === QUOTE) this.pendingQuote = true;
-            } else if (b === QUOTE) {
-                this.inQuotes = true;
+                else if (b !== SPACE && b !== TAB) this.fieldHasContent = true;
+            } else if (b === this.delimiter) {
+                this.fieldHasContent = false;
             } else if (b === LF) {
                 out.push(i + 1);
                 this.remainderHasContent = false;
+                this.fieldHasContent = false;
+            } else if (b === QUOTE && !this.fieldHasContent) {
+                this.inQuotes = true;
+            } else if (b !== SPACE && b !== TAB && b !== CR) {
+                // The parser skips \r outside quotes, so it does not count.
+                this.fieldHasContent = true;
             }
         }
         return out;
@@ -74,9 +97,26 @@ async function readRange(filePath: string, start: number, end?: number): Promise
     return Buffer.concat(chunks);
 }
 
+// The file's first line, which is all the provider's delimiter detection looks
+// at. The scanners need the delimiter before they start, so it is read on its
+// own. Capped at 1 MB so a file without a single line break is not pulled into
+// memory whole: a header that long still shows its delimiter well before that.
+export async function readFirstLine(filePath: string): Promise<string> {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    for await (const chunk of fs.createReadStream(filePath, { highWaterMark: 64 * 1024 })) {
+        const buf = chunk as Buffer;
+        const lf = buf.indexOf(LF);
+        chunks.push(lf < 0 ? buf : buf.subarray(0, lf));
+        size += buf.length;
+        if (lf >= 0 || size >= 1024 * 1024) break;
+    }
+    return Buffer.concat(chunks).toString('utf8');
+}
+
 // Head preview: the first `recordCount` records, header included.
-export async function readFirstRecords(filePath: string, recordCount: number): Promise<string> {
-    const scanner = new RecordScanner();
+export async function readFirstRecords(filePath: string, recordCount: number, delimiter: string): Promise<string> {
+    const scanner = new RecordScanner(delimiter);
     const chunks: Buffer[] = [];
     let found = 0;
 
@@ -96,8 +136,8 @@ export async function readFirstRecords(filePath: string, recordCount: number): P
 
 // Total records in the file, header included — the number the preview banner
 // compares against, and the same number Open Full File would put in the grid.
-export async function countRecords(filePath: string): Promise<number> {
-    const scanner = new RecordScanner();
+export async function countRecords(filePath: string, delimiter: string): Promise<number> {
+    const scanner = new RecordScanner(delimiter);
     let count = 0;
     for await (const chunk of fs.createReadStream(filePath, { highWaterMark: 64 * 1024 })) {
         count += scanner.ends(chunk as Buffer).length;
@@ -110,9 +150,10 @@ export async function countRecords(filePath: string): Promise<number> {
 // are actually shown, so the file never has to be held in memory.
 export async function readTailRecords(
     filePath: string,
-    recordCount: number
+    recordCount: number,
+    delimiter: string
 ): Promise<{ content: string; totalRecordCount: number }> {
-    const scanner = new RecordScanner();
+    const scanner = new RecordScanner(delimiter);
     // Start offsets of the records after the header. One slot more than asked
     // for: the last record end starts a record that may never materialise, and
     // that speculative entry must not overwrite one still needed.
@@ -158,8 +199,8 @@ export async function readTailRecords(
 
 // ── F7: Chunked / Paged Mode ──
 
-export async function buildPageIndex(filePath: string, pageSize: number): Promise<RowPageIndex> {
-    const scanner = new RecordScanner();
+export async function buildPageIndex(filePath: string, pageSize: number, delimiter: string): Promise<RowPageIndex> {
+    const scanner = new RecordScanner(delimiter);
     const offsets: number[] = [];
     let base = 0;
     let prevEnd = 0;        // start of the record the next end terminates

@@ -1,6 +1,6 @@
 import { state, getNumCols, emptyTableKind } from '../state';
 import { pushUndo, notifyChange } from './undo-redo';
-import { refreshGrid, focusCell } from '../grid/refresh';
+import { refreshGrid, focusCell, revealAddedRow } from '../grid/refresh';
 import { recomputeColTypes } from '../grid/column-type';
 import { buildGrid } from '../grid/builder';
 import {
@@ -79,16 +79,20 @@ function deleteRows(displayIndices: number[]): void {
 // to have AG Grid re-sort the (empty) new rows to one of the extremes. To avoid
 // that we bake the current displayed order into state.data and clear the sort
 // model first, so the spliced rows stay exactly where we put them.
-function insertRows(anchorDisplayIndex: number, position: 'above' | 'below', count: number): void {
-    if (!state.gridApi || count < 1) return;
+//
+// Returns the displayed index of the first inserted row or null when nothing
+// was inserted. Callers focus that, not the anchor plus one: clearing a filter
+// below shifts every displayed index.
+function insertRows(anchorDisplayIndex: number, position: 'above' | 'below', count: number): number | null {
+    if (!state.gridApi || count < 1) return null;
 
     const targetNode = state.gridApi.getDisplayedRowAtIndex(anchorDisplayIndex);
-    if (!targetNode?.data) return;
+    if (!targetNode?.data) return null;
     // Hold a reference to the actual row array — survives the reorder below
     // so we can find its new index without doing _origIndex arithmetic on
     // a state.data that has just been reshuffled.
     const targetOrig = Number(targetNode.data._origIndex);
-    if (!targetOrig || !state.data[targetOrig]) return;
+    if (!targetOrig || !state.data[targetOrig]) return null;
     const targetRowRef = state.data[targetOrig];
 
     const colState = state.gridApi.getColumnState() as any[];
@@ -126,7 +130,7 @@ function insertRows(anchorDisplayIndex: number, position: 'above' | 'below', cou
 
     // Locate the target row in (possibly reshuffled) state.data by reference.
     const targetIndex = state.data.indexOf(targetRowRef);
-    if (targetIndex < 0) return;
+    if (targetIndex < 0) return null;
 
     const insertAt = position === 'above' ? targetIndex : targetIndex + 1;
     const numCols = getNumCols(state.data);
@@ -135,8 +139,13 @@ function insertRows(anchorDisplayIndex: number, position: 'above' | 'below', cou
     state.isAutoFitted = false;
     state.autoFitCache = null;
     refreshGrid();
+    // Clears a filter that would hide the new rows, the way the sort was
+    // flattened above.
+    const first = revealAddedRow(insertAt);
+
     recomputeColTypes();
     notifyChange();
+    return first;
 }
 
 // The keyboard's entry points into the three row actions (issue #36):
@@ -167,11 +176,14 @@ export function insertRowAtFocus(position: 'above' | 'below'): void {
     // Read the anchor BEFORE committing: stopEditing() can move the focus on, and
     // the row to insert next to is the one that was being edited, not the next one.
     const rowIndex = focusedRowForShortcut();
-    if (rowIndex === null) {
+    if (rowIndex === null || emptyTableKind(state.data) === 'no-rows') {
         // A table with a header and no rows has no cell to hold the focus, so
         // there is no row to insert next to. The key starts the first row
         // instead, the same as the button in the empty grid (issue #40). It does
         // nothing anywhere else: addFirstRow only acts on a table with no rows.
+        // The table itself is asked too, not only the focus: deleting the last
+        // row leaves its index behind. That stale index skipped this branch and
+        // made the key do nothing.
         addFirstRow();
         return;
     }
@@ -182,13 +194,16 @@ export function insertRowAtFocus(position: 'above' | 'below'): void {
 
     const rows = shortcutRows(rowIndex);
     const anchor = position === 'above' ? Math.min(...rows) : Math.max(...rows);
-    insertRows(anchor, position, rows.length);
+    // Read the column before inserting too. Clearing a filter in insertRows
+    // resets the grid's focus. The tracked column goes with it.
+    const colId = state.focusedCellColId;
+    const first = insertRows(anchor, position, rows.length);
 
     // Land on the first row that was just inserted, the way VS Code leaves the
     // caret on the line it made. Without this the two directions would disagree:
     // insert-below keeps the index of the row you came from, insert-above hands
     // that same index to the new blank row.
-    focusCell(position === 'above' ? anchor : anchor + 1, state.focusedCellColId);
+    focusCell(first, colId);
 }
 
 export function deleteRowsAtFocus(): void {
@@ -506,9 +521,9 @@ function showEmptyAreaMenu(x: number, y: number): void {
         addRow.addEventListener('click', () => {
             hideMenu();
             if (kind === 'no-rows') { addFirstRow(); return; }
-            insertRows(shownRows - 1, 'below', 1);
+            const first = insertRows(shownRows - 1, 'below', 1);
             // Land on the new row, the way Ctrl+Enter does.
-            focusCell(shownRows, state.focusedCellColId ?? firstDisplayedColId());
+            focusCell(first, state.focusedCellColId ?? firstDisplayedColId());
         });
         menu.appendChild(addRow);
     }

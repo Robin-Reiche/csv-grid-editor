@@ -54,13 +54,13 @@ async function main() {
     });
 
     await test('the page index hands over the header line to detect from', async () => {
-        const index = await buildPageIndex(semi, 2);
+        const index = await buildPageIndex(semi, 2, ';');
         assert.strictEqual(index.headerLine, 'id;city;note');
         assert.strictEqual(detectDelimiter.call(null, 'big.csv', index.headerLine), ';');
     });
 
     await test('a page then splits into the columns the file really has', async () => {
-        const index = await buildPageIndex(semi, 2);
+        const index = await buildPageIndex(semi, 2, ';');
         const delimiter = detectDelimiter.call(null, semi, index.headerLine);
         const rows = parseCsv(await readPage(semi, index, 0), delimiter);
         assert.deepStrictEqual(rows[0], ['id', 'city', 'note']);
@@ -69,7 +69,7 @@ async function main() {
 
     await test('a tsv is still decided by its extension, not by the header', async () => {
         const tsv = fixture('tabs.tsv', TAB);
-        const index = await buildPageIndex(tsv, 2);
+        const index = await buildPageIndex(tsv, 2, '\t');
         assert.strictEqual(detectDelimiter.call(null, tsv, index.headerLine), '\t');
     });
 

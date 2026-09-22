@@ -36,7 +36,7 @@ export function handlePageData(msg: { pageNumber: number; totalPages: number; te
     // so it has to be the page on display. It used to keep whatever the first page
     // held, which sent you back to page 1 while the bar still said page 6 (#34).
     state.rawCsvText = msg.text;
-    state.data = parseCsv(msg.text, state.currentDelimiter, false);
+    state.data = parseCsv(msg.text, state.currentDelimiter, false, true);
     buildGrid();
     hideLoader();
 }
