@@ -60,6 +60,9 @@ function searchCols(): any[] {
 // active match with `keep`, so the position survives a change that did not
 // touch it.
 function execFind(anchor?: { rowIndex: number; colField: string }, keep = false): void {
+    // A search that runs now makes a pending one pointless. Letting that one
+    // fire later would throw away the position this one sets.
+    if (debounceTimer !== null) clearTimeout(debounceTimer);
     debounceTimer = null;
     if (!state.gridApi) return;
 
@@ -205,6 +208,12 @@ let resume: { key: string; from: number } | null = null;
 
 function replaceOne(): void {
     if (state.findMatchIndex < 0 || IS_PREVIEW) return;
+    // The search still waits out its debounce, so the matches on hand belong
+    // to what the find box held before. An emptied box would match the empty
+    // string at the front of the cell and put the replacement there. Search
+    // again first, the way Replace All does. The replacing waits for the next
+    // press, once the user has seen what the new text matches.
+    if (debounceTimer !== null) { execFind(state.findMatches[state.findMatchIndex], true); return; }
     const needle = (document.getElementById('find-input') as HTMLInputElement).value;
     const repl   = (document.getElementById('replace-input') as HTMLInputElement).value;
     const cs     = isCaseSensitive();
