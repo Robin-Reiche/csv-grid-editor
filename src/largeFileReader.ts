@@ -12,6 +12,20 @@ const CR    = 0x0D;
 const SPACE = 0x20;
 const TAB   = 0x09;
 
+// Excel starts a UTF-8 file with a byte order mark. Open Full File decodes the
+// file with TextDecoder, which leaves the mark out of the text, so the readers
+// here leave it out too. Kept, it would show up as U+FEFF in front of the
+// first header name and hide a quote that opens the first field.
+function bomLength(buf: Buffer): number {
+    return buf.length >= 3 && buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF ? 3 : 0;
+}
+
+// Decodes bytes that were read from `start` on. Only the very start of the
+// file can hold the mark.
+function decode(buf: Buffer, start: number): string {
+    return buf.toString('utf8', start === 0 ? bomLength(buf) : 0);
+}
+
 // A CSV record is not a line: a quoted field may hold line breaks, so one record
 // can span any number of them. Splitting the raw bytes on \n therefore counts
 // too many rows and, wherever a split lands inside a quoted field, the quotes
@@ -39,6 +53,10 @@ class RecordScanner {
     // sit in the next chunk: "" is a literal quote, anything else closes.
     private pendingQuote = false;
 
+    // Every reader scans from the start of the file, so the first buffer is
+    // the one that can begin with a byte order mark.
+    private atStart = true;
+
     // Whether anything but whitespace has turned up since the last record end.
     // parseCsv only keeps a final record without a trailing newline when it
     // holds something, so this decides whether the file's tail counts as a row.
@@ -51,7 +69,14 @@ class RecordScanner {
     // Offsets, relative to `buf`, of the byte just past each record-ending \n.
     public ends(buf: Buffer): number[] {
         const out: number[] = [];
-        for (let i = 0; i < buf.length; i++) {
+        // The mark is not part of the first field. A quote right behind it
+        // opens that field, the way it does in the grid.
+        let i = 0;
+        if (this.atStart) {
+            this.atStart = false;
+            i = bomLength(buf);
+        }
+        for (; i < buf.length; i++) {
             const b = buf[i];
             if (b !== LF && b !== CR && b !== SPACE && b !== TAB) this.remainderHasContent = true;
 
@@ -131,7 +156,7 @@ export async function readFirstRecords(filePath: string, recordCount: number, de
         chunks.push(buf);
     }
 
-    return Buffer.concat(chunks).toString('utf8');
+    return decode(Buffer.concat(chunks), 0);
 }
 
 // Total records in the file, header included — the number the preview banner
@@ -184,17 +209,17 @@ export async function readTailRecords(
     const totalRecordCount = ended + (scanner.remainderHasContent ? 1 : 0);
     if (headerEnd < 0) {
         // No record boundary at all: the whole file is one record.
-        return { content: (await readRange(filePath, 0)).toString('utf8'), totalRecordCount };
+        return { content: decode(await readRange(filePath, 0), 0), totalRecordCount };
     }
 
     const header = await readRange(filePath, 0, headerEnd - 1);
     const kept = Math.min(pushed, recordCount);
     if (kept === 0) {
-        return { content: header.toString('utf8'), totalRecordCount };
+        return { content: decode(header, 0), totalRecordCount };
     }
 
     const tail = await readRange(filePath, ring[(pushed - kept) % capacity]);
-    return { content: Buffer.concat([header, tail]).toString('utf8'), totalRecordCount };
+    return { content: decode(Buffer.concat([header, tail]), 0), totalRecordCount };
 }
 
 // ── F7: Chunked / Paged Mode ──
@@ -236,7 +261,7 @@ export async function buildPageIndex(filePath: string, pageSize: number, delimit
 
     const headerLine = headerEnd < 0
         ? ''
-        : (await readRange(filePath, 0, headerEnd - 1)).toString('utf8').replace(/\r?\n$/, '');
+        : decode(await readRange(filePath, 0, headerEnd - 1), 0).replace(/\r?\n$/, '');
 
     return { offsets, totalRows: dataRows, headerLine };
 }
@@ -245,5 +270,5 @@ export async function readPage(filePath: string, index: RowPageIndex, pageNum: n
     const startOffset = index.offsets[pageNum];
     const endOffset   = index.offsets[pageNum + 1]; // undefined = read to EOF
     const buf = await readRange(filePath, startOffset, endOffset === undefined ? undefined : endOffset - 1);
-    return index.headerLine + '\n' + buf.toString('utf8');
+    return index.headerLine + '\n' + decode(buf, startOffset);
 }
