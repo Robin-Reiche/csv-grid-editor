@@ -435,6 +435,15 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
     }
 
     async saveCustomDocumentAs(document: CsvDocument, destination: vscode.Uri, _cancellation: vscode.CancellationToken): Promise<void> {
+        // A preview holds only part of the file (Paged View holds none of it)
+        // and writing that produced a truncated or empty copy. A preview cannot
+        // be edited, so the file on disk is exactly what Save As should give.
+        if (document.isPreview) {
+            if (destination.toString() !== document.uri.toString()) {
+                await vscode.workspace.fs.copy(document.uri, destination, { overwrite: true });
+            }
+            return;
+        }
         await vscode.workspace.fs.writeFile(destination, document.encode());
     }
 

@@ -1,5 +1,8 @@
 // Regression guards for how the extension reads, saves and restores a file:
 //
+// - Save As from Show Head, Show Tail or Paged View. Those hold only part of
+//   the file (the paged view holds nothing) and Save As wrote exactly that: a
+//   truncated or empty copy, without a word.
 // - A UTF-8 byte order mark. Reading dropped it and saving never wrote it
 //   back, so Excel opened the saved file as ANSI and umlauts came out garbled.
 //
@@ -127,6 +130,23 @@ const tick = () => new Promise(r => setTimeout(r, 20));
 
 async function main() {
     console.log('reading, saving and restoring a file');
+
+    for (const mode of ['head', 'tail', 'chunked', 'plaintext']) {
+        await test(`Save As from ${mode} writes the whole file`, async () => {
+            const text = 'id,name\n' + Array.from({ length: 1500 }, (_, i) => `${i},row ${i}`).join('\n') + '\n';
+            const p = file(`big-${mode}.csv`, text);
+            fakeSize = 60 * 1024 * 1024;
+            quickPickChoice = mode;
+            const t = await open(p);
+            assert.strictEqual(t.doc.isPreview, true, 'the test did not reach the preview');
+            const dest = path.join(tmpDir, `copy-${mode}.csv`);
+            await t.saveAs(dest);
+            const written = fs.readFileSync(dest, 'utf8');
+            assert.strictEqual(written.length, text.length,
+                `Save As wrote ${written.length} of ${text.length} characters`);
+            assert.strictEqual(written, text);
+        });
+    }
 
     const EXCEL = Buffer.concat([BOM, Buffer.from('name,city\nJürgen,Köln\n', 'utf8')]);
 
