@@ -2,6 +2,15 @@
 
 All notable changes to CSV Grid Editor are documented here.
 
+## [1.23.0] - 2026-09-22
+
+### Added
+- **A settings menu in the toolbar** - The gear at the right end of the toolbar opens a small menu for the display switches that are a matter of taste. It sits in the editor rather than in the VS Code settings, where a switch is findable only by someone who already knows it is there, and every entry is remembered across files and sessions. It holds one entry today and is the place the next one goes, so the toolbar does not grow a button per preference.
+- **Checkboxes for true/false columns** - Off by default, switched on in the settings menu ([#41](https://github.com/Robin-Reiche/csv-grid-editor/issues/41)). A cell in a column of true/false values is drawn as a box instead of the word, which is quicker to read down a long column, and one click flips it. The file keeps its own words: the click writes back the opposite word of the pair the cell already used, in the same capitalisation, so `YES` becomes `NO` and never `false`. Switching the mode on or off changes nothing in the file at all. `true/false`, `yes/no`, `y/n`, `t/f` and `on/off` are recognised, and a value the box cannot stand for, an empty cell or a stray `unknown`, keeps its text so nothing disappears behind a box. Double-click beside the box to edit the value as text, as before.
+
+### Changed
+- **More columns are recognised as true/false** - `y/n`, `t/f` and `on/off` columns now carry the Boolean type badge and are profiled as true and false counts, which until now only `true/false` and `yes/no` columns were. A column has to speak one of those pairs almost throughout to count, so a column mixing `yes` and `t` at random is text, as is a column of `1` and `0`, which reads just as well as numbers.
+
 ## [1.22.0] - 2026-09-19
 
 ### Added
