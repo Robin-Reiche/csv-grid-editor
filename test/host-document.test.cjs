@@ -6,6 +6,9 @@
 // - Save As from Show Head, Show Tail or Paged View. Those hold only part of
 //   the file (the paged view holds nothing) and Save As wrote exactly that: a
 //   truncated or empty copy, without a word.
+// - An outside change while the grid holds unsaved edits. The watcher loaded
+//   the file over them, the tab stayed dirty and the next save made the loss
+//   permanent.
 // - A UTF-8 byte order mark. Reading dropped it and saving never wrote it
 //   back, so Excel opened the saved file as ANSI and umlauts came out garbled.
 //
@@ -189,6 +192,64 @@ async function main() {
             assert.strictEqual(written, text);
         });
     }
+
+    await test('an outside change does not replace unsaved edits', async () => {
+        const p = file('dirty.csv', 'h\n1\n');
+        const t = await open(p);
+        await t.edit('h\nMY UNSAVED EDIT\n');
+        fs.writeFileSync(p, 'h\n1\nexternal\n');
+        await t.fireWatcher();
+        assert.strictEqual(t.updates().length, 0, 'the grid was reloaded over the unsaved edit');
+        assert.strictEqual(t.doc.content, 'h\nMY UNSAVED EDIT\n', 'the unsaved edit was replaced');
+        assert.strictEqual(warnings.length, 1, 'the user was not told the file changed on disk');
+        assert.ok(warnings[0].actions.includes('Reload from Disk'), 'the warning offers no way to load the disk');
+    });
+
+    await test('the same outside change warns only once', async () => {
+        const p = file('dirty-twice.csv', 'h\n1\n');
+        const t = await open(p);
+        await t.edit('h\n2\n');
+        fs.writeFileSync(p, 'h\nexternal\n');
+        await t.fireWatcher();
+        await t.fireWatcher();                          // a second event for the same write
+        assert.strictEqual(warnings.length, 1, 'one outside write raised ' + warnings.length + ' warnings');
+    });
+
+    await test('Reload from Disk on the warning loads the file', async () => {
+        const p = file('dirty-reload.csv', 'h\n1\n');
+        const t = await open(p);
+        await t.edit('h\nmine\n');
+        fs.writeFileSync(p, 'h\ntheirs\n');
+        await t.fireWatcher();
+        warnings[0].pick('Reload from Disk');
+        await tick();
+        assert.strictEqual(t.doc.content, 'h\ntheirs\n', 'the action did not load the disk');
+        assert.strictEqual(t.updates().length, 1);
+        assert.strictEqual(t.updates()[0].text, 'h\ntheirs\n');
+    });
+
+    await test('saving after the warning keeps the edits', async () => {
+        const p = file('dirty-save.csv', 'h\n1\n');
+        const t = await open(p);
+        await t.edit('h\nmine\n');
+        fs.writeFileSync(p, 'h\ntheirs\n');
+        await t.fireWatcher();
+        warnings[0].pick(undefined);                    // dismissed
+        await t.save();
+        await t.fireWatcher();                          // the echo of that save
+        assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\nmine\n');
+        assert.strictEqual(t.updates().length, 0);
+    });
+
+    await test('an unchanged document still reloads silently', async () => {
+        const p = file('clean.csv', 'h\n1\n');
+        const t = await open(p);
+        fs.writeFileSync(p, 'h\n2\n');
+        await t.fireWatcher();
+        assert.strictEqual(t.updates().length, 1, 'an outside change no longer reaches a clean grid');
+        assert.strictEqual(t.doc.content, 'h\n2\n');
+        assert.strictEqual(warnings.length, 0, 'a clean document asked before reloading');
+    });
 
     const EXCEL = Buffer.concat([BOM, Buffer.from('name,city\nJürgen,Köln\n', 'utf8')]);
 

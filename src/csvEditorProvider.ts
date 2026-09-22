@@ -332,6 +332,23 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
                     // it holds has nothing new to say. Only the watcher waits like
                     // this: Reload from Disk is the explicit request for the disk.
                     if (fromWatcher && text === document.diskText) return false;
+                    // Another program changed the file while the grid holds
+                    // unsaved edits. Loading it silently replaced those edits and
+                    // left the tab dirty, so the next save made the loss final.
+                    // Like VS Code's own text editors, keep the edits and let the
+                    // user choose. Recording the new disk text makes a second
+                    // event for the same write stay quiet. A later save still
+                    // resets it to what we wrote.
+                    if (fromWatcher && document.content !== document.diskText) {
+                        document.diskText = text;
+                        void vscode.window.showWarningMessage(
+                            `${fileName} changed on disk. Your unsaved edits in the grid were kept.`,
+                            'Reload from Disk'
+                        ).then(choice => {
+                            if (choice === 'Reload from Disk') void reload();
+                        });
+                        return false;
+                    }
                     document.content = text;
                     document.diskText = text;
                     document.hasBom = hasBom;
