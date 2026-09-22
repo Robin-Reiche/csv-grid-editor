@@ -2,9 +2,9 @@
 //
 // These drive the real webview in headless Chrome (test/ui/harness.cjs). Two
 // ways an edit used to reach the wrong row: Delete cleared the cell that was
-// last clicked instead of the one the keyboard had moved to, and any edit made
-// in the "Show only duplicates" view put back a copy of the rows taken before
-// the edit, so the next edit was written to a different row.
+// last clicked instead of the one the keyboard had moved to. Any edit made in
+// the "Show only duplicates" view put back a copy of the rows taken before the
+// edit, so the next edit was written to a different row.
 //
 // Run after `tsc -p ./`:  node test/find-edit-target.test.cjs
 
@@ -97,6 +97,26 @@ runSuite('edit target (browser)', [
             await t.wait(300);
             t.check(col0() === 'a,b,a', 'Show all rows brings back the file order (' + col0() + ')');
             t.check(t.sent('edit').length === 0, 'toggling the view wrote nothing');
+        },
+    },
+    {
+        name: 'file changed outside while the duplicates view is on',
+        csv: 'k,v\na,1\nb,2\na,1',
+        steps: async (t, csv) => {
+            const col0 = () => {
+                const out = [];
+                for (let r = 0; t.cell(r, 0); r++) out.push(t.cell(r, 0).textContent);
+                return out.join(',');
+            };
+            await t.init(csv);
+            t.click(document.getElementById('btn-duplicates'));
+            await t.wait(200);
+            t.click(document.getElementById('dup-only-toggle'));
+            await t.wait(300);
+            t.check(col0() === 'a,a', 'only the duplicates show (' + col0() + ')');
+            window.postMessage({ type: 'update', text: 'k,v\nx,1\ny,2\nz,3', delimiter: ',' }, '*');
+            await t.wait(300);
+            t.check(col0() === 'x,y,z', 'the grid shows the new file (' + col0() + ')');
         },
     },
 ]);

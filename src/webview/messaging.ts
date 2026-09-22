@@ -49,9 +49,12 @@ export function setupMessaging(): void {
             const frozen = frozenRowPositions();
             state.data = parseCsv(msg.text, msg.delimiter, false);
             reanchorFrozenRows(frozen);
-            // Existing dup highlights now point at stale rows.
+            // Existing dup highlights now point at stale rows. Leaving the
+            // "Show only duplicates" view already rebuilds the rows from
+            // state.data, so a second rebuild would only cost time on big files.
+            const rebuilt = state.dupShowOnly;
             resetDuplicatesState();
-            refreshGrid();
+            if (!rebuilt) refreshGrid();
         } else if (msg.type === 'pageData') {
             handlePageData(msg);
         }
