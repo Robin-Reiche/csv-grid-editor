@@ -11,11 +11,13 @@ see the feature it is built around.
 | `sales_panel_wide.csv` | 96 | Two header rows over a wide layout, plus three identifier columns. Freeze rows and columns together so you never lose which row or quarter you are on. |
 | `multiline.csv` | 5 | Cells with line breaks inside them, both LF and CRLF, one of them next to a comma and a quote. Toggle **Wrap cell text** in the toolbar, and edit a cell with Alt+Enter. |
 | `reaction_times.csv` | 180 | Right-skewed reaction times next to a date, two categorical columns and a boolean. Open the **Column Profile** panel to see the distribution histogram, its long thin tail is the thing min, max and mean cannot tell you about. |
+| `header-only.csv` | 0 | A header row and nothing under it. The grid shows **Add row** where the rows would be, and `Ctrl+Enter` adds the first one. |
+| `blank-table.csv` | 6 | Thirteen unnamed columns and six rows with nothing in them, what adding blank columns to a new file leaves behind. It has to open with every column and row in place, and survive an edit with auto-save on. |
 | `booleans.csv` | 10 | Five true/false columns, one per spelling the grid knows (`true/false`, `yes/no`, `y/n`, `t/f`, `on/off`), next to a column of 1 and 0 that is meant to stay numbers. One cell is empty and one holds `unknown`. Switch on **Checkboxes for true/false columns** behind the toolbar gear. |
 
 The multi-row and multi-column freeze cases come from issue #9, the multi-line
-cells from issue #29, the skewed distribution from issue #33 and the
-checkboxes from issue #41.
+cells from issue #29, the skewed distribution from issue #33, the two
+empty tables from issue #40 and the checkboxes from issue #41.
 
 ## local/
 

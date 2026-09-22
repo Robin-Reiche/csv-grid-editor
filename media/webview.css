@@ -1354,7 +1354,7 @@ body.vscode-high-contrast #grid-container.cm-on {
     border-radius: 4px;
     box-shadow: 0 4px 12px rgba(0,0,0,.45);
     font-family: var(--vscode-font-family, "Segoe UI", sans-serif);
-    color: var(--vscode-editor-foreground, #d4d4d4);
+    color: var(--vscode-menu-foreground, var(--vscode-editor-foreground, #d4d4d4));
 }
 .goto-popover.hidden { display: none; }
 .goto-label {
@@ -1447,7 +1447,7 @@ body.vscode-high-contrast #grid-container.cm-on {
     border-radius: 4px;
     box-shadow: 0 4px 12px rgba(0,0,0,.45);
     font-family: var(--vscode-font-family, "Segoe UI", sans-serif);
-    color: var(--vscode-editor-foreground, #d4d4d4);
+    color: var(--vscode-menu-foreground, var(--vscode-editor-foreground, #d4d4d4));
 }
 .col-chooser-popover.hidden { display: none; }
 .col-chooser-head {
