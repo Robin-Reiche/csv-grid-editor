@@ -210,6 +210,19 @@ async function main() {
         assert.deepStrictEqual(seen, dataRows(want));
     });
 
+    // A field of only spaces may open a quote. Spaces written inside quotes are
+    // still only spaces. The scanner counted them as content, so after " " and
+    // a space the next quote reopened a field in the grid but not in the
+    // scanner. The counts came apart from there.
+    await test('a quote after a quoted space reopens the field in both', async () => {
+        const text = 'h\n" " "x\ny",z\nw,v\n';
+        const spaced = fixture('quoted-space.csv', text);
+        const want = parseCsv(text, ',');
+        assert.strictEqual(want.length, 3, 'the fixture no longer parses to three records');
+        assert.strictEqual(await countRecords(spaced, ','), want.length);
+        assert.deepStrictEqual(parseCsv(await readFirstRecords(spaced, 2, ','), ','), want.slice(0, 2));
+    });
+
     await test('the provider detects the delimiter before it scans', async () => {
         const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'csvEditorProvider.ts'), 'utf8');
         assert.ok(/scanDelimiter = this\.detectDelimiter\(filePath, await readFirstLine\(filePath\)\)/.test(src),

@@ -57,7 +57,7 @@ class RecordScanner {
 
             if (this.pendingQuote) {
                 this.pendingQuote = false;
-                if (b === QUOTE) {           // "" — a literal quote, still inside
+                if (b === QUOTE) {           // "": a literal quote, still inside
                     this.fieldHasContent = true;
                     continue;
                 }
@@ -65,8 +65,10 @@ class RecordScanner {
             }
 
             if (this.inQuotes) {
+                // Spaces inside quotes are still only spaces to the parser, so
+                // after " " a quote may open the field again there too.
                 if (b === QUOTE) this.pendingQuote = true;
-                else this.fieldHasContent = true;
+                else if (b !== SPACE && b !== TAB) this.fieldHasContent = true;
             } else if (b === this.delimiter) {
                 this.fieldHasContent = false;
             } else if (b === LF) {
