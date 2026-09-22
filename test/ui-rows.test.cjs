@@ -1,8 +1,11 @@
 // Browser tests for inserting rows with the keyboard.
 //
-// With a column filter on, Ctrl+Enter added the new blank row to the file but
-// the filter hid it, and the focus landed on the next row the filter let
-// through, so whatever was typed next replaced that row.
+// Two ways Ctrl+Enter used to go wrong. With a column filter on, the new blank
+// row was added to the file but hidden by the filter, and the focus landed on
+// the next row the filter let through, so whatever was typed next replaced
+// that row. And after the last row had been deleted, Ctrl+Enter did nothing,
+// because the focus the deleted row left behind still looked like a row to
+// insert next to.
 //
 // Run after `tsc -p ./`:  node test/ui-rows.test.cjs
 
@@ -55,6 +58,20 @@ runSuite('rows (browser)', [
             await t.pressEnter();
             t.check(t.lastEdit() === 'city,n\\nBerlin,1\\nOslo,\\nHanoi,2\\nParis,3\\nRome,4',
                 'the typed value lands in the new row (' + JSON.stringify(t.lastEdit()) + ')');
+        }`,
+    },
+    {
+        name: 'insert after deleting the last row',
+        csv: 'a,b\n1,2',
+        steps: `async (t, csv) => {
+            const press = ${PRESS};
+            await t.init(csv);
+            await t.focusCell(0, 0);
+            await press(t, 'K', { ctrlKey: true, shiftKey: true });
+            t.check(t.lastEdit() === 'a,b', 'Ctrl+Shift+K deletes the only row (' + JSON.stringify(t.lastEdit()) + ')');
+            await press(t, 'Enter', { ctrlKey: true });
+            t.check(t.lastEdit() === 'a,b\\n,', 'Ctrl+Enter then starts a new first row (' + JSON.stringify(t.lastEdit()) + ')');
+            t.check(!!t.cell(0, 0), 'and the grid shows it');
         }`,
     },
 ]);

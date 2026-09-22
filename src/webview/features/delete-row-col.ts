@@ -196,11 +196,14 @@ export function insertRowAtFocus(position: 'above' | 'below'): void {
     // Read the anchor BEFORE committing: stopEditing() can move the focus on, and
     // the row to insert next to is the one that was being edited, not the next one.
     const rowIndex = focusedRowForShortcut();
-    if (rowIndex === null) {
+    if (rowIndex === null || emptyTableKind(state.data) === 'no-rows') {
         // A table with a header and no rows has no cell to hold the focus, so
         // there is no row to insert next to. The key starts the first row
         // instead, the same as the button in the empty grid (issue #40). It does
         // nothing anywhere else: addFirstRow only acts on a table with no rows.
+        // The table itself is asked too, not only the focus: deleting the last
+        // row leaves its index behind, and that stale index skipped this branch
+        // and made the key do nothing.
         addFirstRow();
         return;
     }
