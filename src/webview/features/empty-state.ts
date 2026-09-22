@@ -1,7 +1,7 @@
 import { state, getNumCols, emptyTableKind } from '../state';
 import { insertRowsIntoData, insertColumnsIntoData } from '../grid/mutations';
 import { buildGrid } from '../grid/builder';
-import { refreshGrid, focusCell } from '../grid/refresh';
+import { refreshGrid, focusCell, revealAddedRow } from '../grid/refresh';
 import { recomputeColTypes } from '../grid/column-type';
 import { pushUndo, notifyChange } from './undo-redo';
 
@@ -91,6 +91,9 @@ export function addFirstRow(): void {
     state.isAutoFitted = false;
     state.autoFitCache = null;
     refreshGrid();
+    // A filter set before the last row was deleted is still on and would hide
+    // the new row, the same as a row inserted next to another.
+    const row = revealAddedRow(1);
     recomputeColTypes();
     notifyChange();
 
@@ -98,5 +101,5 @@ export function addFirstRow(): void {
     // The first displayed column, not col_0, which may be hidden.
     const first = (state.gridApi?.getAllDisplayedColumns?.() ?? [])
         .find((c: any) => c.getColId() !== 'row-index');
-    focusCell(0, first ? first.getColId() : 'col_0');
+    focusCell(row, first ? first.getColId() : 'col_0');
 }

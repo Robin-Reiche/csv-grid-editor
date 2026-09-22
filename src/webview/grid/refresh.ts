@@ -105,6 +105,39 @@ export function clampRow(rowIndex: number, rowCount: number): number | null {
     return Math.max(0, Math.min(rowIndex, rowCount - 1));
 }
 
+// The displayed index of state.data[dataIndex], a blank row that was just
+// added. null means it is frozen into the band above instead. Call it after
+// the grid has the new row.
+//
+// A column filter judges the new row like any other and nearly always hides
+// it: a value list never ticked (Blank), a condition such as "contains" never
+// matches nothing. The row went into the file unseen and the focus landed on
+// the next row the filter let through, so the next keystroke overwrote that
+// row. The filters are cleared instead, the way the "Clear filters" button
+// does it. Keeping them and hiding the row the user just asked for is the
+// worse surprise. A filter that lets blank rows through is left alone. Both
+// ways of adding a blank row come through here: inserting next to a row
+// (features/delete-row-col.ts) and starting the first row of an empty table
+// (features/empty-state.ts).
+export function revealAddedRow(dataIndex: number): number | null {
+    if (!state.gridApi) return null;
+    const shown = displayIndexOfDataRow(dataIndex);
+    if (shown !== null || !state.gridApi.isAnyFilterPresent()) return shown;
+    state.gridApi.setFilterModel(null);
+    return displayIndexOfDataRow(dataIndex);
+}
+
+// The displayed row that shows state.data[dataIndex]. null means a filter hides
+// it or it is frozen into the pinned band.
+function displayIndexOfDataRow(dataIndex: number): number | null {
+    if (!state.gridApi) return null;
+    const count = state.gridApi.getDisplayedRowCount();
+    for (let i = 0; i < count; i++) {
+        if (Number(state.gridApi.getDisplayedRowAtIndex(i)?.data?._origIndex) === dataIndex) return i;
+    }
+    return null;
+}
+
 export function refreshGrid(): void {
     // No grid to refresh (the file was empty, then content arrived by undo, redo
     // or an edit in another editor), or no columns left to show (undo back to an

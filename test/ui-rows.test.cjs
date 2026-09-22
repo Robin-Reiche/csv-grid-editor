@@ -3,9 +3,9 @@
 // Two ways Ctrl+Enter used to go wrong. With a column filter on, the new blank
 // row was added to the file but hidden by the filter. The focus landed on the
 // next row the filter let through, so whatever was typed next replaced that
-// row. And after the last row had been deleted, Ctrl+Enter did nothing,
-// because the focus the deleted row left behind still looked like a row to
-// insert next to.
+// row. The first row of an emptied table was hidden the same way. And after
+// the last row had been deleted, Ctrl+Enter did nothing, because the focus the
+// deleted row left behind still looked like a row to insert next to.
 //
 // Run after `tsc -p ./`:  node test/ui-rows.test.cjs
 
@@ -82,6 +82,35 @@ runSuite('rows (browser)', [
             await press(t, 'Enter', { ctrlKey: true });
             t.check(t.lastEdit() === 'a,b\\n,', 'Ctrl+Enter then starts a new first row (' + JSON.stringify(t.lastEdit()) + ')');
             t.check(!!t.cell(0, 0), 'and the grid shows it');
+        }`,
+    },
+    {
+        name: 'start the first row with a filter on',
+        csv: 'city,n\nBerlin,1',
+        steps: `async (t, csv) => {
+            ${FRAMES}
+            const press = ${PRESS};
+            await t.init(csv);
+            // Set the city column's condition to "Is not blank", which a new
+            // blank row never passes.
+            t.click(t.header(0).querySelector('.ag-header-cell-filter-button, .ag-header-cell-menu-button'));
+            await t.wait(300);
+            const sel = document.querySelector('.csv-filter-select');
+            t.check(!!sel, 'the filter offers a condition');
+            sel.value = 'notblank';
+            sel.dispatchEvent(new Event('change'));
+            await t.wait(300);
+            document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+            await t.wait(200);
+
+            await t.focusCell(0, 0);
+            await press(t, 'K', { ctrlKey: true, shiftKey: true });
+            t.check(t.lastEdit() === 'city,n', 'Ctrl+Shift+K deletes the only row (' + JSON.stringify(t.lastEdit()) + ')');
+            await press(t, 'Enter', { ctrlKey: true });
+            t.check(t.lastEdit() === 'city,n\\n,', 'Ctrl+Enter starts a new first row (' + JSON.stringify(t.lastEdit()) + ')');
+            const status = document.getElementById('status').textContent;
+            t.check(!!t.cell(0, 0) && status === '1 records', 'the new row is shown (status "' + status + '")');
+            t.check(t.focusedRow() === 0, 'the focus is on it (row ' + t.focusedRow() + ')');
         }`,
     },
 ]);

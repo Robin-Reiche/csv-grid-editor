@@ -1,6 +1,6 @@
 import { state, getNumCols, emptyTableKind } from '../state';
 import { pushUndo, notifyChange } from './undo-redo';
-import { refreshGrid, focusCell } from '../grid/refresh';
+import { refreshGrid, focusCell, revealAddedRow } from '../grid/refresh';
 import { recomputeColTypes } from '../grid/column-type';
 import { buildGrid } from '../grid/builder';
 import {
@@ -80,7 +80,7 @@ function deleteRows(displayIndices: number[]): void {
 // that we bake the current displayed order into state.data and clear the sort
 // model first, so the spliced rows stay exactly where we put them.
 //
-// Returns the displayed index of the first inserted row, or null when nothing
+// Returns the displayed index of the first inserted row or null when nothing
 // was inserted. Callers focus that, not the anchor plus one: clearing a filter
 // below shifts every displayed index.
 function insertRows(anchorDisplayIndex: number, position: 'above' | 'below', count: number): number | null {
@@ -139,33 +139,13 @@ function insertRows(anchorDisplayIndex: number, position: 'above' | 'below', cou
     state.isAutoFitted = false;
     state.autoFitCache = null;
     refreshGrid();
-
-    // A column filter judges the new blank rows like any other and nearly always
-    // hides them: a value list never ticked (Blank), a condition such as
-    // "contains" never matches nothing. The row went into the file unseen and
-    // the focus landed on the next row the filter let through, so the next
-    // keystroke overwrote that row. The filters are cleared instead, the way the
-    // sort is flattened above and the way the "Clear filters" button does it.
-    // Keeping them and hiding the row the user just asked for is the worse
-    // surprise. A filter that lets blank rows through is left alone.
-    if (displayIndexOfDataRow(insertAt) === null && state.gridApi.isAnyFilterPresent()) {
-        state.gridApi.setFilterModel(null);
-    }
+    // Clears a filter that would hide the new rows, the way the sort was
+    // flattened above.
+    const first = revealAddedRow(insertAt);
 
     recomputeColTypes();
     notifyChange();
-    return displayIndexOfDataRow(insertAt);
-}
-
-// The displayed row that shows state.data[dataIndex], or null when a filter
-// hides it or it is frozen into the pinned band.
-function displayIndexOfDataRow(dataIndex: number): number | null {
-    if (!state.gridApi) return null;
-    const count = state.gridApi.getDisplayedRowCount();
-    for (let i = 0; i < count; i++) {
-        if (Number(state.gridApi.getDisplayedRowAtIndex(i)?.data?._origIndex) === dataIndex) return i;
-    }
-    return null;
+    return first;
 }
 
 // The keyboard's entry points into the three row actions (issue #36):
@@ -202,8 +182,8 @@ export function insertRowAtFocus(position: 'above' | 'below'): void {
         // instead, the same as the button in the empty grid (issue #40). It does
         // nothing anywhere else: addFirstRow only acts on a table with no rows.
         // The table itself is asked too, not only the focus: deleting the last
-        // row leaves its index behind, and that stale index skipped this branch
-        // and made the key do nothing.
+        // row leaves its index behind. That stale index skipped this branch and
+        // made the key do nothing.
         addFirstRow();
         return;
     }
@@ -215,7 +195,7 @@ export function insertRowAtFocus(position: 'above' | 'below'): void {
     const rows = shortcutRows(rowIndex);
     const anchor = position === 'above' ? Math.min(...rows) : Math.max(...rows);
     // Read the column before inserting too. Clearing a filter in insertRows
-    // resets the grid's focus, and the tracked column goes with it.
+    // resets the grid's focus. The tracked column goes with it.
     const colId = state.focusedCellColId;
     const first = insertRows(anchor, position, rows.length);
 
