@@ -69,9 +69,9 @@ test('a last line of only spaces or tabs is not a row', () => {
     assert.deepStrictEqual(parseCsv('a,b\n1,2\n \t ', ',', false, true), [['a', 'b'], ['1', '2']]);
 });
 
-// Paste calls the parser without the file flag, and there spaces are what the
-// user copied. Dropping them made a paste of spaces do nothing and skipped the
-// last row of a pasted block when it held only spaces.
+// Paste calls the parser without the file flag. There spaces are what the user
+// copied. Dropping them made a paste of spaces do nothing and skipped the last
+// row of a pasted block when it held only spaces.
 test('pasted spaces are kept, alone and as the last row of a block', () => {
     assert.deepStrictEqual(parseCsv('   ', '\t', false), [['   ']]);
     assert.deepStrictEqual(parseCsv('x\ty\n  \t  ', '\t', false), [['x', 'y'], ['  ', '  ']]);

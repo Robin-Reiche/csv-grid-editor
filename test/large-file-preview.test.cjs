@@ -185,7 +185,7 @@ async function main() {
 
     // The grid reads a " only at the start of a field as an opening quote, so
     // 5" disk is plain text. The scanner used to open a quoted section at any
-    // quote, and on such a file the counts and pages stopped matching the grid.
+    // quote. On such a file the counts and pages stopped matching the grid.
     // A quote after a space behind the delimiter still opens a field, in both.
     await test('inch marks and a space before a quote split records the way the grid does', async () => {
         const lines = ['size;n;note'];

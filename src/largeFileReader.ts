@@ -19,8 +19,8 @@ const TAB   = 0x09;
 // (issue #32). Every reader below walks the file through this scanner instead.
 // It tracks quote state exactly the way the grid's parser does (see
 // webview/utils/csv.ts): a " opens a quoted section only at the start of a
-// field, spaces and tabs before it aside, inside one "" is a literal quote and
-// a single " closes it, and only \n ends a record. A " further into a field is
+// field, spaces and tabs before it aside. Inside one "" is a literal quote and
+// a single " closes it. Only \n ends a record. A " further into a field is
 // part of the value, as in 5" disk. Telling the two apart takes the delimiter,
 // which is why every reader below asks for it. Scanning bytes rather than
 // characters is safe because ", \n, \r and the delimiters the provider detects
