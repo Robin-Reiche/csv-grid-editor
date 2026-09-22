@@ -27,6 +27,10 @@ let selCellCount = 0;
 let dragging = false;
 let dragMode: 'cells' | 'rows' = 'cells';
 
+// AG Grid's focused cell as it was when the selection was last set, so
+// followFocus() can tell whether the focus has moved since.
+let focusAtSel: string | null = null;
+
 let statsTimer: ReturnType<typeof setTimeout> | null = null;
 
 // ── grid geometry helpers ─────────────────────────────────────────────────────
@@ -40,6 +44,13 @@ function displayedColIds(): string[] {
 
 function displayedRowCount(): number {
     return state.gridApi ? state.gridApi.getDisplayedRowCount() : 0;
+}
+
+// AG Grid's focused cell as one comparable string. Null when nothing is focused.
+function focusKey(): string | null {
+    const f = state.gridApi?.getFocusedCell();
+    const colId: string | undefined = f?.column?.getColId?.();
+    return f && colId != null ? `${f.rowPinned ?? ''}:${f.rowIndex}:${colId}` : null;
 }
 
 // map[displayRowIndex] = original 1-based data-row index
@@ -85,6 +96,7 @@ function repaint(): void {
 }
 
 function selectionChanged(): void {
+    focusAtSel = focusKey();
     recomputeCache();
     repaint();
     scheduleStats();
@@ -431,14 +443,26 @@ const ARROWS = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
 // telling us, so the stored cell went stale and Delete cleared the cell that was
 // clicked last, possibly far off screen, instead of the one the user was on. A
 // one-cell selection is really just "the current cell", so before any key acts
-// on it, it is moved to AG Grid's focused cell. A focus on a frozen row or
-// outside the grid has no body cell to stand for, so the selection is dropped.
+// on it, it is moved to AG Grid's focused cell.
+//
+// It only follows a focus that has moved since the selection was made. It used
+// to follow on every key, a bare Shift press included. A gutter click puts the
+// focus on the '#' cell and a header click leaves it where it was, so on a file
+// with one column or one row, where a single gutter row or header column is one
+// cell, the Shift press before a Shift+click swapped that row or column for the
+// focused cell and the Shift+click started over.
+//
+// A focus on a frozen row, on the '#' gutter or outside the grid has no data
+// cell to stand for, so the selection is dropped and Delete does nothing there.
 function followFocus(): void {
     if (!selActive || selCellCount !== 1 || !state.gridApi) return;
+    const now = focusKey();
+    if (now === focusAtSel) return;
+    focusAtSel = now;
     const f = state.gridApi.getFocusedCell();
     const colId: string | undefined = f?.column?.getColId?.();
     if (!f || f.rowPinned || f.rowIndex == null || colId == null) { clearRangeSelection(); return; }
-    const cpos = colId === 'row-index' ? 0 : displayedColIds().indexOf(colId);
+    const cpos = displayedColIds().indexOf(colId);
     if (cpos < 0) { clearRangeSelection(); return; }
     selType = 'cells';
     anchorRow = focusRow = f.rowIndex;

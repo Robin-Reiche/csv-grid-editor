@@ -4,7 +4,9 @@
 // ways an edit used to reach the wrong row: Delete cleared the cell that was
 // last clicked instead of the one the keyboard had moved to. Any edit made in
 // the "Show only duplicates" view put back a copy of the rows taken before the
-// edit, so the next edit was written to a different row.
+// edit, so the next edit was written to a different row. The fix for the first
+// must not break a Shift+click range on the gutter or a header, which a bare
+// Shift press used to reset on files with a single row or column.
 //
 // Run after `tsc -p ./`:  node test/find-edit-target.test.cjs
 
@@ -39,6 +41,83 @@ runSuite('edit target (browser)', [
             await key('Delete');
             t.check(t.lastEdit() === 'k,v\na,\nb,\nc,\nd,4',
                 'Shift+Arrow starts at the focused cell (' + JSON.stringify(t.lastEdit()) + ')');
+        },
+    },
+    {
+        // Holding Shift sends a keydown of its own before the Shift+click. On a
+        // file with one column a single gutter row is one cell. That bare Shift
+        // press turned it into a plain cell, so the Shift+click started over
+        // instead of taking in the rows between.
+        name: 'Shift+click on the gutter after a Shift press',
+        csv: 'k\na\nb\nc\nd\ne',
+        steps: async (t, csv) => {
+            const gutter = r => {
+                for (const row of document.querySelectorAll('#grid-container .ag-row[row-index="' + r + '"]')) {
+                    const c = row.querySelector('.ag-cell[col-id="row-index"]');
+                    if (c) return c;
+                }
+                return null;
+            };
+            const press = (el, shiftKey) => ['mousedown', 'mouseup', 'click'].forEach(ty =>
+                el.dispatchEvent(new MouseEvent(ty, { bubbles: true, button: 0, shiftKey })));
+            await t.init(csv);
+            press(gutter(1), false);
+            await t.wait(200);
+            document.querySelector('#grid-container .ag-cell-focus').dispatchEvent(
+                new KeyboardEvent('keydown', { key: 'Shift', code: 'ShiftLeft', shiftKey: true, bubbles: true, cancelable: true }));
+            await t.wait(100);
+            press(gutter(3), true);
+            await t.wait(200);
+            document.querySelector('#grid-container .ag-cell-focus').dispatchEvent(
+                new KeyboardEvent('keydown', { key: 'Delete', code: 'Delete', bubbles: true, cancelable: true }));
+            await t.wait(150);
+            t.check(t.lastEdit() === 'k\na\n\n\n\ne',
+                'Delete clears the three rows from the gutter range (' + JSON.stringify(t.lastEdit()) + ')');
+        },
+    },
+    {
+        // The same on a file with one data row, where one column is one cell.
+        // A header click leaves the grid's cell focus where it was, so that old
+        // focus must not be taken for a move away from the selected column.
+        name: 'Shift+click on a header after a Shift press',
+        csv: 'a,b,c\n1,2,3',
+        steps: async (t, csv) => {
+            const shiftClick = el => el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, shiftKey: true }));
+            await t.init(csv);
+            await t.focusCell(0, 0);
+            shiftClick(t.header(1));
+            await t.wait(100);
+            document.querySelector('#grid-container .ag-cell-focus').dispatchEvent(
+                new KeyboardEvent('keydown', { key: 'Shift', code: 'ShiftLeft', shiftKey: true, bubbles: true, cancelable: true }));
+            await t.wait(100);
+            shiftClick(t.header(2));
+            await t.wait(100);
+            document.querySelector('#grid-container .ag-cell-focus').dispatchEvent(
+                new KeyboardEvent('keydown', { key: 'Delete', code: 'Delete', bubbles: true, cancelable: true }));
+            await t.wait(150);
+            t.check(t.lastEdit() === 'a,b,c\n1,,',
+                'Delete clears both selected columns and leaves the focused cell (' + JSON.stringify(t.lastEdit()) + ')');
+        },
+    },
+    {
+        // The '#' gutter holds no data. With the focus on it, Delete must not
+        // clear the row's first cell on behalf of an earlier click.
+        name: 'Delete on the gutter after the arrow keys',
+        csv: 'k,v\na,1\nb,2\nc,3',
+        steps: async (t, csv) => {
+            const key = async k => {
+                const c = document.querySelector('#grid-container .ag-cell-focus');
+                c.dispatchEvent(new KeyboardEvent('keydown', { key: k, code: k, bubbles: true, cancelable: true }));
+                await t.wait(150);
+            };
+            await t.init(csv);
+            await t.focusCell(1, 1);
+            await key('ArrowLeft');
+            await key('ArrowLeft');
+            const f = document.querySelector('#grid-container .ag-cell-focus');
+            t.check(!!f && f.getAttribute('col-id') === 'row-index', 'the focus is on the gutter');
+            await key('Delete');
+            t.check(t.sent('edit').length === 0, 'Delete wrote nothing (' + JSON.stringify(t.lastEdit()) + ')');
         },
     },
     {
