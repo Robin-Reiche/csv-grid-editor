@@ -78,6 +78,14 @@ function loadWebviewModule() {
 
 // The helpers a test gets as `t`. Runs inside the page.
 const PRELUDE = `
+// Headless Chrome draws its frames on the real clock while timers run on the
+// virtual one, so a frame callback fired at some random point in the test. The
+// grid puts the focus back in a frame after a rebuild. When that frame came
+// late, it pulled the focus off a cell the test had just clicked. Frames run
+// on a 16 ms timer here instead, the pace of a real screen, so they happen in
+// step with the waits.
+window.requestAnimationFrame = cb => setTimeout(() => cb(performance.now()), 16);
+window.cancelAnimationFrame = id => clearTimeout(id);
 window.__sent = [];
 window.__lines = [];
 window.__t = {

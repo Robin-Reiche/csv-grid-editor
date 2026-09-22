@@ -8,7 +8,7 @@ import { ControlCharCellRenderer, shownValue } from './control-char-cell';
 import { MultilineCellEditor } from './multiline-cell-editor';
 import { refreshProfileIfOpen } from '../features/profile';
 import { pushUndo, notifyChange, updateButtons } from '../features/undo-redo';
-import { getFindCellClassRules } from '../features/find-replace';
+import { getFindCellClassRules, refreshFindIfOpen } from '../features/find-replace';
 import { getCellMarkClassRules } from '../features/cell-marks';
 import { attachHeaderContextMenus } from '../features/freeze-columns';
 import { applyZoom } from '../features/zoom';
@@ -349,6 +349,8 @@ export function buildGrid(): void {
             // row data is unchanged). Force it so the numbers renumber at once.
             state.gridApi?.refreshCells({ columns: ['row-index'], force: true });
         },
+
+        onColumnVisible: () => refreshFindIfOpen(),
 
         onFilterChanged: () => {
             clearRangeSelection();
