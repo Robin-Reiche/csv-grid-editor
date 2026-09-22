@@ -78,10 +78,6 @@ export function getWebviewContent(
     const agGridCssUri  = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', 'ag-grid.css'));
     const agThemeCssUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', 'ag-theme-alpine.css'));
 
-    const escapedDelimiter = delimiter
-        .replace(/\\/g, '\\\\')
-        .replace(/\t/, '\\t');
-
     return /*html*/ `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -284,21 +280,31 @@ export function getWebviewContent(
     <script nonce="${nonce}">
         const vscodeApi      = acquireVsCodeApi();
         const IS_PREVIEW     = ${isPreview ? 'true' : 'false'};
-        const PREVIEW_MODE   = '${previewMode}';
-        const TOTAL_LINE_COUNT = ${totalLineCount};
-        const DELIMITER      = '${escapedDelimiter}';
-        const FILENAME       = '${fileName.replace(/'/g, "\\'")}';
+        const PREVIEW_MODE   = ${scriptValue(previewMode)};
+        const TOTAL_LINE_COUNT = ${scriptValue(totalLineCount)};
+        const DELIMITER      = ${scriptValue(delimiter)};
+        const FILENAME       = ${scriptValue(fileName)};
         const IS_CHUNKED          = ${isChunked ? 'true' : 'false'};
-        const INITIAL_ZOOM_INDEX  = ${zoomIndex};
+        const INITIAL_ZOOM_INDEX  = ${scriptValue(zoomIndex)};
         const INITIAL_WRAP_TEXT   = ${wrapText ? 'true' : 'false'};
-        const INITIAL_SETTINGS    = ${JSON.stringify(settings)};
-        const INITIAL_PROFILE_LAYOUT = ${JSON.stringify(profileLayout)};
+        const INITIAL_SETTINGS    = ${scriptValue(settings)};
+        const INITIAL_PROFILE_LAYOUT = ${scriptValue(profileLayout)};
     </script>
 
     <!-- Bundled webview logic -->
     <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`;
+}
+
+// Writes a value into the inline script as a literal that can only ever be
+// data. The file name comes from the disk (on Linux and macOS it may hold
+// quotes, backslashes and line breaks) and the zoom and profile layout come
+// back from the webview through globalState, so none of them may be pasted in
+// as code. JSON covers quotes, backslashes and line breaks. Escaping "<" keeps
+// a "</script>" inside a value from ending the script early.
+function scriptValue(value: unknown): string {
+    return JSON.stringify(value).replace(/</g, '\\u003c');
 }
 
 function getNonce(): string {

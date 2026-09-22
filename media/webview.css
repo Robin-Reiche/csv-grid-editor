@@ -43,7 +43,12 @@ body {
     background: var(--vscode-editor-background, #1e1e1e);
     border-bottom: 1px solid var(--vscode-panel-border, #2d2d2d);
     flex-shrink: 0;
-    height: 28px;
+    /* A split editor is often narrower than the toolbar and the page clips
+       whatever overflows. The settings gear sits at the right end, so it went
+       first and took every switch that only lives in its menu with it.
+       Wrapping onto a second row keeps each control on screen. */
+    flex-wrap: wrap;
+    min-height: 28px;
 }
 
 .toolbar button {
@@ -122,8 +127,17 @@ button .codicon {
     margin: 0 3px;
 }
 
+/* The row count gives way before any control does. It takes whatever room is
+   left on its row, right aligned next to the gear. When that room runs out
+   it is cut short with an ellipsis. Its zero basis keeps it from ever being
+   the reason the toolbar wraps. */
 .toolbar .info {
-    margin-left: auto;
+    flex: 1 1 0;
+    min-width: 0;
+    text-align: right;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
     opacity: 0.5;
     font-size: 11px;
 }
