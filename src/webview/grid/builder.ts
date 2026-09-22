@@ -82,8 +82,10 @@ function parseTimeToSeconds(s: string): number {
 
 // Text compares what the grid SHOWS. The file is read with its padding kept,
 // so with "Hide spaces around values" on an invisible leading space would
-// otherwise put ' Zurich' ahead of 'Berlin'. The parsed types need no help:
-// Number, Date.parse and the time pattern all read past the spaces already.
+// otherwise put ' Zurich' ahead of 'Berlin'. Number and the time pattern read
+// past the spaces on their own. Date.parse does too, but it reads a padded
+// ' 2024-01-05' as local midnight rather than the ISO date, so the date
+// comparator below hands it the bare value.
 function textCompare(a: string, b: string): number {
     return shownValue(String(a ?? '')).localeCompare(shownValue(String(b ?? '')), undefined, {
         numeric: true, sensitivity: 'base',
@@ -117,7 +119,7 @@ function typedComparator(parse: (s: string) => number): (a: string, b: string) =
 
 function makeComparator(colType: string): (a: string, b: string) => number {
     if (colType === 'integer' || colType === 'float') return typedComparator(s => Number(s));
-    if (colType === 'date' || colType === 'datetime') return typedComparator(s => Date.parse(s));
+    if (colType === 'date' || colType === 'datetime') return typedComparator(s => Date.parse(s.trim()));
     if (colType === 'time') return typedComparator(parseTimeToSeconds);
     // string / boolean — natural order so "10" sorts after "2"
     return textCompare;

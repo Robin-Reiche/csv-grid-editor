@@ -140,9 +140,15 @@ export function createCombinedFilter(colType: ColType): any {
             const cv = cond.value;
             const isNumeric  = colType === 'integer' || colType === 'float';
             const isDateType = colType === 'date' || colType === 'datetime' || colType === 'time';
+            // With "Hide spaces around values" off the key keeps the file's
+            // padding, but a number or a date is the same with or without it.
+            // The parse gets the bare value, the way column-type.ts detected it,
+            // because new Date(' 2024-01-05') reads local midnight instead of
+            // the ISO date and lands on the day before east of UTC.
+            const bare = valStr.trim();
 
             if (isNumeric) {
-                const nCell = Number(valStr), nCond = Number(cv);
+                const nCell = Number(bare), nCond = Number(cv);
                 if (isNaN(nCell)) return false;
                 if (ct === 'eq')  return nCell === nCond;
                 if (ct === 'neq') return nCell !== nCond;
@@ -151,7 +157,7 @@ export function createCombinedFilter(colType: ColType): any {
                 if (ct === 'lt')  return nCell < nCond;
                 if (ct === 'lte') return nCell <= nCond;
             } else if (isDateType) {
-                const dCell = new Date(valStr), dCond = new Date(cv);
+                const dCell = new Date(bare), dCond = new Date(cv);
                 if (isNaN(dCell.getTime())) return false;
                 const ds = dCell.toISOString().slice(0, 10);
                 const dc = dCond.toISOString().slice(0, 10);

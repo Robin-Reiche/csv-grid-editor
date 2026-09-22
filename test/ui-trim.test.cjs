@@ -14,9 +14,15 @@
 
 const { runSuite } = require('./ui/harness.cjs');
 
+// Chrome inherits the time zone from this process. The date scenario below
+// only means something east of UTC, where a date parsed as local midnight
+// lands on the day before, so it is pinned here instead of left to the host.
+process.env.TZ = 'Europe/Berlin';
+
 const CITIES = 'city,n\n Berlin,1\nAnna,2\nHanoi ,3\nBerlin,4\n Zoe,5';
 const SORTING = 'city,n\nAnna,1\n Zoe,2\nBerlin,3\n  Carl,4';
 const PADDED_HEADERS = 'name,   , city \nAnna,x, Berlin ';
+const DATES = 'd,n\n 2024-01-05,1\n2024-01-05,2\n2024-02-01,3';
 
 // Shared by the filter scenarios. The steps run inside the page, where these
 // helpers are rebuilt from their source, so they must not close over anything.
@@ -32,6 +38,16 @@ const FILTER_HELPERS = `
             .dispatchEvent(new MouseEvent('click', { bubbles: true }));
         await t.wait(250);
         return document.querySelector('.csv-filter-panel');
+    };
+    t.setCond = async (panel, type, value) => {
+        const sel = panel.querySelector('.csv-filter-select');
+        sel.value = type;
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+        await t.wait(100);
+        const inp = panel.querySelector('.csv-filter-cond-input');
+        inp.value = value;
+        inp.dispatchEvent(new Event('input', { bubbles: true }));
+        await t.wait(250);
     };
     t.filterRows = () => [...document.querySelectorAll('.csv-filter-panel .csv-filter-value-row')];
     t.filterLabels = () => t.filterRows().map(r => r.querySelector('.csv-filter-value-label').textContent);
@@ -109,6 +125,44 @@ runSuite('spaces around values (browser)', [
             shown = t.shownCol(0);
             t.check(shown.length === 4 && !shown.includes('Anna'),
                 'and switching back keeps them too (' + JSON.stringify(shown) + ')');
+        `),
+    },
+    {
+        // With spaces shown ' 2024-01-05' is its own value in the list, but it
+        // is still the 5th of January. A condition has to read it as that date.
+        name: 'date condition, spaces shown',
+        csv: DATES,
+        settings: { trimDisplay: false },
+        steps: withHelpers(`
+            await t.init(csv);
+            t.check(new Date(2024, 0, 5).getTimezoneOffset() < 0,
+                'the page runs east of UTC, where the bug shows (offset ' + new Date(2024, 0, 5).getTimezoneOffset() + ')');
+            const panel = await t.openFilter(0);
+            await t.setCond(panel, 'eq', '2024-01-05');
+            let shown = t.shownCol(1);
+            t.check(JSON.stringify(shown) === JSON.stringify(['1', '2']),
+                'Equals 2024-01-05 keeps the padded date too (' + JSON.stringify(shown) + ')');
+            let labels = t.filterLabels();
+            t.check(labels.includes(' 2024-01-05') && labels.includes('2024-01-05') && !labels.includes('2024-02-01'),
+                'the list offers both spellings of the day and nothing else (' + JSON.stringify(labels) + ')');
+            await t.setCond(panel, 'lt', '2024-01-05');
+            shown = t.shownCol(1);
+            t.check(shown.length === 0,
+                'Before 2024-01-05 does not count the padded date as the day before (' + JSON.stringify(shown) + ')');
+        `),
+    },
+    {
+        // Two spellings of one day are the same date, so a sort keeps them in
+        // file order instead of putting the padded one an hour earlier.
+        name: 'date sort, spaces around one',
+        csv: 'd,n\n2024-01-05,1\n 2024-01-05,2\n2024-01-04,3',
+        steps: withHelpers(`
+            await t.init(csv);
+            t.header(0).querySelector('.ag-header-cell-label').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(250);
+            const shown = t.shownCol(1);
+            t.check(JSON.stringify(shown) === JSON.stringify(['3', '1', '2']),
+                'ascending puts the 4th first and keeps both 5ths in file order (' + JSON.stringify(shown) + ')');
         `),
     },
     {
