@@ -3,8 +3,9 @@
 // A switch re-splits the text of the file into columns. That text was the one
 // the file was opened with, so every edit made since then was gone from the
 // grid after a switch and the next edit wrote the old table back into the
-// file. An outside change was never kept either, and it was split with the
-// delimiter found at open instead of the one the user had picked.
+// file. An outside change was never kept either. It was also split with the
+// delimiter found at open instead of the one the user had picked. A switch in
+// the "Show only duplicates" view left that view up with the old rows.
 //
 // Run after `tsc -p ./`:  node test/ui-delimiter.test.cjs
 
@@ -33,6 +34,10 @@ const HELPERS = `
     t.delim = async (d) => {
         document.querySelector('.delim-option[data-delim="' + d + '"]')
             .dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        await t.wait(400);
+    };
+    t.button = async (id) => {
+        document.getElementById(id).dispatchEvent(new MouseEvent('click', { bubbles: true }));
         await t.wait(400);
     };
     t.edit = async (row, col, value) => {
@@ -86,6 +91,20 @@ runSuite('delimiter switch (browser)', [
                 + t.col(0) + ' / ' + t.col(1) + ')');
             await t.edit(0, 1, '10');
             t.check(t.lastEdit() === 'name;qty\\nx;10', 'and written back with it (' + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
+    {
+        name: 'a switch in the duplicates view',
+        csv: 'k;v\na;1\nb;2\na;1',
+        steps: steps(`
+            await t.button('btn-duplicates');
+            await t.button('dup-only-toggle');
+            t.check(t.col(0) === 'a;1,a;1', 'the view shows the two duplicates (' + t.col(0) + ')');
+            await t.delim(';');
+            t.check(document.getElementById('dup-banner').classList.contains('hidden'),
+                'the switch ends the view, its rows were split the old way');
+            t.check(t.col(0) === 'a,b,a' && t.col(1) === '1,2,1', 'every row is shown, split on the semicolon ('
+                + t.col(0) + ' / ' + t.col(1) + ')');
         `),
     },
 ]);

@@ -3,6 +3,7 @@ import { parseCsv } from '../utils/csv';
 import { buildGrid } from '../grid/builder';
 import { frozenRowPositions, reanchorFrozenRows } from './freeze-rows';
 import { closeAllPopups } from './popups';
+import { resetDuplicatesState } from './duplicates';
 
 export function updateDelimiterBadge(delimiter: string): void {
     const badge = document.getElementById('delim-badge');
@@ -41,6 +42,12 @@ export function setupDelimiterBadge(): void {
             state.autoFitCache = null;
             state.colTypes = [];
             buildGrid();
+            // The duplicate search looked at the rows as they were split before,
+            // so its results no longer fit. Leaving "Show only duplicates" later
+            // would put back its snapshot of those old rows. A switch writes
+            // nothing, so notifyChange, which ends the view after every edit,
+            // never runs here.
+            resetDuplicatesState();
         });
     });
 
