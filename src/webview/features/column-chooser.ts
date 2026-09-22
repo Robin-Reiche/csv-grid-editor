@@ -1,5 +1,6 @@
 import { state } from '../state';
 import { closeAllPopups } from './popups';
+import { shownValue } from '../grid/control-char-cell';
 
 // ── Column chooser (show / hide columns) ────────────────────────────────────
 // A toolbar dropdown listing every data column with a checkbox to toggle its
@@ -21,9 +22,12 @@ function setColHidden(colIndex: number, hidden: boolean): void {
     syncMaster();
 }
 
+// The name as the grid header shows it. A name made of nothing but spaces is
+// no name to pick a column by, so it gets the placeholder even with the spaces
+// shown.
 function colLabel(header: string[], c: number): string {
-    const name = header[c] ?? '';
-    return name !== '' ? name : '(column ' + (c + 1) + ')';
+    const name = shownValue(header[c] ?? '');
+    return name.trim() !== '' ? name : '(column ' + (c + 1) + ')';
 }
 
 function visibleColIndices(): number[] {

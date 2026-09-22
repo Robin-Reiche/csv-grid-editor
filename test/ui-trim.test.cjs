@@ -129,4 +129,27 @@ runSuite('spaces around values (browser)', [
             t.check(t.sent('edit').length === 0, 'sorting wrote nothing');
         `),
     },
+    {
+        name: 'column chooser',
+        csv: PADDED_HEADERS,
+        steps: async (t, csv) => {
+            await t.init(csv);
+            const labels = async () => {
+                document.getElementById('btn-columns').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+                await t.wait(150);
+                const out = [...document.querySelectorAll('#col-chooser-list .col-chooser-label')].map(s => s.textContent);
+                document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+                document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+                await t.wait(100);
+                return out;
+            };
+            let l = await labels();
+            t.check(JSON.stringify(l) === JSON.stringify(['name', '(column 2)', 'city']),
+                'names are shown as the header shows them, a blank one as (column N) (' + JSON.stringify(l) + ')');
+            await t.setSetting('trimDisplay', false);
+            l = await labels();
+            t.check(JSON.stringify(l) === JSON.stringify(['name', '(column 2)', ' city ']),
+                'with spaces shown the names keep them, a blank one is still (column N) (' + JSON.stringify(l) + ')');
+        },
+    },
 ]);
