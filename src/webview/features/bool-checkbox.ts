@@ -56,11 +56,6 @@ export function paintBoolCheckbox(
     box.setAttribute('role', 'img');
     box.setAttribute('aria-label', value);
     box.title = value;
-    if (checked) {
-        const tick = document.createElement('i');
-        tick.className = 'codicon codicon-check';
-        box.appendChild(tick);
-    }
 
     if (onToggle) {
         box.classList.add('csv-bool-box--clickable');

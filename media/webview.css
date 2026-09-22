@@ -1534,28 +1534,39 @@ body.vscode-high-contrast #grid-container.cm-on {
 /* ── Checkbox cells for true/false columns ──
    Drawn over the value, never in place of it: the cell still holds the word the
    file uses, and it is the box's tooltip and its accessible name. Sized in em so
-   it follows the zoom steps like every other cell. */
+   it follows the zoom steps like every other cell.
+
+   Drawn in the cell's own text color (currentColor) and nothing else. The
+   theme's checkbox and focus colors looked like the obvious source, but plenty
+   of themes set them barely apart from the editor background: on Tomorrow
+   Night Blue an empty box vanished into the row, on Gruvbox Light both states
+   washed out. The text color is the one color every theme guarantees reads
+   against the cell, whatever the row stripe, color mode tint or selection
+   behind it, so a box drawn in it is exactly as legible as the words it stands
+   in for.
+
+   Empty: an outline. Ticked: a filled square with the tick cut out of it, so
+   the tick shows the cell background through the fill and needs no second
+   color of its own. The cut-out is a mask, drawn by an SVG whose tick is the
+   transparent part. */
 .csv-bool-box {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 1.15em;
-    height: 1.15em;
+    display: inline-block;
+    width: 1.1em;
+    height: 1.1em;
     box-sizing: border-box;
-    border: 1px solid var(--vscode-checkbox-border, #6b6b6b);
+    border: 1.5px solid currentColor;
     border-radius: 3px;
-    background: var(--vscode-checkbox-background, #313131);
-    color: var(--vscode-checkbox-foreground, #cccccc);
+    background: transparent;
     vertical-align: text-bottom;
 }
 .csv-bool-box--on {
-    border-color: var(--vscode-focusBorder, #007fd4);
-    background: var(--vscode-focusBorder, #007fd4);
-    color: var(--vscode-button-foreground, #ffffff);
+    border: none;
+    background: currentColor;
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cmask id='m'%3E%3Crect width='16' height='16' rx='3' fill='white'/%3E%3Cpath d='M4 8.4l2.7 2.7L12.2 5.4' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/mask%3E%3Crect width='16' height='16' rx='3' mask='url(%23m)'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
+            mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cmask id='m'%3E%3Crect width='16' height='16' rx='3' fill='white'/%3E%3Cpath d='M4 8.4l2.7 2.7L12.2 5.4' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/mask%3E%3Crect width='16' height='16' rx='3' mask='url(%23m)'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
 }
-.csv-bool-box .codicon { font-size: 0.9em; line-height: 1; }
 .csv-bool-box--clickable { cursor: pointer; }
-.csv-bool-box--clickable:hover { border-color: var(--vscode-focusBorder, #007fd4); }
+.csv-bool-box--clickable:hover { opacity: 0.7; }
 .goto-error {
     margin-top: 6px;
     font-size: 11px;
