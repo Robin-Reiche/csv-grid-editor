@@ -59,7 +59,7 @@ function searchCols(): any[] {
 // top or landing on the same cell again. Showing or hiding a column passes the
 // active match with `keep`, so the position survives a change that did not
 // touch it.
-function execFind(anchor?: { rowIndex: number; colField: string }, keep = false): void {
+function execFind(anchor?: { rowIndex: number; origIndex?: number; colField: string }, keep = false): void {
     // A search that runs now makes a pending one pointless. Letting that one
     // fire later would throw away the position this one sets.
     if (debounceTimer !== null) clearTimeout(debounceTimer);
@@ -105,12 +105,21 @@ function execFind(anchor?: { rowIndex: number; colField: string }, keep = false)
     if (state.findMatches.length) {
         state.findMatchIndex = 0;
         if (anchor) {
+            // The row the anchor is on now. A replace can put the rows in
+            // another order, since it ends the "Show only duplicates" view,
+            // which lists them by group. The display index the match was found
+            // at may then belong to another row, so the row is looked up by its
+            // place in the data. A row a filter hides has no display index and
+            // keeps the old one.
+            const anchorRow = anchor.origIndex != null
+                ? state.gridApi.getRowNode(String(anchor.origIndex))?.rowIndex ?? anchor.rowIndex
+                : anchor.rowIndex;
             const colPos = new Map<string, number>(cols.map((c, i) => [c.field, i]));
             const anchorCol = colPos.get(anchor.colField) ?? -1;
             const next = state.findMatches.findIndex(m => {
                 const col = colPos.get(m.colField) ?? -1;
-                return m.rowIndex > anchor.rowIndex
-                    || (m.rowIndex === anchor.rowIndex && (keep ? col >= anchorCol : col > anchorCol));
+                return m.rowIndex > anchorRow
+                    || (m.rowIndex === anchorRow && (keep ? col >= anchorCol : col > anchorCol));
             });
             if (next >= 0) state.findMatchIndex = next;
         }

@@ -217,4 +217,28 @@ runSuite('find and replace (browser)', [
             t.check(t.lastEdit() === 'k,v\\nx,abc\\nZ,xyz', 'the second press replaces the match it showed (' + JSON.stringify(t.lastEdit()) + ')');
         `),
     },
+    {
+        // "Show only duplicates" sorts the rows by group. The replace ends
+        // that view, which puts them back in file order. The counter has to
+        // move on from where the replaced row is now, not from the place it
+        // had in the duplicates view.
+        name: 'replace in the duplicates view',
+        csv: 'k,v\nc,x\nb,x\na,x\nb,x\na,x',
+        steps: steps(`
+            await t.init(csv);
+            await press(t, 'btn-duplicates');
+            await press(t, 'dup-only-toggle');
+            t.check(col(t, 0, 4) === 'a,a,b,b', 'the duplicates view groups the rows (' + col(t, 0, 4) + ')');
+            await find(t, 'x', 'y');
+            await press(t, 'find-next');
+            await press(t, 'find-next');
+            t.check(count() === '3 / 4', 'Next moved to the first b row (' + count() + ')');
+            await press(t, 'replace-one');
+            t.check(t.lastEdit() === 'k,v\\nc,x\\nb,y\\na,x\\nb,x\\na,x', 'Replace takes that row (' + JSON.stringify(t.lastEdit()) + ')');
+            t.check(col(t, 0, 5) === 'c,b,a,b,a', 'the replace ends the view (' + col(t, 0, 5) + ')');
+            t.check(count() === '2 / 4', 'the counter moves on to the row after it in file order (' + count() + ')');
+            await press(t, 'replace-one');
+            t.check(t.lastEdit() === 'k,v\\nc,x\\nb,y\\na,y\\nb,x\\na,x', 'the next Replace takes that row (' + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
 ]);
