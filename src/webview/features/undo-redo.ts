@@ -1,6 +1,6 @@
 import { state } from '../state';
 import { toCsv } from '../utils/csv';
-import { refreshGrid, syncColumnHeaders } from '../grid/refresh';
+import { refreshGrid } from '../grid/refresh';
 import { recomputeColTypes } from '../grid/column-type';
 import { resetDuplicatesState } from './duplicates';
 import { refreshProfileIfOpen } from './profile';
@@ -59,7 +59,6 @@ export function undo(): void {
     state.redoStack.push(snapshot());
     restore(state.undoStack.pop()!);
     refreshGrid();
-    syncColumnHeaders(); // header row may have changed (rename column)
     notifyChange();
     updateButtons();
     recomputeColTypes();
@@ -72,7 +71,6 @@ export function redo(): void {
     state.undoStack.push(snapshot());
     restore(state.redoStack.pop()!);
     refreshGrid();
-    syncColumnHeaders(); // header row may have changed (rename column)
     notifyChange();
     updateButtons();
     recomputeColTypes();
