@@ -13,7 +13,7 @@ function initWithData(text: string, delimiter: string): void {
     state.rawCsvText      = text;
     state.currentDelimiter = delimiter;
     // Untrimmed: the file's values exactly, see parseCsv.
-    state.data = parseCsv(text, delimiter, false);
+    state.data = parseCsv(text, delimiter, false, true);
     state.isAutoFitted     = false;
     state.autoFitCache     = null;
     state.autoFitCacheZoom = -1;
@@ -47,7 +47,7 @@ export function setupMessaging(): void {
             // they survive the reload (best effort: positions past the new row count
             // are dropped if the external edit removed rows).
             const frozen = frozenRowPositions();
-            state.data = parseCsv(msg.text, msg.delimiter, false);
+            state.data = parseCsv(msg.text, msg.delimiter, false, true);
             reanchorFrozenRows(frozen);
             // Existing dup highlights now point at stale rows.
             resetDuplicatesState();

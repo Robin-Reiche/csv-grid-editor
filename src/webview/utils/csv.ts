@@ -13,7 +13,11 @@ export function trimPadding(s: string): string {
 // decides whether the spaces are SHOWN (grid/control-char-cell.ts). Trimming at
 // read time meant the first edit anywhere wrote the whole file back without
 // them.
-export function parseCsv(text: string, delimiter: string, trimFields: boolean = true): CsvRow[] {
+//
+// fromFile is set only by the callers that read a file. It decides one thing,
+// whether a last line of only spaces is dropped, see the end of the function.
+// Paste reads the clipboard through here too and leaves it off.
+export function parseCsv(text: string, delimiter: string, trimFields: boolean = true, fromFile: boolean = false): CsvRow[] {
     const rows: CsvRow[] = [];
     let row: string[] = [];
     let field = '';
@@ -43,7 +47,7 @@ export function parseCsv(text: string, delimiter: string, trimFields: boolean = 
             // delimiters and line breaks after it and merged the rest of the file
             // into one cell. Excel and Python's csv read it the same way. The
             // padding is allowed because hand-written files put a space after
-            // the comma, as in name, "Smith, John", and that value has always
+            // the comma, as in name, "Smith, John". That value has always
             // been read as one quoted field. field is also empty right after a
             // quoted "" closes, but a quote there would have made it an escaped
             // "" inside the field, so this cannot reopen one by mistake.
@@ -71,11 +75,14 @@ export function parseCsv(text: string, delimiter: string, trimFields: boolean = 
     // dropped. Except when it is the only line and holds a delimiter: that is a
     // header of unnamed columns, ",,,," is five of them. Dropping it opened the
     // file as an empty table and lost every column the moment it was read back.
-    // A last line of only spaces or tabs counts as blank too. The grid reads
-    // with trimming off, and that turned such a line, often left behind by an
+    // In a file a last line of only spaces or tabs counts as blank too. The grid
+    // reads with trimming off. That turned such a line, often left behind by an
     // editor, into an extra row that looked empty. Spaces someone wrote in
-    // quotes, as in "   ", are a value and keep their row.
-    if (row.some(f => f !== '' && (lineQuoted || trimPadding(f) !== '')) || (rows.length === 0 && row.length > 1)) rows.push(row);
+    // quotes, as in "   ", are a value and keep their row. On the clipboard the
+    // spaces are what the user copied: dropping them made a paste of spaces do
+    // nothing and skipped the last row of a pasted block.
+    const blank = (f: string) => f === '' || (fromFile && !lineQuoted && trimPadding(f) === '');
+    if (row.some(f => !blank(f)) || (rows.length === 0 && row.length > 1)) rows.push(row);
     return rows;
 }
 

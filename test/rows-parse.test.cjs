@@ -7,7 +7,9 @@
 // but spaces or tabs is the trailing blank line it looks like, not a row.
 //
 // The grid reads files and pastes with trimming off, so every check below
-// passes false for trimFields, the way the grid calls it.
+// passes false for trimFields, the way the grid calls it. The last line rule
+// only applies to a file, so its checks also pass the flag that only file
+// reading sets. Paste leaves it off and keeps its spaces.
 //
 // Run after `npm run compile` (or `tsc -p ./`):  node test/rows-parse.test.cjs
 
@@ -63,24 +65,32 @@ test('a quoted field after a space behind the delimiter is still one field', () 
 // ── a last line of only spaces ───────────────────────────────────────────────
 
 test('a last line of only spaces or tabs is not a row', () => {
-    assert.deepStrictEqual(parseCsv('a,b\n1,2\n   ', ',', false), [['a', 'b'], ['1', '2']]);
-    assert.deepStrictEqual(parseCsv('a,b\n1,2\n \t ', ',', false), [['a', 'b'], ['1', '2']]);
+    assert.deepStrictEqual(parseCsv('a,b\n1,2\n   ', ',', false, true), [['a', 'b'], ['1', '2']]);
+    assert.deepStrictEqual(parseCsv('a,b\n1,2\n \t ', ',', false, true), [['a', 'b'], ['1', '2']]);
+});
+
+// Paste calls the parser without the file flag, and there spaces are what the
+// user copied. Dropping them made a paste of spaces do nothing and skipped the
+// last row of a pasted block when it held only spaces.
+test('pasted spaces are kept, alone and as the last row of a block', () => {
+    assert.deepStrictEqual(parseCsv('   ', '\t', false), [['   ']]);
+    assert.deepStrictEqual(parseCsv('x\ty\n  \t  ', '\t', false), [['x', 'y'], ['  ', '  ']]);
 });
 
 test('spaces in a real last row and in a blank line between rows are kept', () => {
-    assert.deepStrictEqual(parseCsv('a,b\n1,2\n 3 ,', ',', false), [['a', 'b'], ['1', '2'], [' 3 ', '']]);
-    assert.deepStrictEqual(parseCsv('a\n  \nb', ',', false), [['a'], ['  '], ['b']]);
+    assert.deepStrictEqual(parseCsv('a,b\n1,2\n 3 ,', ',', false, true), [['a', 'b'], ['1', '2'], [' 3 ', '']]);
+    assert.deepStrictEqual(parseCsv('a\n  \nb', ',', false, true), [['a'], ['  '], ['b']]);
 });
 
 test('a last line of spaces written in quotes is a value and keeps its row', () => {
-    assert.deepStrictEqual(parseCsv('a\n"   "', ',', false), [['a'], ['   ']]);
-    assert.deepStrictEqual(parseCsv('a,b\n"  ",""', ',', false), [['a', 'b'], ['  ', '']]);
+    assert.deepStrictEqual(parseCsv('a\n"   "', ',', false, true), [['a'], ['   ']]);
+    assert.deepStrictEqual(parseCsv('a,b\n"  ",""', ',', false, true), [['a', 'b'], ['  ', '']]);
     // An empty quoted value alone is still a blank line, as it always was.
-    assert.deepStrictEqual(parseCsv('a\n""', ',', false), [['a']]);
+    assert.deepStrictEqual(parseCsv('a\n""', ',', false, true), [['a']]);
 });
 
 test('a header of blank column names is still read as one', () => {
-    assert.deepStrictEqual(parseCsv(',,,,', ',', false), [['', '', '', '', '']]);
+    assert.deepStrictEqual(parseCsv(',,,,', ',', false, true), [['', '', '', '', '']]);
 });
 
 console.log(failures === 0 ? '\nAll rows parse tests passed.' : `\n${failures} test(s) failed.`);
