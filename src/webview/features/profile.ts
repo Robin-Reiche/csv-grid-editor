@@ -1,5 +1,6 @@
 import { state } from '../state';
 import { histogram, downsample } from '../utils/histogram';
+import { trimPadding } from '../utils/csv';
 import type { ColProfile, ColType } from '../types';
 
 const BADGE_TEXT: Record<string, string> = {
@@ -68,7 +69,9 @@ export function computeProfile(): ColProfile[] {
         }
 
         const p: ColProfile = {
-            name: headerRow[c] || `(col ${c + 1})`, type: ct,
+            // Trimmed like the values above, so a header of only spaces falls
+            // back to the placeholder instead of naming the column with blanks.
+            name: trimPadding(headerRow[c] ?? '') || `(col ${c + 1})`, type: ct,
             total, nullCount, nullPct: total > 0 ? nullCount / total * 100 : 0,
             uniqueCount: 0
         };

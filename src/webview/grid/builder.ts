@@ -80,10 +80,28 @@ function parseTimeToSeconds(s: string): number {
     return (+m[1]) * 3600 + (+m[2]) * 60 + (+(m[3] ?? 0));
 }
 
+// Text compares what the grid SHOWS. The file is read with its padding kept,
+// so with "Hide spaces around values" on an invisible leading space would
+// otherwise put ' Zurich' ahead of 'Berlin'. Number and the time pattern read
+// past the spaces on their own. Date.parse does too, but it reads a padded
+// ' 2024-01-05' as local midnight rather than the ISO date, so the date
+// comparator below hands it the bare value.
 function textCompare(a: string, b: string): number {
-    return String(a ?? '').localeCompare(String(b ?? ''), undefined, {
+    return shownValue(String(a ?? '')).localeCompare(shownValue(String(b ?? '')), undefined, {
         numeric: true, sensitivity: 'base',
     });
+}
+
+// The comparators read the setting each time they run, but AG Grid only runs
+// them when something asks for a sort. Switching the setting has to ask.
+// Otherwise an active sort stays in the order of the old setting. Filters are
+// asked too, because their value lists are keyed by the shown value as well
+// (filter.ts).
+export function reapplySortAndFilter(): void {
+    const api = state.gridApi;
+    if (!api) return;
+    if (api.getColumnState().some((c: any) => c.sort)) api.onSortChanged();
+    if (api.isAnyFilterPresent()) api.onFilterChanged();
 }
 
 // Builds a comparator that parses each value to a number via `parse`. Parseable
@@ -101,7 +119,7 @@ function typedComparator(parse: (s: string) => number): (a: string, b: string) =
 
 function makeComparator(colType: string): (a: string, b: string) => number {
     if (colType === 'integer' || colType === 'float') return typedComparator(s => Number(s));
-    if (colType === 'date' || colType === 'datetime') return typedComparator(s => Date.parse(s));
+    if (colType === 'date' || colType === 'datetime') return typedComparator(s => Date.parse(s.trim()));
     if (colType === 'time') return typedComparator(parseTimeToSeconds);
     // string / boolean — natural order so "10" sorts after "2"
     return textCompare;

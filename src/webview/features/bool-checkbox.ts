@@ -60,6 +60,10 @@ export function paintBoolCheckbox(
     if (onToggle) {
         box.classList.add('csv-bool-box--clickable');
         box.addEventListener('click', (e) => {
+            // Shift, Ctrl, Cmd or Alt make the click a selection gesture on the
+            // cell, handled on mousedown by range selection. It must not also
+            // write to the file, so it passes through as a click on the cell.
+            if (e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
             e.stopPropagation();
             // The second click of a double-click would otherwise undo the first.
             if (e.detail > 1) return;

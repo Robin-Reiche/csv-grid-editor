@@ -50,6 +50,15 @@ test('values are trimmed before they are counted', () => {
     assert.strictEqual(p.maxLen, 1);
 });
 
+// The file is read untrimmed since v1.23, so a header can arrive as '   ' or
+// ' city '. The profile trims its values. Its column names have to follow: a
+// name made of spaces is no name and gets the placeholder.
+test('column names are trimmed and a blank-looking one falls back to (col N)', () => {
+    state.data = [['name', '   ', ' city '], ['a', 'b', 'c']];
+    state.colTypes = ['string', 'string', 'string'];
+    assert.deepStrictEqual(computeProfile().map(p => p.name), ['name', '(col 2)', 'city']);
+});
+
 test('a short row does not throw and its missing cells are null', () => {
     state.data = [['a', 'b'], ['1', '2'], ['3']];
     state.colTypes = ['integer', 'integer'];

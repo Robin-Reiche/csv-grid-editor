@@ -2,6 +2,7 @@ import { state } from '../state';
 import type { ColType } from '../types';
 import { toJson, toJsonLines, toMarkdownTable, toXml } from '../utils/export-formats';
 import { closeAllPopups } from './popups';
+import { shownValue } from '../grid/control-char-cell';
 
 // ── Export menu ──────────────────────────────────────────────────────────────
 // The toolbar Export button opens a small dropdown (JSON / JSON Lines / XML /
@@ -37,10 +38,14 @@ function collectView(): { headers: string[]; rows: string[][]; types: ColType[] 
         return (state.colTypes[ci] ?? 'string') as ColType;
     });
 
+    // Values as the grid shows them, the same as the headers (headerName is
+    // already the shown name). With "Hide spaces around values" on the export
+    // leaves the padding off, with it off the padding goes along, so what is
+    // exported always matches what is on screen.
     const rows: string[][] = [];
     const pushRow = (data: any): void => {
         if (!data) return;
-        rows.push(fields.map(f => (data[f] != null ? String(data[f]) : '')));
+        rows.push(fields.map(f => (data[f] != null ? shownValue(String(data[f])) : '')));
     };
     // Pinned (frozen) reference row first — it sits above the body on screen.
     const pinnedCount = state.gridApi.getPinnedTopRowCount?.() ?? 0;
