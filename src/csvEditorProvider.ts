@@ -18,6 +18,18 @@ const PREVIEW_ROW_COUNT      = 1000;
 const PAGE_SIZE              = 500;
 const CANCELLED_PREVIEW_MODE = '__cancelled__';
 
+// Excel writes UTF-8 CSV with a byte order mark and reads a file without one
+// as ANSI, so a save that drops the mark turns every umlaut into mojibake. The
+// grid never sees the mark (TextDecoder strips it, which also keeps it out of
+// the first header name), so the document remembers it and every write puts
+// it back.
+const UTF8_BOM = [0xEF, 0xBB, 0xBF];
+
+function decodeFile(raw: Uint8Array): { text: string; hasBom: boolean } {
+    const hasBom = raw.length >= 3 && raw[0] === UTF8_BOM[0] && raw[1] === UTF8_BOM[1] && raw[2] === UTF8_BOM[2];
+    return { text: new TextDecoder().decode(raw), hasBom };
+}
+
 class CsvDocument implements vscode.CustomDocument {
     public content: string;
     public pageIndex: RowPageIndex | null = null;
@@ -25,6 +37,8 @@ class CsvDocument implements vscode.CustomDocument {
     // last saved, or the outside change we last loaded. The watcher compares
     // against this, not only against content, see reload() below.
     public diskText: string;
+    // Whether the file started with a UTF-8 byte order mark, see decodeFile.
+    public hasBom = false;
 
     constructor(
         public readonly uri: vscode.Uri,
@@ -40,6 +54,17 @@ class CsvDocument implements vscode.CustomDocument {
     }
 
     dispose(): void {}
+
+    // The bytes to write for this document: its text, behind the byte order
+    // mark when the file had one.
+    encode(): Uint8Array {
+        const body = new TextEncoder().encode(this.content);
+        if (!this.hasBom) return body;
+        const bytes = new Uint8Array(UTF8_BOM.length + body.length);
+        bytes.set(UTF8_BOM);
+        bytes.set(body, UTF8_BOM.length);
+        return bytes;
+    }
 }
 
 export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocument> {
@@ -110,6 +135,7 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         let previewMode = 'full';
         let totalLineCount = 0;
         let isChunked = false;
+        let hasBom = false;
 
         if (fileSize > LARGE_FILE_THRESHOLD) {
             const sizeMB = (fileSize / (1024 * 1024)).toFixed(2);
@@ -180,11 +206,11 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
                 // content stays empty — pages are served on demand
             } else {
                 const raw = await vscode.workspace.fs.readFile(uri);
-                content = new TextDecoder().decode(raw);
+                ({ text: content, hasBom } = decodeFile(raw));
             }
         } else {
             const raw = await vscode.workspace.fs.readFile(uri);
-            content = new TextDecoder().decode(raw);
+            ({ text: content, hasBom } = decodeFile(raw));
         }
 
         // The paged view learns its row total only from the index, and the preview
@@ -202,6 +228,7 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
 
         const doc = new CsvDocument(uri, content, delimiter, isPreview, previewMode, totalLineCount, isChunked);
         doc.pageIndex = pageIndex;
+        doc.hasBom = hasBom;
 
         return doc;
     }
@@ -263,7 +290,7 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             const reload = async (fromWatcher = false): Promise<boolean> => {
                 try {
                     const raw = await vscode.workspace.fs.readFile(document.uri);
-                    const text = new TextDecoder().decode(raw);
+                    const { text, hasBom } = decodeFile(raw);
                     // Ignore our own writes. saveCustomDocument writes document.content
                     // verbatim, so a watcher event whose content equals what we already
                     // hold is the echo of our own save, not an external edit. Reloading
@@ -283,6 +310,7 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
                     if (fromWatcher && text === document.diskText) return false;
                     document.content = text;
                     document.diskText = text;
+                    document.hasBom = hasBom;
                     webviewPanel.webview.postMessage({
                         type: 'update',
                         text: document.content,
@@ -403,16 +431,16 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         // Recorded before the write, so the watcher event it causes is known as
         // ours however late it arrives (see reload in resolveCustomEditor).
         document.diskText = document.content;
-        await vscode.workspace.fs.writeFile(document.uri, new TextEncoder().encode(document.content));
+        await vscode.workspace.fs.writeFile(document.uri, document.encode());
     }
 
     async saveCustomDocumentAs(document: CsvDocument, destination: vscode.Uri, _cancellation: vscode.CancellationToken): Promise<void> {
-        await vscode.workspace.fs.writeFile(destination, new TextEncoder().encode(document.content));
+        await vscode.workspace.fs.writeFile(destination, document.encode());
     }
 
     async revertCustomDocument(document: CsvDocument, _cancellation: vscode.CancellationToken): Promise<void> {
         const raw = await vscode.workspace.fs.readFile(document.uri);
-        document.content = new TextDecoder().decode(raw);
+        ({ text: document.content, hasBom: document.hasBom } = decodeFile(raw));
         document.diskText = document.content;
 
         const panel = this._webviews.get(document.uri.toString());
@@ -426,7 +454,7 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
     }
 
     async backupCustomDocument(document: CsvDocument, context: vscode.CustomDocumentBackupContext, _cancellation: vscode.CancellationToken): Promise<vscode.CustomDocumentBackup> {
-        await vscode.workspace.fs.writeFile(context.destination, new TextEncoder().encode(document.content));
+        await vscode.workspace.fs.writeFile(context.destination, document.encode());
         return {
             id: context.destination.toString(),
             delete: async () => {
