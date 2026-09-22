@@ -426,10 +426,32 @@ function isTypingTarget(t: EventTarget | null): boolean {
 
 const ARROWS = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
 
+// A plain click arms a one-cell selection, which is never drawn. AG Grid then
+// moves its focus on the arrows, Tab, Enter and clicks on a frozen row without
+// telling us, so the stored cell went stale and Delete cleared the cell that was
+// clicked last, possibly far off screen, instead of the one the user was on. A
+// one-cell selection is really just "the current cell", so before any key acts
+// on it, it is moved to AG Grid's focused cell. A focus on a frozen row or
+// outside the grid has no body cell to stand for, so the selection is dropped.
+function followFocus(): void {
+    if (!selActive || selCellCount !== 1 || !state.gridApi) return;
+    const f = state.gridApi.getFocusedCell();
+    const colId: string | undefined = f?.column?.getColId?.();
+    if (!f || f.rowPinned || f.rowIndex == null || colId == null) { clearRangeSelection(); return; }
+    const cpos = colId === 'row-index' ? 0 : displayedColIds().indexOf(colId);
+    if (cpos < 0) { clearRangeSelection(); return; }
+    selType = 'cells';
+    anchorRow = focusRow = f.rowIndex;
+    anchorCol = focusCol = cpos;
+    recomputeCache();
+}
+
 function onKeyDown(e: KeyboardEvent): void {
     if (state.isCellEditing) return;
     if (isTypingTarget(e.target)) return;
     if (!state.gridApi) return;
+
+    followFocus();
 
     const ctrl = e.ctrlKey || e.metaKey;
     const key = e.key;
