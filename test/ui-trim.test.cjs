@@ -187,6 +187,22 @@ runSuite('spaces around values (browser)', [
         `),
     },
     {
+        // A cell of only spaces is a blank cell. Number('   ') is 0, so the
+        // number comparator used to sort it in with the zeros instead of after
+        // the numbers with the other blanks.
+        name: 'number sort, blank cells',
+        csv: 'n,x\n5,a\n   ,b\n-2,c\n0,d\n,e',
+        steps: withHelpers(`
+            await t.init(csv);
+            t.header(0).querySelector('.ag-header-cell-label').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(250);
+            const order = t.shownCol(1);
+            t.check(JSON.stringify(order.slice(0, 3)) === JSON.stringify(['c', 'd', 'a'])
+                && order.slice(3).sort().join() === 'b,e',
+                'ascending puts -2, 0, 5 first and both blank cells after them (' + JSON.stringify(order) + ')');
+        `),
+    },
+    {
         name: 'column chooser',
         csv: PADDED_HEADERS,
         steps: async (t, csv) => {

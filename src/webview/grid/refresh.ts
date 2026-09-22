@@ -111,7 +111,7 @@ export function clampRow(rowIndex: number, rowCount: number): number | null {
 //
 // A column filter judges the new row like any other and nearly always hides
 // it: a value list never ticked (Blank), a condition such as "contains" never
-// matches nothing. The row went into the file unseen and the focus landed on
+// matches an empty value. The row went into the file unseen and the focus landed on
 // the next row the filter let through, so the next keystroke overwrote that
 // row. The filters are cleared instead, the way the "Clear filters" button
 // does it. Keeping them and hiding the row the user just asked for is the

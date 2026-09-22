@@ -113,11 +113,9 @@ runSuite('find and replace (browser)', [
             box.checked = false;
             box.dispatchEvent(new Event('change', { bubbles: true }));
             await t.wait(200);
-            // Hiding the column now searches again right away, so the active
-            // match moves off the hidden cell before Replace is pressed. This
-            // used to check that Replace wrote nothing on the stale match.
-            // There is no stale match to press on any more, so it checks that
-            // Replace takes the visible one and leaves the hidden cell alone.
+            // Hiding a column searches again right away, so the active match
+            // moves off the hidden cell before Replace is pressed. Replace then
+            // takes the visible match and leaves the hidden cell alone.
             await press(t, 'replace-one');
             t.check(t.lastEdit() === 'name,secret\\nbaz,foo\\nbar,x', 'Replace leaves the newly hidden column alone (' + JSON.stringify(t.lastEdit()) + ')');
             t.check(count() === '0 matches', 'and nothing visible is left to find (' + count() + ')');

@@ -86,10 +86,12 @@ function parseTimeToSeconds(s: string): number {
 // past the spaces on their own. Date.parse does too, but it reads a padded
 // ' 2024-01-05' as local midnight rather than the ISO date, so the date
 // comparator below hands it the bare value.
+// One collator for every comparison. localeCompare with options builds a new
+// one on each call, and a sort makes n log n of them.
+const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+
 function textCompare(a: string, b: string): number {
-    return shownValue(String(a ?? '')).localeCompare(shownValue(String(b ?? '')), undefined, {
-        numeric: true, sensitivity: 'base',
-    });
+    return collator.compare(shownValue(String(a ?? '')), shownValue(String(b ?? '')));
 }
 
 // The comparators read the setting each time they run, but AG Grid only runs
@@ -107,9 +109,12 @@ export function reapplySortAndFilter(): void {
 // Builds a comparator that parses each value to a number via `parse`. Parseable
 // values sort numerically and come first; unparseable ones sort as text after.
 function typedComparator(parse: (s: string) => number): (a: string, b: string) => number {
+    // A cell of only spaces is blank, not a value. Number('   ') is 0, which put
+    // such a cell in among the zeros instead of after the numbers.
+    const read = (s: string) => s == null || String(s).trim() === '' ? NaN : parse(String(s));
     return (a, b) => {
-        const va = a ? parse(a) : NaN;
-        const vb = b ? parse(b) : NaN;
+        const va = read(a);
+        const vb = read(b);
         const aOk = !isNaN(va), bOk = !isNaN(vb);
         if (aOk && bOk) return va - vb;
         if (aOk !== bOk) return aOk ? -1 : 1;

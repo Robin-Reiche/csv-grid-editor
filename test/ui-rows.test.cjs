@@ -14,8 +14,8 @@ const { runSuite } = require('./ui/harness.cjs');
 const CITIES = 'city,n\nBerlin,1\nHanoi,2\nParis,3\nRome,4';
 
 // Runs inside the page first. focusCell (grid/refresh.ts) waits one animation
-// frame before it moves the focus. Chrome runs these pages on a virtual clock,
-// and on that clock a frame now and then never comes. The focus then stayed
+// frame before it moves the focus. Chrome runs these pages on a virtual clock.
+// On that clock a frame now and then never comes. The focus then stayed
 // where it was and the checks on it failed in some runs, with the code doing
 // the right thing. A timer stands in for the frame. It is set here and not in
 // the shared harness, so the other suites keep the browser's own timing.
