@@ -5,7 +5,9 @@
 // next row the filter let through, so whatever was typed next replaced that
 // row. The first row of an emptied table was hidden the same way. And after
 // the last row had been deleted, Ctrl+Enter did nothing, because the focus the
-// deleted row left behind still looked like a row to insert next to.
+// deleted row left behind still looked like a row to insert next to. That same
+// focus made a second Ctrl+Shift+K record an empty undo step and write the
+// file again.
 //
 // Run after `tsc -p ./`:  node test/ui-rows.test.cjs
 
@@ -82,6 +84,24 @@ runSuite('rows (browser)', [
             await press(t, 'Enter', { ctrlKey: true });
             t.check(t.lastEdit() === 'a,b\\n,', 'Ctrl+Enter then starts a new first row (' + JSON.stringify(t.lastEdit()) + ')');
             t.check(!!t.cell(0, 0), 'and the grid shows it');
+        }`,
+    },
+    {
+        name: 'delete again after deleting the last row',
+        csv: 'a,b\n1,2',
+        steps: `async (t, csv) => {
+            ${FRAMES}
+            const press = ${PRESS};
+            await t.init(csv);
+            await t.focusCell(0, 0);
+            await press(t, 'K', { ctrlKey: true, shiftKey: true });
+            t.check(t.lastEdit() === 'a,b', 'Ctrl+Shift+K deletes the only row (' + JSON.stringify(t.lastEdit()) + ')');
+            await press(t, 'K', { ctrlKey: true, shiftKey: true });
+            t.check(t.sent('edit').length === 1, 'a second one has nothing to delete and writes nothing ('
+                + t.sent('edit').length + ' edits)');
+            document.getElementById('btn-undo').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(400);
+            t.check(t.lastEdit() === 'a,b\\n1,2', 'one undo brings the row back (' + JSON.stringify(t.lastEdit()) + ')');
         }`,
     },
     {

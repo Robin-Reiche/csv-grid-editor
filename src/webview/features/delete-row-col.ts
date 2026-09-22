@@ -53,7 +53,6 @@ function deleteColumns(colIndices: number[]): void {
 
 function deleteRows(displayIndices: number[]): void {
     if (displayIndices.length === 0 || !state.gridApi) return;
-    pushUndo();
     // Map display indices → original data-row positions. A row's index in
     // state.data differs from its display index whenever a sort is active.
     const toDelete = new Set<number>();
@@ -61,6 +60,10 @@ function deleteRows(displayIndices: number[]): void {
         const oi = state.gridApi.getDisplayedRowAtIndex(di)?.data?._origIndex;
         if (oi != null) toDelete.add(Number(oi));
     }
+    // No row shown at those positions, as on a table whose last row is gone
+    // already. Deleting nothing must not leave an undo step or write the file.
+    if (toDelete.size === 0) return;
+    pushUndo();
     state.data = deleteRowsFromData(state.data, toDelete);
     state.isAutoFitted = false;
     state.autoFitCache = null;
@@ -181,9 +184,8 @@ export function insertRowAtFocus(position: 'above' | 'below'): void {
         // there is no row to insert next to. The key starts the first row
         // instead, the same as the button in the empty grid (issue #40). It does
         // nothing anywhere else: addFirstRow only acts on a table with no rows.
-        // The table itself is asked too, not only the focus: deleting the last
-        // row leaves its index behind. That stale index skipped this branch and
-        // made the key do nothing.
+        // The table itself is asked too, not only the focus, so a focus left
+        // over from a row that is gone can never skip this branch.
         addFirstRow();
         return;
     }

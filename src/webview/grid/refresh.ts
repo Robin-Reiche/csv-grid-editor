@@ -163,6 +163,13 @@ export function refreshGrid(): void {
     const focusRow   = state.focusedCellRowIndex;
     const focusColId = state.focusedCellColId;
     const numCols    = getNumCols(state.data);
+    // With no row left there is no cell to stand on. The tracked focus would
+    // still name the row that was deleted last. The row shortcuts would then act
+    // on that row: a second Ctrl+Shift+K would record an empty undo step.
+    if (emptyTableKind(state.data) === 'no-rows') {
+        state.focusedCellRowIndex = null;
+        state.focusedCellColId    = null;
+    }
 
     // A row swap fills the columns the grid already has. It cannot add or remove
     // one, so a restored column would stay invisible and a removed one would
