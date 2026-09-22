@@ -52,10 +52,14 @@ function searchCols(): any[] {
         .map(c => c.getColDef());
 }
 
-// `after` is the cell a replace just changed. The search then starts on the
-// first match past it in screen order, so the counter moves on instead of
-// jumping back to the top or landing on the same cell again.
-function execFind(after?: { rowIndex: number; colField: string }): void {
+// `anchor` carries the position over from the last search. The new search
+// lands on the anchor itself when `keep` is set and it is still a match,
+// otherwise on the first match past it in screen order. A replace passes the
+// cell it just changed, so the counter moves on instead of jumping back to the
+// top or landing on the same cell again. Showing or hiding a column passes the
+// active match with `keep`, so the position survives a change that did not
+// touch it.
+function execFind(anchor?: { rowIndex: number; colField: string }, keep = false): void {
     debounceTimer = null;
     if (!state.gridApi) return;
 
@@ -97,12 +101,14 @@ function execFind(after?: { rowIndex: number; colField: string }): void {
 
     if (state.findMatches.length) {
         state.findMatchIndex = 0;
-        if (after) {
+        if (anchor) {
             const colPos = new Map<string, number>(cols.map((c, i) => [c.field, i]));
-            const afterCol = colPos.get(after.colField) ?? -1;
-            const next = state.findMatches.findIndex(m =>
-                m.rowIndex > after.rowIndex
-                || (m.rowIndex === after.rowIndex && (colPos.get(m.colField) ?? -1) > afterCol));
+            const anchorCol = colPos.get(anchor.colField) ?? -1;
+            const next = state.findMatches.findIndex(m => {
+                const col = colPos.get(m.colField) ?? -1;
+                return m.rowIndex > anchor.rowIndex
+                    || (m.rowIndex === anchor.rowIndex && (keep ? col >= anchorCol : col > anchorCol));
+            });
             if (next >= 0) state.findMatchIndex = next;
         }
     }
@@ -126,11 +132,13 @@ export function runFind(): void {
 
 // Public: the grid calls this when a column is shown or hidden. The matches
 // depend on which columns are on screen, so without a fresh search the counter
-// and Next/Prev kept a match in a column the user had just hidden.
+// and Next/Prev kept a match in a column the user had just hidden. The active
+// match stays active while its column is on screen, so hiding some other column
+// does not send the user back to the first match.
 export function refreshFindIfOpen(): void {
     if (document.getElementById('find-bar')?.classList.contains('hidden') ?? true) return;
     if (debounceTimer !== null) clearTimeout(debounceTimer);
-    execFind();
+    execFind(state.findMatches[state.findMatchIndex], true);
 }
 
 // ── navigation ────────────────────────────────────────────────────────────────

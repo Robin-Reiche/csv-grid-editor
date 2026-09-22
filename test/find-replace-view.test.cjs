@@ -145,4 +145,24 @@ runSuite('find and replace (browser)', [
             t.check(count() === '1 / 2', 'and comes back when the column shows again (' + count() + ')');
         `),
     },
+    {
+        name: 'hiding a column keeps the active match',
+        csv: 'a,b,c\nfoo,1,x\nfoo,2,y\nfoo,3,z',
+        steps: steps(`
+            await t.init(csv);
+            await find(t, 'foo', 'bar');
+            await press(t, 'find-next');
+            await press(t, 'find-next');
+            t.check(count() === '3 / 3', 'Next moved to the third match (' + count() + ')');
+            document.getElementById('btn-columns').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(100);
+            const box = document.querySelectorAll('#col-chooser-list input[type=checkbox]')[2];
+            box.checked = false;
+            box.dispatchEvent(new Event('change', { bubbles: true }));
+            await t.wait(200);
+            t.check(count() === '3 / 3', 'hiding a column without a match stays on it (' + count() + ')');
+            await press(t, 'replace-one');
+            t.check(t.lastEdit() === 'a,b,c\\nfoo,1,x\\nfoo,2,y\\nbar,3,z', 'Replace takes that match (' + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
 ]);
