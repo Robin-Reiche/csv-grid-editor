@@ -1,9 +1,10 @@
 // Tests for how parseCsv splits a file into rows.
 //
-// A double quote only opens a quoted field when it is the first character of
-// that field. Anywhere else it is an ordinary character, the way Excel and
-// Python's csv read it, so an inch mark such as 5" disk no longer swallows the
-// rest of the file.
+// Two rules are pinned down here. A double quote only opens a quoted field when
+// it is the first character of that field. Anywhere else it is an ordinary
+// character, the way Excel and Python's csv read it, so an inch mark such as
+// 5" disk no longer swallows the rest of the file. And a last line of nothing
+// but spaces or tabs is the trailing blank line it looks like, not a row.
 //
 // The grid reads files and pastes with trimming off, so every check below
 // passes false for trimFields, the way the grid calls it.
@@ -48,6 +49,22 @@ test('a quote at the start of a field still opens a quoted field', () => {
         [['x', '1,5'], ['y', 'line1\nline2']]);
     assert.deepStrictEqual(parseCsv('a\t"b\tc"', '\t', false), [['a', 'b\tc']]);
     assert.deepStrictEqual(parseCsv('"",x', ',', false), [['', 'x']]);
+});
+
+// ── a last line of only spaces ───────────────────────────────────────────────
+
+test('a last line of only spaces or tabs is not a row', () => {
+    assert.deepStrictEqual(parseCsv('a,b\n1,2\n   ', ',', false), [['a', 'b'], ['1', '2']]);
+    assert.deepStrictEqual(parseCsv('a,b\n1,2\n \t ', ',', false), [['a', 'b'], ['1', '2']]);
+});
+
+test('spaces in a real last row and in a blank line between rows are kept', () => {
+    assert.deepStrictEqual(parseCsv('a,b\n1,2\n 3 ,', ',', false), [['a', 'b'], ['1', '2'], [' 3 ', '']]);
+    assert.deepStrictEqual(parseCsv('a\n  \nb', ',', false), [['a'], ['  '], ['b']]);
+});
+
+test('a header of blank column names is still read as one', () => {
+    assert.deepStrictEqual(parseCsv(',,,,', ',', false), [['', '', '', '', '']]);
 });
 
 console.log(failures === 0 ? '\nAll rows parse tests passed.' : `\n${failures} test(s) failed.`);

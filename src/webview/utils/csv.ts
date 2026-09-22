@@ -61,7 +61,10 @@ export function parseCsv(text: string, delimiter: string, trimFields: boolean = 
     // dropped. Except when it is the only line and holds a delimiter: that is a
     // header of unnamed columns, ",,,," is five of them. Dropping it opened the
     // file as an empty table and lost every column the moment it was read back.
-    if (row.some(f => f !== '') || (rows.length === 0 && row.length > 1)) rows.push(row);
+    // A last line of only spaces or tabs counts as blank too. The grid reads
+    // with trimming off, and that turned such a line, often left behind by an
+    // editor, into an extra row that looked empty.
+    if (row.some(f => trimPadding(f) !== '') || (rows.length === 0 && row.length > 1)) rows.push(row);
     return rows;
 }
 
