@@ -3,6 +3,9 @@ import { SETTING_DEFAULTS, type Settings } from './settings';
 
 export const state = {
     currentDelimiter: ',',
+    // The text of the file as the grid last saw it: what it was opened with, an
+    // outside change or the last edit it wrote. In the paged view it is the page
+    // on display. A delimiter switch re-splits this (features/delimiter.ts).
     rawCsvText: '',
     data: [] as CsvRow[],
     undoStack: [] as UndoSnapshot[],
