@@ -1,9 +1,9 @@
 // Browser tests for inserting rows with the keyboard.
 //
 // Two ways Ctrl+Enter used to go wrong. With a column filter on, the new blank
-// row was added to the file but hidden by the filter, and the focus landed on
-// the next row the filter let through, so whatever was typed next replaced
-// that row. And after the last row had been deleted, Ctrl+Enter did nothing,
+// row was added to the file but hidden by the filter. The focus landed on the
+// next row the filter let through, so whatever was typed next replaced that
+// row. And after the last row had been deleted, Ctrl+Enter did nothing,
 // because the focus the deleted row left behind still looked like a row to
 // insert next to.
 //
@@ -12,6 +12,14 @@
 const { runSuite } = require('./ui/harness.cjs');
 
 const CITIES = 'city,n\nBerlin,1\nHanoi,2\nParis,3\nRome,4';
+
+// Runs inside the page first. focusCell (grid/refresh.ts) waits one animation
+// frame before it moves the focus. Chrome runs these pages on a virtual clock,
+// and on that clock a frame now and then never comes. The focus then stayed
+// where it was and the checks on it failed in some runs, with the code doing
+// the right thing. A timer stands in for the frame. It is set here and not in
+// the shared harness, so the other suites keep the browser's own timing.
+const FRAMES = `window.requestAnimationFrame = cb => setTimeout(() => cb(performance.now()), 16);`;
 
 // Runs inside the page: presses a row shortcut on the focused cell.
 const PRESS = `async (t, key, mods) => {
@@ -25,6 +33,7 @@ runSuite('rows (browser)', [
         name: 'insert with a filter on',
         csv: CITIES,
         steps: `async (t, csv) => {
+            ${FRAMES}
             const press = ${PRESS};
             await t.init(csv);
             // Untick Paris in the city column's value filter.
@@ -64,6 +73,7 @@ runSuite('rows (browser)', [
         name: 'insert after deleting the last row',
         csv: 'a,b\n1,2',
         steps: `async (t, csv) => {
+            ${FRAMES}
             const press = ${PRESS};
             await t.init(csv);
             await t.focusCell(0, 0);
