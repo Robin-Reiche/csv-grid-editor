@@ -13,6 +13,7 @@ export function getWebviewContent(
     zoomIndex: number = 4,
     colorMode: boolean = false,
     wrapText: boolean = false,
+    boolCheckboxes: boolean = false,
     profileLayout: { dock: string; width: number; height: number } = { dock: 'right', width: 0, height: 0 }
 ): string {
     const nonce = getNonce();
@@ -131,6 +132,15 @@ export function getWebviewContent(
         <div    class="separator"></div>
         <span   id="delim-badge" class="delim-badge" title="Click to change delimiter">Delim: ,</span>
         <span   class="info" id="info"></span>
+        <button id="btn-settings"      title="Settings"><i class="codicon codicon-settings-gear"></i></button>
+    </div>
+
+    <!-- Settings menu -->
+    <div id="settings-popover" class="settings-popover hidden">
+        <div class="col-chooser-head">
+            <span class="goto-label" style="margin:0;">Settings</span>
+        </div>
+        <div id="settings-list" class="settings-list"></div>
     </div>
 
     <!-- Delimiter dropdown [F2] -->
@@ -283,6 +293,7 @@ export function getWebviewContent(
         const INITIAL_ZOOM_INDEX  = ${zoomIndex};
         const INITIAL_COLOR_MODE  = ${colorMode ? 'true' : 'false'};
         const INITIAL_WRAP_TEXT   = ${wrapText ? 'true' : 'false'};
+        const INITIAL_BOOL_CHECKBOXES = ${boolCheckboxes ? 'true' : 'false'};
         const INITIAL_PROFILE_LAYOUT = ${JSON.stringify(profileLayout)};
     </script>
 

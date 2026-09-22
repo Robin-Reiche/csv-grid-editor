@@ -18,6 +18,7 @@ const POPUP_IDS = [
     'export-dropdown',
     'delim-dropdown',
     'col-chooser-popover',
+    'settings-popover',
     'goto-popover',
     'rename-popover',
 ];

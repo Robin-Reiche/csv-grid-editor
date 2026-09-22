@@ -228,6 +228,7 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         const zoomIndex = this.context.globalState.get<number>('csvGridEditor.zoomIndex', 4);
         const colorMode = this.context.globalState.get<boolean>('csvGridEditor.colorMode', false);
         const wrapText  = this.context.globalState.get<boolean>('csvGridEditor.wrapText', false);
+        const boolCheckboxes = this.context.globalState.get<boolean>('csvGridEditor.boolCheckboxes', false);
         const profileLayout = {
             dock:   this.context.globalState.get<string>('csvGridEditor.profileDock', 'right'),
             width:  this.context.globalState.get<number>('csvGridEditor.profileWidth', 0),
@@ -247,6 +248,7 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             zoomIndex,
             colorMode,
             wrapText,
+            boolCheckboxes,
             profileLayout
         );
 
@@ -336,6 +338,9 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
 
             } else if (msg.type === 'wrapTextChanged') {
                 this.context.globalState.update('csvGridEditor.wrapText', msg.wrapText);
+
+            } else if (msg.type === 'boolCheckboxesChanged') {
+                this.context.globalState.update('csvGridEditor.boolCheckboxes', msg.boolCheckboxes);
 
             } else if (msg.type === 'profileLayoutChanged') {
                 this.context.globalState.update('csvGridEditor.profileDock',   msg.dock);

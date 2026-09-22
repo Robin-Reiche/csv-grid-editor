@@ -1,4 +1,5 @@
 import { hasControlChars, splitControlChars } from '../utils/control-chars';
+import { boolCellState, paintBoolCheckbox, toggleBoolCell } from '../features/bool-checkbox';
 
 // ── Cell renderer: labelled control characters ───────────────────────────────
 // Draws the value with each control character replaced by a chip showing its
@@ -52,12 +53,16 @@ const valueOf = (params: any): string => params.value == null ? '' : String(para
 
 export class ControlCharCellRenderer {
     private eGui!: HTMLSpanElement;
-    private value = '';
+    private params: any = null;
+    // What is currently drawn: the value plus how it is drawn. A cell in a
+    // true/false column can be drawn as a box or as its text (issue #41), and
+    // switching the mode changes the second half of this key without the value
+    // moving, so a repaint is needed for a value that did not change.
+    private painted: string | null = null;
 
     init(params: any): void {
         this.eGui = document.createElement('span');
-        this.value = valueOf(params);
-        paint(this.eGui, this.value);
+        this.render(params);
     }
 
     getGui(): HTMLElement {
@@ -65,12 +70,24 @@ export class ControlCharCellRenderer {
     }
 
     refresh(params: any): boolean {
-        const next = valueOf(params);
-        // Unchanged value → leave the DOM alone, for the same reason.
-        if (next !== this.value) {
-            this.value = next;
-            paint(this.eGui, next);
-        }
+        this.render(params);
         return true;
+    }
+
+    private render(params: any): void {
+        // Kept current on every refresh so a click on a box edits the row the
+        // box is on NOW, not the one it was built for.
+        this.params = params;
+        const value   = valueOf(params);
+        const checked = boolCellState(params);
+        const key     = (checked === null ? 't' : checked ? '1' : '0') + '\u0000' + value;
+        // Unchanged → leave the DOM alone, for the same reason.
+        if (key === this.painted) return;
+        this.painted = key;
+        if (checked === null) {
+            paint(this.eGui, value);
+        } else {
+            paintBoolCheckbox(this.eGui, value, checked, IS_PREVIEW ? null : () => toggleBoolCell(this.params));
+        }
     }
 }

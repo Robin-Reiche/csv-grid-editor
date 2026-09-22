@@ -1,6 +1,7 @@
 import { state, getNumCols, emptyTableKind } from '../state';
 import { applyColorMode } from '../features/color-mode';
 import { buildGrid } from './builder';
+import { recomputeColTypes } from './column-type';
 
 // Splits a freshly-built rowData array into the scrollable body and the frozen
 // reference rows (AG Grid renders the latter in a fixed pinned-top band). Frozen
@@ -145,6 +146,12 @@ export function refreshGrid(): void {
     // of a column insert/delete reaches here (not buildGrid), so the hue rules must
     // be regenerated for the current numCols, not left at the pre-undo count.
     applyColorMode();
+    // The types were dropped above and the rows have been swapped, so work them
+    // out again here rather than leaving it to each caller. Most callers already
+    // ask for it, but the ones arriving from an external file change or from
+    // freezing a row do not, and a column whose type is unknown is drawn as
+    // plain text even where it should be drawn as checkboxes.
+    recomputeColTypes();
 }
 
 // Recomputes the "<n> rows × <n> columns" toolbar text and the "<n> records"

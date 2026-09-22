@@ -31,6 +31,15 @@ export const state = {
     // globalState (csvGridEditor.wrapText) like colorMode. In-memory mirror of
     // the persisted flag. See features/wrap-text.ts.
     wrapText: false,
+
+    // Checkboxes for true/false columns — when on, a cell holding one of the
+    // known true/false words is drawn as a box instead of the word (issue #41).
+    // Display only: the file keeps its own spelling, and clicking a box writes
+    // back the opposite word of the same pair. Persisted globally via VS Code
+    // globalState (csvGridEditor.boolCheckboxes) like colorMode and wrapText.
+    // In-memory mirror of the persisted flag. See features/bool-checkbox.ts.
+    boolCheckboxes: false,
+
     autoFitCache: null as any,
     autoFitCacheZoom: -1,
 

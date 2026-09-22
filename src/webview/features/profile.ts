@@ -123,8 +123,8 @@ export function computeProfile(): ColProfile[] {
                 }
                 p.topValues = Array.from(freq.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5);
             } else if (ct === 'boolean') {
-                const T: Record<string, number> = { 'true':1,'yes':1,'1':1,'t':1,'y':1 };
-                const F: Record<string, number> = { 'false':1,'no':1,'0':1,'f':1,'n':1 };
+                const T: Record<string, number> = { 'true':1,'yes':1,'1':1,'t':1,'y':1,'on':1 };
+                const F: Record<string, number> = { 'false':1,'no':1,'0':1,'f':1,'n':1,'off':1 };
                 let tc = 0, fc = 0;
                 for (let i = 0; i < values.length; i++) {
                     const lo = values[i].toLowerCase();
