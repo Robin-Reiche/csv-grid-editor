@@ -1,0 +1,11 @@
+name,active,subscribed,flag,shortform,switch,count,note
+Anna,true,Yes,Y,T,ON,1,alpha
+Ben,FALSE,no,N,f,off,0,beta
+Chris,True,YES,y,t,On,1,gamma
+Dana,false,No,N,T,OFF,0,delta
+Eli,TRUE,yes,Y,f,on,1,epsilon
+Finn,false,no,n,T,off,0,zeta
+Gina,true,Yes,Y,t,On,1,eta
+Hugo,False,No,N,f,OFF,0,theta
+Ida,,yes,Y,T,on,1,iota
+Jan,unknown,no,N,f,off,0,kappa

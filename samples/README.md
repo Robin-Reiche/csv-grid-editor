@@ -11,6 +11,17 @@ see the feature it is built around.
 | `sales_panel_wide.csv` | 96 | Two header rows over a wide layout, plus three identifier columns. Freeze rows and columns together so you never lose which row or quarter you are on. |
 | `multiline.csv` | 5 | Cells with line breaks inside them, both LF and CRLF, one of them next to a comma and a quote. Toggle **Wrap cell text** in the toolbar, and edit a cell with Alt+Enter. |
 | `reaction_times.csv` | 180 | Right-skewed reaction times next to a date, two categorical columns and a boolean. Open the **Column Profile** panel to see the distribution histogram, its long thin tail is the thing min, max and mean cannot tell you about. |
+| `booleans.csv` | 10 | Five true/false columns, one per spelling the grid knows (`true/false`, `yes/no`, `y/n`, `t/f`, `on/off`), next to a column of 1 and 0 that is meant to stay numbers. One cell is empty and one holds `unknown`. Switch on **Checkboxes for true/false columns** behind the toolbar gear. |
 
 The multi-row and multi-column freeze cases come from issue #9, the multi-line
-cells from issue #29 and the skewed distribution from issue #33.
+cells from issue #29, the skewed distribution from issue #33 and the
+checkboxes from issue #41.
+
+## local/
+
+Everything else this project is tested against lives in `samples/local/`,
+which is not committed: files of 50 MB and up for the paged and preview modes,
+and anything carrying real data. Keeping it here means there is one folder to
+look in rather than several scattered across the machine. The scripts that
+generate the large files are in there too, with a README.txt saying what each
+file is for.
