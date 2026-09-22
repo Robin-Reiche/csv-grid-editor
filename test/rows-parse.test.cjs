@@ -51,6 +51,15 @@ test('a quote at the start of a field still opens a quoted field', () => {
     assert.deepStrictEqual(parseCsv('"",x', ',', false), [['', 'x']]);
 });
 
+test('a quoted field after a space behind the delimiter is still one field', () => {
+    // Hand-written files put a space after the comma. Only the space is kept,
+    // the quotes still hold the comma inside the value, as they always did.
+    assert.deepStrictEqual(parseCsv('a, "b,c"', ',', false), [['a', ' b,c']]);
+    assert.deepStrictEqual(parseCsv('name, "Smith, John", 5', ',', false), [['name', ' Smith, John', ' 5']]);
+    assert.deepStrictEqual(parseCsv('a,\t"x\ny"', ',', false), [['a', '\tx\ny']]);
+    assert.deepStrictEqual(parseCsv('a, "b,c"', ','), [['a', 'b,c']]);
+});
+
 // ── a last line of only spaces ───────────────────────────────────────────────
 
 test('a last line of only spaces or tabs is not a row', () => {
@@ -61,6 +70,13 @@ test('a last line of only spaces or tabs is not a row', () => {
 test('spaces in a real last row and in a blank line between rows are kept', () => {
     assert.deepStrictEqual(parseCsv('a,b\n1,2\n 3 ,', ',', false), [['a', 'b'], ['1', '2'], [' 3 ', '']]);
     assert.deepStrictEqual(parseCsv('a\n  \nb', ',', false), [['a'], ['  '], ['b']]);
+});
+
+test('a last line of spaces written in quotes is a value and keeps its row', () => {
+    assert.deepStrictEqual(parseCsv('a\n"   "', ',', false), [['a'], ['   ']]);
+    assert.deepStrictEqual(parseCsv('a,b\n"  ",""', ',', false), [['a', 'b'], ['  ', '']]);
+    // An empty quoted value alone is still a blank line, as it always was.
+    assert.deepStrictEqual(parseCsv('a\n""', ',', false), [['a']]);
 });
 
 test('a header of blank column names is still read as one', () => {
