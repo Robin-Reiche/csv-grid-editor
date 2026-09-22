@@ -303,6 +303,56 @@ async function main() {
         assert.deepStrictEqual([...fs.readFileSync(p).subarray(0, 3)], [...BOM]);
     });
 
+    // The grid never sees the mark, so a program that only adds or removes it
+    // leaves the text as it was. That is still an outside change and not the
+    // echo of our own save: the next save has to write the file the way it is
+    // on disk now.
+    await test('an outside change that only adds the byte order mark is picked up', async () => {
+        const p = file('bom-added.csv', 'a,b\n1,2\n');
+        const t = await open(p);
+        fs.writeFileSync(p, Buffer.concat([BOM, Buffer.from('a,b\n1,2\n')]));
+        await t.fireWatcher();
+        assert.strictEqual(t.doc.hasBom, true, 'the document missed the new byte order mark');
+        assert.strictEqual(t.updates().length, 0, 'the grid was reloaded although its text did not change');
+        await t.edit('a,b\n1,3\n');
+        await t.save();
+        assert.deepStrictEqual([...fs.readFileSync(p).subarray(0, 3)], [...BOM], 'the save dropped the byte order mark');
+    });
+
+    await test('an outside change that only removes the byte order mark is picked up', async () => {
+        const p = file('bom-removed.csv', EXCEL);
+        const t = await open(p);
+        fs.writeFileSync(p, EXCEL.subarray(3));
+        await t.fireWatcher();
+        assert.strictEqual(t.doc.hasBom, false, 'the document kept a byte order mark the file no longer has');
+        await t.edit('name,city\nJürgen,Köln\nAnna,Wien\n');
+        await t.save();
+        assert.strictEqual(fs.readFileSync(p, 'utf8'), 'name,city\nJürgen,Köln\nAnna,Wien\n');
+    });
+
+    await test('Reload from Disk picks up a byte order mark added outside', async () => {
+        const p = file('bom-reload.csv', 'a\n1\n');
+        const t = await open(p);
+        fs.writeFileSync(p, Buffer.concat([BOM, Buffer.from('a\n1\n')]));
+        const reload = t.provider._reloaders.get(t.uri.toString());
+        assert.strictEqual(await reload(), true, 'Reload from Disk said the file was already up to date');
+        assert.strictEqual(t.doc.hasBom, true);
+    });
+
+    await test('a byte order mark added outside under unsaved edits warns once and is kept', async () => {
+        const p = file('bom-dirty.csv', 'a\n1\n');
+        const t = await open(p);
+        await t.edit('a\nmine\n');
+        fs.writeFileSync(p, Buffer.concat([BOM, Buffer.from('a\n1\n')]));
+        await t.fireWatcher();
+        await t.fireWatcher();                          // a second event for the same write
+        assert.strictEqual(warnings.length, 1, 'one outside write raised ' + warnings.length + ' warnings');
+        assert.strictEqual(t.doc.content, 'a\nmine\n', 'the unsaved edit was replaced');
+        await t.save();
+        assert.ok(fs.readFileSync(p).equals(Buffer.concat([BOM, Buffer.from('a\nmine\n')])),
+            'the save did not keep the byte order mark the file now has');
+    });
+
     fs.rmSync(tmpDir, { recursive: true, force: true });
     if (failures) { console.error(`\n${failures} test(s) failed`); process.exit(1); }
     console.log('\nAll host document tests passed.');
