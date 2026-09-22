@@ -2,7 +2,7 @@
 //
 // These drive the real webview in headless Chrome (test/ui/harness.cjs). What
 // they hold the bar to: a replace shows up in the grid at once and the counter
-// moves on, the replacement text is inserted exactly as typed, and find only
+// moves on, the replacement text is inserted exactly as typed and find only
 // sees the columns the user sees.
 //
 // Run after `tsc -p ./`:  node test/find-replace-view.test.cjs
@@ -113,11 +113,36 @@ runSuite('find and replace (browser)', [
             box.checked = false;
             box.dispatchEvent(new Event('change', { bubbles: true }));
             await t.wait(200);
+            // Hiding the column now searches again right away, so the active
+            // match moves off the hidden cell before Replace is pressed. This
+            // used to check that Replace wrote nothing on the stale match.
+            // There is no stale match to press on any more, so it checks that
+            // Replace takes the visible one and leaves the hidden cell alone.
             await press(t, 'replace-one');
-            t.check(t.sent('edit').length === 0, 'Replace on a match that was hidden since writes nothing');
-            t.check(count() === '1 / 1', 'and searches again (' + count() + ')');
+            t.check(t.lastEdit() === 'name,secret\\nbaz,foo\\nbar,x', 'Replace leaves the newly hidden column alone (' + JSON.stringify(t.lastEdit()) + ')');
+            t.check(count() === '0 matches', 'and nothing visible is left to find (' + count() + ')');
             await press(t, 'replace-all');
             t.check(t.lastEdit() === 'name,secret\\nbaz,foo\\nbar,x', 'Replace All leaves the newly hidden column alone (' + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
+    {
+        name: 'hiding a column updates the counter at once',
+        csv: 'name,secret\nfoo,foo\nbar,x',
+        steps: steps(`
+            await t.init(csv);
+            await find(t, 'foo', 'baz');
+            t.check(count() === '1 / 2', 'both columns are searched while both show (' + count() + ')');
+            document.getElementById('btn-columns').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(100);
+            const box = document.querySelectorAll('#col-chooser-list input[type=checkbox]')[1];
+            box.checked = false;
+            box.dispatchEvent(new Event('change', { bubbles: true }));
+            await t.wait(200);
+            t.check(count() === '1 / 1', 'the hidden match drops out of the counter (' + count() + ')');
+            box.checked = true;
+            box.dispatchEvent(new Event('change', { bubbles: true }));
+            await t.wait(200);
+            t.check(count() === '1 / 2', 'and comes back when the column shows again (' + count() + ')');
         `),
     },
 ]);

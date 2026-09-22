@@ -124,6 +124,15 @@ export function runFind(): void {
     debounceTimer = setTimeout(execFind, 120);
 }
 
+// Public: the grid calls this when a column is shown or hidden. The matches
+// depend on which columns are on screen, so without a fresh search the counter
+// and Next/Prev kept a match in a column the user had just hidden.
+export function refreshFindIfOpen(): void {
+    if (document.getElementById('find-bar')?.classList.contains('hidden') ?? true) return;
+    if (debounceTimer !== null) clearTimeout(debounceTimer);
+    execFind();
+}
+
 // ── navigation ────────────────────────────────────────────────────────────────
 
 export function navigateFind(dir: 1 | -1): void {
