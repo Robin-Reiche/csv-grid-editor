@@ -178,16 +178,14 @@ export function closeFindBar(): void {
 
 // ── replace ───────────────────────────────────────────────────────────────────
 
-// Replaces `regex` in one matched cell and returns the grid row it lives on.
-// The replacement comes back from a function so it is inserted exactly as
-// typed. Handed over as a plain string, "$$" became "$" and "$&" pasted in the
-// matched text. The grid's row objects are copies of state.data, so the new
-// value is written to both, otherwise the grid kept showing the old value and
-// the next search found it again.
-function replaceInCell(m: FindMatch, regex: RegExp, repl: string): any {
+// Rewrites one matched cell with `edit` and returns the grid row it lives on.
+// The grid's row objects are copies of state.data, so the new value is written
+// to both, otherwise the grid kept showing the old value and the next search
+// found it again.
+function replaceInCell(m: FindMatch, edit: (old: string) => string): any {
     const colIdx = parseInt(m.colField.replace('col_', ''));
     const dataIndex = dataRowIndexForFindMatch(m);
-    const newVal = String(state.data[dataIndex][colIdx] ?? '').replace(regex, () => repl);
+    const newVal = edit(String(state.data[dataIndex][colIdx] ?? ''));
     state.data[dataIndex][colIdx] = newVal;
     const node = state.gridApi?.getRowNode(String(dataIndex));
     if (node?.data && Number(node.data._origIndex) === dataIndex) {
@@ -196,6 +194,14 @@ function replaceInCell(m: FindMatch, regex: RegExp, repl: string): any {
     }
     return null;
 }
+
+// A cell can hold the search text more than once. Replace used to take the
+// first occurrence every time, so when the new text held the search text too, a
+// later occurrence was never reached. `resume` remembers where the last Replace
+// stopped: `key` names the cell, its new value and the search, `from` is the
+// offset just past the inserted text. The next Replace on the same unchanged
+// cell carries on from there.
+let resume: { key: string; from: number } | null = null;
 
 function replaceOne(): void {
     if (state.findMatchIndex < 0 || IS_PREVIEW) return;
@@ -206,13 +212,29 @@ function replaceOne(): void {
     // The column was hidden since the search ran. Search again rather than
     // change a cell the user can no longer see.
     if (!searchCols().some(c => c.field === m.colField)) { execFind(); return; }
+    const regex  = new RegExp(escapeRegExp(needle), cs ? 'g' : 'gi');
+    const keyOf  = (val: string) => JSON.stringify([dataRowIndexForFindMatch(m), m.colField, needle, cs, val]);
+    let more = false;
     pushUndo();
-    // Replace only the FIRST occurrence of needle within the cell value
-    const node = replaceInCell(m, new RegExp(escapeRegExp(needle), cs ? '' : 'i'), repl);
+    // Replace one occurrence of needle within the cell value
+    const node = replaceInCell(m, old => {
+        regex.lastIndex = resume?.key === keyOf(old) ? resume.from : 0;
+        let hit = regex.exec(old);
+        if (!hit) { regex.lastIndex = 0; hit = regex.exec(old); }
+        if (!hit) return old;
+        // Spliced in by hand, so "$$" or "$&" goes in exactly as typed.
+        const val = old.slice(0, hit.index) + repl + old.slice(hit.index + hit[0].length);
+        const from = hit.index + repl.length;
+        regex.lastIndex = from;
+        more = regex.exec(val) !== null;
+        resume = more ? { key: keyOf(val), from } : null;
+        return val;
+    });
     if (node) state.gridApi.refreshCells({ rowNodes: [node], force: true });
     notifyChange();
     scheduleRecomputeColTypes();
-    execFind(m);
+    // The counter stays on this cell while it holds more to replace.
+    execFind(m, more);
 }
 
 function replaceAll(): void {
@@ -229,7 +251,10 @@ function replaceAll(): void {
     pushUndo();
     const nodes: any[] = [];
     state.findMatches.forEach(m => {
-        const node = replaceInCell(m, regex, repl);
+        // The replacement comes back from a function so it is inserted exactly
+        // as typed. Handed over as a plain string, "$$" became "$" and "$&"
+        // pasted in the matched text.
+        const node = replaceInCell(m, old => old.replace(regex, () => repl));
         if (node) nodes.push(node);
     });
     if (nodes.length) state.gridApi.refreshCells({ rowNodes: nodes, force: true });

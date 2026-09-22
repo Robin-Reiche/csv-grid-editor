@@ -146,6 +146,25 @@ runSuite('find and replace (browser)', [
         `),
     },
     {
+        // The new text holds the search text too, so starting over at the
+        // front of the cell would only ever hit what the last press put in.
+        name: 'replace steps through a cell that holds the text twice',
+        csv: 'k,v\nx,abab\ny,b',
+        steps: steps(`
+            await t.init(csv);
+            await find(t, 'b', 'bb');
+            t.check(count() === '1 / 2', 'two cells match (' + count() + ')');
+            await press(t, 'replace-one');
+            t.check(t.lastEdit() === 'k,v\\nx,abbab\\ny,b', 'the first b is replaced (' + JSON.stringify(t.lastEdit()) + ')');
+            t.check(count() === '1 / 2', 'the counter stays on the cell while it has more (' + count() + ')');
+            await press(t, 'replace-one');
+            t.check(t.lastEdit() === 'k,v\\nx,abbabb\\ny,b', 'the second press takes the second b (' + JSON.stringify(t.lastEdit()) + ')');
+            t.check(count() === '2 / 2', 'then the counter moves on (' + count() + ')');
+            await press(t, 'replace-one');
+            t.check(t.lastEdit() === 'k,v\\nx,abbabb\\ny,bb', 'the third press takes the next cell (' + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
+    {
         name: 'hiding a column keeps the active match',
         csv: 'a,b,c\nfoo,1,x\nfoo,2,y\nfoo,3,z',
         steps: steps(`
