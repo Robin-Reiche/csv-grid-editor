@@ -152,4 +152,27 @@ runSuite('spaces around values (browser)', [
                 'with spaces shown the names keep them, a blank one is still (column N) (' + JSON.stringify(l) + ')');
         },
     },
+    {
+        name: 'export',
+        csv: PADDED_HEADERS,
+        steps: async (t, csv) => {
+            await t.init(csv);
+            const exportAs = async (format) => {
+                t.click(document.querySelector('.export-option[data-format="' + format + '"]'));
+                await t.wait(100);
+                const e = t.sent('export');
+                return e.length ? e[e.length - 1].text : '';
+            };
+            let md = await exportAs('md');
+            t.check(md.includes('| Anna | x | Berlin |') && md.includes('| name |  | city |'),
+                'Markdown exports what the grid shows (' + JSON.stringify(md) + ')');
+            let json = await exportAs('json');
+            t.check(json.includes('"city": "Berlin"'), 'JSON exports the shown value (' + JSON.stringify(json) + ')');
+            await t.setSetting('trimDisplay', false);
+            md = await exportAs('md');
+            t.check(md.includes('|  Berlin  |') && md.includes('|  city  |'),
+                'with spaces shown the export keeps them in names and values alike (' + JSON.stringify(md) + ')');
+            t.check(t.sent('edit').length === 0, 'exporting wrote nothing');
+        },
+    },
 ]);
