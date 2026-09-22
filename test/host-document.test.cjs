@@ -193,6 +193,25 @@ async function main() {
         });
     }
 
+    // A preview is read-only, so it has nothing to revert. Reading the whole
+    // file there and handing it to the grid would be exactly the load the
+    // preview was chosen to avoid.
+    for (const mode of ['head', 'tail', 'chunked', 'plaintext']) {
+        await test(`Revert File leaves a ${mode} preview as it is`, async () => {
+            const text = 'id,name\n' + Array.from({ length: 1500 }, (_, i) => `${i},row ${i}`).join('\n') + '\n';
+            const p = file(`revert-${mode}.csv`, text);
+            fakeSize = 60 * 1024 * 1024;
+            quickPickChoice = mode;
+            const t = await open(p);
+            assert.strictEqual(t.doc.isPreview, true, 'the test did not reach the preview');
+            const before = t.doc.content;
+            await t.provider.revertCustomDocument(t.doc, {});
+            assert.strictEqual(t.doc.content.length, before.length,
+                `revert changed the preview from ${before.length} to ${t.doc.content.length} characters`);
+            assert.strictEqual(t.updates().length, 0, 'revert sent the grid a new text');
+        });
+    }
+
     await test('an outside change does not replace unsaved edits', async () => {
         const p = file('dirty.csv', 'h\n1\n');
         const t = await open(p);

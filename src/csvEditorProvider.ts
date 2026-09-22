@@ -508,6 +508,13 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
     }
 
     async revertCustomDocument(document: CsvDocument, _cancellation: vscode.CancellationToken): Promise<void> {
+        // A preview cannot be edited, so there is nothing to revert. Reading the
+        // file here would load all of it, which is what the preview was picked
+        // to avoid on a file this large. The grid would also get rows the
+        // preview does not show. Re-reading the preview instead would turn
+        // revert into a reload, which a preview does not offer either (no
+        // watcher, no Reload from Disk). So the preview stays as it is.
+        if (document.isPreview) return;
         const raw = await vscode.workspace.fs.readFile(document.uri);
         ({ text: document.content, hasBom: document.hasBom } = decodeFile(raw));
         document.diskText = document.content;
