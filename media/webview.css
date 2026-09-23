@@ -902,10 +902,14 @@ body.spaces-shown .col-chooser-label {
 }
 
 /* ── Custom combined filter panel ── */
+/* The panel sits on the menu background (the .ag-popup rule at the end of this
+   file), so its text takes the menu foreground and the quieter parts fade it
+   with opacity. The editor and description colors belong to the editor
+   background. A light theme with dark menus drew them dark on dark. */
 .csv-filter-panel {
     font-family: var(--vscode-font-family, "Segoe UI", sans-serif);
     font-size: 12px;
-    color: var(--vscode-editor-foreground, #d4d4d4);
+    color: var(--vscode-menu-foreground, var(--vscode-editor-foreground, #d4d4d4));
     min-width: 230px;
     max-width: 280px;
 }
@@ -916,7 +920,7 @@ body.spaces-shown .col-chooser-label {
     font-weight: 600;
     letter-spacing: 0.06em;
     text-transform: uppercase;
-    color: var(--vscode-descriptionForeground, #888);
+    opacity: 0.7;
     margin-bottom: 6px;
 }
 .csv-filter-select {
@@ -967,7 +971,7 @@ body.spaces-shown .col-chooser-label {
     height: 1px;
     background: var(--vscode-panel-border, #3c3c3c);
 }
-.csv-filter-master:hover { background: var(--vscode-list-hoverBackground, #2a2d2e); }
+.csv-filter-master:hover { background: var(--vscode-menu-selectionBackground, #094771); color: var(--vscode-menu-selectionForeground, #fff); }
 .csv-filter-master input { cursor: pointer; margin: 0; flex: none; accent-color: var(--vscode-focusBorder, #007fd4); }
 .csv-filter-master-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .csv-filter-master-count { font-size: 11px; font-weight: 400; opacity: 0.6; flex: none; }
@@ -994,11 +998,11 @@ body.spaces-shown .col-chooser-label {
     white-space: nowrap;
     overflow: hidden;
 }
-.csv-filter-value-row:hover { background: var(--vscode-list-hoverBackground, #2a2d2e); }
+.csv-filter-value-row:hover { background: var(--vscode-menu-selectionBackground, #094771); color: var(--vscode-menu-selectionForeground, #fff); }
 .csv-filter-value-row input[type="checkbox"] { flex-shrink: 0; cursor: pointer; accent-color: var(--vscode-focusBorder, #007fd4); margin: 0; }
-.csv-filter-value-label { overflow: hidden; text-overflow: ellipsis; font-size: 12px; line-height: 1.5; color: var(--vscode-editor-foreground, #d4d4d4); }
-.csv-filter-value-label.blank { color: var(--vscode-descriptionForeground, #888); font-style: italic; }
-.csv-filter-empty { font-size: 11px; color: var(--vscode-descriptionForeground, #888); padding: 6px 2px; }
+.csv-filter-value-label { overflow: hidden; text-overflow: ellipsis; font-size: 12px; line-height: 1.5; }
+.csv-filter-value-label.blank { opacity: 0.7; font-style: italic; }
+.csv-filter-empty { font-size: 11px; opacity: 0.7; padding: 6px 2px; }
 
 /* ── Multi-condition rows ── */
 .csv-filter-cond-rows { display: flex; flex-direction: column; gap: 0; }
@@ -1016,16 +1020,21 @@ body.spaces-shown .col-chooser-label {
     background: none;
     border: 1px solid var(--vscode-panel-border, rgba(255,255,255,0.15));
     border-radius: 9px;
-    color: var(--vscode-descriptionForeground, #888);
+    color: inherit;
+    opacity: 0.7;
     cursor: pointer;
     line-height: 1.5;
 }
 .csv-filter-join-toggle:hover {
     border-color: var(--vscode-textLink-foreground, #4db6f0);
-    color: var(--vscode-editor-foreground, #d4d4d4);
+    opacity: 1;
 }
+/* OR stands out by its border and full strength. Its text keeps the menu
+   foreground: the link color belongs to the editor background and was hard to
+   read on a menu of the other lightness. Add condition below keeps it for the
+   same reason. */
 .csv-filter-join-toggle[data-join="or"] {
-    color: var(--vscode-textLink-foreground, #4db6f0);
+    opacity: 1;
     border-color: var(--vscode-textLink-foreground, #4db6f0);
 }
 .csv-filter-remove-btn {
@@ -1034,7 +1043,8 @@ body.spaces-shown .col-chooser-label {
     background: none;
     border: none;
     border-radius: 3px;
-    color: var(--vscode-descriptionForeground, #888);
+    color: inherit;
+    opacity: 0.7;
     cursor: pointer;
     font-size: 14px;
     line-height: 1;
@@ -1042,7 +1052,7 @@ body.spaces-shown .col-chooser-label {
     display: flex; align-items: center; justify-content: center;
 }
 .csv-filter-remove-btn:hover {
-    color: var(--vscode-editor-foreground, #d4d4d4);
+    opacity: 1;
     background: var(--vscode-toolbar-hoverBackground, rgba(255,255,255,0.1));
 }
 .csv-filter-add-btn {
@@ -1050,7 +1060,7 @@ body.spaces-shown .col-chooser-label {
     background: none;
     border: 1px dashed var(--vscode-panel-border, rgba(255,255,255,0.15));
     border-radius: 3px;
-    color: var(--vscode-textLink-foreground, #4db6f0);
+    color: inherit;
     cursor: pointer;
     font-size: 11px;
     padding: 3px 8px;
@@ -1411,7 +1421,11 @@ body.spaces-shown .col-chooser-label {
     font-weight: 600;
     letter-spacing: 0.06em;
     text-transform: uppercase;
-    color: var(--vscode-descriptionForeground, #888);
+    /* The heading of every menu-colored popover (Settings, Columns, Go to row,
+       Rename column). The menu foreground, faded. The description color is
+       meant for the editor background and went dark on dark in a light theme
+       with dark menus. */
+    opacity: 0.7;
     margin-bottom: 5px;
 }
 .goto-input-row { display: flex; align-items: center; gap: 8px; }
@@ -1432,7 +1446,7 @@ body.spaces-shown .col-chooser-label {
 .goto-input-row input:focus { border-color: var(--vscode-focusBorder, #007fd4); }
 .goto-hint {
     font-size: 11px;
-    color: var(--vscode-descriptionForeground, #888);
+    opacity: 0.7;
     white-space: nowrap;
 }
 .goto-actions {
@@ -1519,7 +1533,11 @@ body.spaces-shown .col-chooser-label {
     cursor: pointer;
     border-radius: 3px;
 }
-.col-chooser-item:hover { background: var(--vscode-list-hoverBackground, #2a2d2e); }
+/* Hovered rows in the menu-colored popovers take the menu's own selection
+   pair, as the context menus do. The list hover color belongs to the editor
+   background: a light theme with dark menus drew a light gray row under the
+   light menu text. */
+.col-chooser-item:hover { background: var(--vscode-menu-selectionBackground, #094771); color: var(--vscode-menu-selectionForeground, #fff); }
 .col-chooser-item input { cursor: pointer; margin: 0; flex: none; accent-color: var(--vscode-focusBorder, #007fd4); }
 .col-chooser-master {
     display: flex;
@@ -1542,7 +1560,7 @@ body.spaces-shown .col-chooser-label {
     height: 1px;
     background: var(--vscode-menu-border, #454545);
 }
-.col-chooser-master:hover { background: var(--vscode-list-hoverBackground, #2a2d2e); }
+.col-chooser-master:hover { background: var(--vscode-menu-selectionBackground, #094771); color: var(--vscode-menu-selectionForeground, #fff); }
 .col-chooser-master input { cursor: pointer; margin: 0; flex: none; accent-color: var(--vscode-focusBorder, #007fd4); }
 .col-chooser-master-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .col-chooser-master-count { font-size: 11px; font-weight: 400; opacity: 0.6; flex: none; }
@@ -1585,7 +1603,14 @@ body.spaces-shown .col-chooser-label {
     cursor: pointer;
     border-radius: 3px;
 }
-.settings-item:hover { background: var(--vscode-list-hoverBackground, #2a2d2e); }
+.settings-item:hover { background: var(--vscode-menu-selectionBackground, #094771); color: var(--vscode-menu-selectionForeground, #fff); }
+/* The faded parts of a hovered row (a hint, a count, "(Blank)") are drawn at
+   full strength. The selection pair is only meant to read at full strength.
+   Faded, it fell below 3:1 on a bright selection color. */
+.settings-item:hover .settings-item-hint,
+.col-chooser-master:hover .col-chooser-master-count,
+.csv-filter-master:hover .csv-filter-master-count,
+.csv-filter-value-row:hover .csv-filter-value-label.blank { opacity: 1; }
 .settings-item input {
     cursor: pointer;
     margin: 1px 0 0;
