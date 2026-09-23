@@ -126,6 +126,33 @@ test('behind a byte order mark each byte outside a valid UTF-8 sequence is its W
     }
 });
 
+// Each stray byte used to be decoded on its own. A 100 MB file with a byte
+// order mark whose rows are mostly Windows-1252 took nine seconds to open,
+// against half a second with a single stray byte. Both files here take the
+// same walk over their bytes, so only the cost of a stray byte tells them
+// apart: about twice the time now, more than twelve times before.
+test('many stray bytes behind a byte order mark read about as fast as one', () => {
+    const fill = row => {
+        const body = Buffer.alloc(Math.ceil(2e6 / row.length) * row.length);
+        for (let i = 0; i < body.length; i += row.length) row.copy(body, i);
+        return Buffer.concat([Buffer.from([0xEF, 0xBB, 0xBF]), body, Buffer.from([0xE4, 0x0A])]);
+    };
+    const oneStray = fill(Buffer.from('Müller;Köln;12345;Straße\n', 'utf8'));
+    const manyStrays = fill(Buffer.from('M\xFCller;K\xF6ln;12345;Stra\xDFe\n', 'latin1'));
+    const fastest = raw => {
+        let best = Infinity;
+        for (let run = 0; run < 3; run++) {
+            const start = process.hrtime.bigint();
+            decodeFile(raw);
+            best = Math.min(best, Number(process.hrtime.bigint() - start));
+        }
+        return best;
+    };
+    assert.ok(decodeFile(manyStrays).text.startsWith('Müller;Köln;12345;Straße\n'), 'the stray bytes read wrong');
+    const ratio = fastest(manyStrays) / fastest(oneStray);
+    assert.ok(ratio < 6, `many stray bytes took ${ratio.toFixed(1)} times as long as one`);
+});
+
 test('the start of a file counts as UTF-8 when a character is cut at its end', () => {
     const cut = Buffer.from('abc ö').subarray(0, 5);    // the first byte of ö only
     assert.strictEqual(startsAsUtf8(cut), true);

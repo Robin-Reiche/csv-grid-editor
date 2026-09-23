@@ -92,13 +92,22 @@ function utf8Length(b: Uint8Array, i: number): number {
     return 0;
 }
 
+// The UTF-8 bytes of each byte's Windows-1252 character.
+const WINDOWS_1252_AS_UTF8 = Array.from({ length: 256 }, (_, byte) =>
+    Buffer.from(decodeWindows1252(Uint8Array.of(byte)), 'utf8'));
+
 // UTF-8, but a byte that is not part of a valid UTF-8 character is read as
 // its Windows-1252 character, the way a line a legacy tool added to a UTF-8
 // file was written. No byte turns into U+FFFD. Written back as UTF-8, every
 // other byte comes out as it was.
+//
+// Each stray byte is swapped for the UTF-8 of its character and the result is
+// read as UTF-8 in one go. Decoding each stray byte on its own took seconds on
+// a large file whose rows are mostly Windows-1252.
 export function decodeUtf8KeepingStrays(bytes: Uint8Array): string {
     const buf = asBuffer(bytes);
-    let text = '';
+    let out = Buffer.alloc(0);
+    let length = 0;
     let from = 0;
     for (let i = 0; i < buf.length;) {
         const n = utf8Length(buf, i);
@@ -106,10 +115,22 @@ export function decodeUtf8KeepingStrays(bytes: Uint8Array): string {
             i += n;
             continue;
         }
-        text += buf.toString('utf8', from, i) + decodeWindows1252(buf.subarray(i, i + 1));
+        const char = WINDOWS_1252_AS_UTF8[buf[i]];
+        // Room for the rest of the file as well, so only a stray byte ever
+        // has to make more. Its character takes up to three bytes.
+        const needed = length + (i - from) + char.length + (buf.length - i - 1);
+        if (needed > out.length) {
+            const more = Buffer.allocUnsafe(Math.max(needed, Math.floor(out.length * 1.5)));
+            out.copy(more, 0, 0, length);
+            out = more;
+        }
+        length += buf.copy(out, length, from, i);
+        length += char.copy(out, length);
         from = ++i;
     }
-    return text + buf.toString('utf8', from);
+    if (from === 0) return buf.toString('utf8');
+    length += buf.copy(out, length, from);
+    return out.toString('utf8', 0, length);
 }
 
 // Whether these bytes, the start of a longer file, can begin UTF-8 text. A
