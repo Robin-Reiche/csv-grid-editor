@@ -750,6 +750,41 @@ async function main() {
         assert.ok(fs.readFileSync(dest).equals(ANSI), 'Save As wrote ' + hex(dest));
     });
 
+    // Save As onto the file itself (Ctrl+Shift+S, keep the name, confirm the
+    // overwrite) is a save. VS Code keeps the same document open and marks
+    // the tab clean. The document went on believing the disk held the text
+    // from before, so an outside change was ignored or reported as clashing
+    // with unsaved edits the tab did not have.
+    await test('Save As onto the file itself counts as a save', async () => {
+        const p = file('saveas-self.csv', 'h\nOLD\n');
+        const t = await open(p);
+        await t.edit('h\nNEW\n');
+        await t.saveAs(p);
+        t.tab.isDirty = false;
+        await t.fireWatcher();                          // the echo of that write
+        assert.strictEqual(t.updates().length, 0, 'the echo of the Save As was taken for an outside change');
+        fs.writeFileSync(p, 'h\nOLD\n');               // a git checkout
+        await t.fireWatcher();
+        assert.deepStrictEqual(warnings.map(w => w.msg), [], 'a clean tab was told its unsaved edits were kept');
+        assert.deepStrictEqual(t.updates().map(m => m.text), ['h\nOLD\n'], 'the grid kept the text the checkout replaced');
+    });
+
+    await test('Save As onto a Windows-1252 file itself that needs UTF-8 says so once', async () => {
+        const p = file('saveas-self-ansi.csv', ANSI);
+        const t = await open(p);
+        const text = 'Name;Stadt\r\nAnna;Łódź\r\n';
+        await t.edit(text);
+        await t.saveAs(p);
+        t.tab.isDirty = false;
+        await t.fireWatcher();                          // the echo of that write
+        assert.ok(fs.readFileSync(p).equals(Buffer.concat([BOM, Buffer.from(text, 'utf8')])), 'saved ' + hex(p));
+        assert.strictEqual(warnings.length, 1, 'warnings: ' + JSON.stringify(warnings.map(w => w.msg)));
+        assert.match(warnings[0].msg, /UTF-8/);
+        await t.edit(text + 'Eva;Graz\r\n');
+        await t.save();
+        assert.strictEqual(warnings.length, 1, 'the next save warned again');
+    });
+
     await test('a hot exit backup of a Windows-1252 file restores and saves the same bytes', async () => {
         const p = file('ansi-backup.csv', ANSI);
         const before = await open(p);
