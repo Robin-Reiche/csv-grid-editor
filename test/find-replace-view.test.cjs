@@ -660,6 +660,38 @@ runSuite('find and replace (browser)', [
         `),
     },
     {
+        // The grid asks every cell it draws whether it holds a match. A sort
+        // draws them all again. Going through the matches for each cell took
+        // over a second per sort with a search like 'e' on 100,000 rows.
+        // The virtual clock of the page does not see that time, so the steps
+        // of the array scans are counted over one sort instead.
+        name: 'a sort with many matches does not scan them for each cell',
+        csv: 'a,b\n' + Array.from({ length: 1000 }, (_, i) => 'e' + (999 - i) + ',e' + i).join('\n'),
+        steps: steps(`
+            await t.init(csv);
+            await find(t, 'e', '');
+            t.check(count() === '1 / 2000', 'every cell is a match (' + count() + ')');
+            const names = ['some', 'every', 'find', 'findIndex', 'filter'];
+            const orig = names.map(n => Array.prototype[n]);
+            let calls = 0;
+            names.forEach((n, i) => {
+                Array.prototype[n] = function (cb, ...rest) {
+                    return orig[i].call(this, function (...a) { calls++; return cb.apply(this, a); }, ...rest);
+                };
+            });
+            try {
+                t.header(0).querySelector('.ag-header-cell-label').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+                await t.wait(300);
+            } finally {
+                names.forEach((n, i) => { Array.prototype[n] = orig[i]; });
+            }
+            t.check(col(t, 0, 3) === 'e0,e1,e2', 'sorted by a (' + col(t, 0, 3) + ')');
+            t.check(marks(t.cell(0, 0)) !== 'none' && marks(t.cell(1, 1)) === 'match',
+                'the drawn cells are marked (' + marks(t.cell(0, 0)) + ', ' + marks(t.cell(1, 1)) + ')');
+            t.check(calls < 10000, 'the sort takes far fewer steps than matches times drawn cells (' + calls + ')');
+        `),
+    },
+    {
         // With no rows left there is no grid to search, and the search used to
         // stop before it touched the counter.
         name: 'an outside change that empties the file',
