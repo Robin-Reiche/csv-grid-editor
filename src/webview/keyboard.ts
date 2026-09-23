@@ -5,6 +5,7 @@ import { undo, redo } from './features/undo-redo';
 import { zoomIn, zoomOut, resetZoom } from './features/zoom';
 import { openFindBar } from './features/find-replace';
 import { insertRowAtFocus, deleteRowsAtFocus } from './features/delete-row-col';
+import { commitOpenEditor } from './grid/builder';
 
 function writeToClipboard(text: string): void {
     if (navigator.clipboard?.writeText) {
@@ -56,6 +57,22 @@ export function isUndoKey(e: KeyLike): boolean {
 export function isRedoKey(e: KeyLike): boolean {
     if (!(e.ctrlKey || e.metaKey) || e.altKey) return false;
     return (isLetter(e, 'y') && !e.shiftKey) || (isLetter(e, 'z') && e.shiftKey);
+}
+
+// The test VS Code's webview host makes before it saves: Ctrl or Cmd with
+// the S key, whatever else is held. keyCode names that key on any keyboard
+// layout, where `key` may be another letter.
+function isSaveKey(e: KeyLike & { keyCode: number }): boolean {
+    return (e.ctrlKey || e.metaKey) && e.keyCode === 83;
+}
+
+// Ctrl+S saves what is being typed in a cell, the way a spreadsheet does
+// (grid/builder.ts commitOpenEditor). Capture phase, so it runs before
+// anything in the page can stop the key. The key itself goes on to VS Code,
+// which does the saving. Only the key does this. Auto-save leaves an open
+// cell alone.
+function onSaveKey(e: KeyboardEvent): void {
+    if (isSaveKey(e)) commitOpenEditor();
 }
 
 // The open cell editor is a <textarea> and has to get through — editing is the
@@ -111,6 +128,7 @@ function copiedCell(): { node: any; colId: string } | null {
 
 export function setupKeyboard(): void {
     document.addEventListener('keydown', onGridShortcut, true /* capture */);
+    document.addEventListener('keydown', onSaveKey, true /* capture */);
 
     document.addEventListener('keydown', e => {
         // Single-cell copy. Multi-cell range copy is handled in capture phase by

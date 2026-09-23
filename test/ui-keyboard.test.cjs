@@ -1,9 +1,12 @@
-// Browser tests for Ctrl+C in the grid.
+// Browser tests for Ctrl+C and Ctrl+S in the grid.
 //
 // Ctrl+C copied the grid's focused cell wherever the key was pressed, in the
 // find box, the rename box and the other text boxes too. It stopped the
 // browser from copying the text selected there. On a focused cell of a frozen
-// row it copied nothing, so a paste gave whatever was copied before.
+// row it copied nothing, so a paste gave whatever was copied before. Ctrl+S
+// while a cell was being typed in saved the file without the typed value and
+// the tab showed it as saved. VS Code saves as soon as it gets the key. The
+// value only reached the file once the grid had reported the commit.
 //
 // Run after `tsc -p ./`:  node test/ui-keyboard.test.cjs
 
@@ -113,6 +116,72 @@ runSuite('keyboard (browser)', [
             t.check(t.focused() === frozen(1), 'ArrowUp moves the focus into the frozen row');
             await t.ctrlKey(t.focused(), 'c');
             t.check(t.copied[t.copied.length - 1] === 'y', 'Ctrl+C copies that cell too (' + JSON.stringify(t.copied) + ')');
+        `),
+    },
+    {
+        name: 'Ctrl+S saves the value being typed',
+        csv: 'name,city\nAnna,Berlin\nBen,Oslo\n',
+        steps: steps(`
+            const ta = await t.type(0, 1, 'TYPED');
+            if (!ta) return;
+            const ev = new KeyboardEvent('keydown', { key: 's', code: 'KeyS', keyCode: 83, ctrlKey: true, bubbles: true, cancelable: true });
+            ta.dispatchEvent(ev);
+            // VS Code handles the key right after the page has seen it, so the
+            // edit has to be on its way by the time the key is through.
+            t.check(t.lastEdit() === 'name,city\\nAnna,TYPED\\nBen,Oslo\\n', 'the edit is sent while the key is handled ('
+                + JSON.stringify(t.lastEdit()) + ')');
+            t.check(!ev.defaultPrevented, 'the key goes on to VS Code');
+            await t.wait(400);
+            t.check(!document.querySelector('#grid-container textarea'), 'the editor is closed');
+            t.check(t.sent('edit').length === 1, 'the value is written once (' + t.sent('edit').length + ')');
+            t.check(t.cell(0, 1).textContent === 'TYPED', 'the cell shows it');
+            document.getElementById('btn-undo').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(300);
+            t.check(t.lastEdit() === csv, 'one undo takes it back (' + JSON.stringify(t.lastEdit()) + ')');
+            t.check(document.getElementById('btn-undo').disabled, 'and nothing else is left to undo');
+            // Without an open editor the key writes nothing.
+            await t.focusCell(1, 1);
+            const sent = t.sent('edit').length;
+            await t.ctrlKey(t.focused(), 's');
+            t.check(t.sent('edit').length === sent, 'Ctrl+S on a cell that is not open writes nothing');
+        `),
+    },
+    {
+        name: 'Ctrl+S with the value unchanged writes nothing',
+        csv: 'name,city\nAnna,Berlin\n',
+        steps: steps(`
+            const ta = await t.type(0, 1, 'Berlin');
+            if (!ta) return;
+            ta.dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', keyCode: 83, ctrlKey: true, bubbles: true, cancelable: true }));
+            await t.wait(400);
+            t.check(!document.querySelector('#grid-container textarea'), 'the editor is closed');
+            t.check(t.sent('edit').length === 0, 'nothing is written (' + JSON.stringify(t.lastEdit()) + ')');
+            t.check(document.getElementById('btn-undo').disabled, 'and nothing is there to undo');
+        `),
+    },
+    {
+        // A frozen row sits in a band of its own above the others, with row
+        // numbers of its own.
+        name: 'Ctrl+S saves the value typed in a frozen row',
+        csv: 'name,city\nAnna,Berlin\nBen,Oslo\n',
+        steps: steps(`
+            await t.rightClick(t.cell(1, 0));
+            const item = [...document.querySelectorAll('#row-context-menu .row-ctx-item')].find(i => i.textContent === 'Freeze row');
+            if (!item) { t.check(false, 'the row menu offers Freeze row'); return; }
+            item.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(300);
+            const frozen = document.querySelector('#grid-container .ag-floating-top .ag-cell[col-id="col_1"]');
+            t.check(!!frozen && frozen.textContent === 'Oslo', 'Ben is frozen');
+            ['mousedown', 'mouseup', 'click'].forEach(ty => frozen.dispatchEvent(new MouseEvent(ty, { bubbles: true, button: 0 })));
+            await t.wait(200);
+            await t.pressEnter();
+            const ta = document.querySelector('#grid-container textarea');
+            if (!ta) { t.check(false, 'Enter opens the editor on the frozen cell'); return; }
+            ta.value = 'Rome';
+            ta.dispatchEvent(new Event('input', { bubbles: true }));
+            ta.dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', keyCode: 83, ctrlKey: true, bubbles: true, cancelable: true }));
+            t.check(t.lastEdit() === 'name,city\\nAnna,Berlin\\nBen,Rome\\n', 'the frozen row gets the value ('
+                + JSON.stringify(t.lastEdit()) + ')');
         `),
     },
 ]);
