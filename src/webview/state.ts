@@ -70,6 +70,7 @@ export const state = {
     findMatchIndex: -1,
 
     currentPage: 0,
+    totalPages: 1,
 
     // Freeze rows — the data rows pinned to the top of the grid as always-visible
     // references. Tracked by their array references within state.data (NOT by

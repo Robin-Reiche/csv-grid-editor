@@ -8,12 +8,32 @@ import { updateDelimiterBadge } from './features/delimiter';
 import { handlePageData } from './features/pagination';
 import { resetDuplicatesState } from './features/duplicates';
 import { frozenRowPositions, reanchorFrozenRows } from './features/freeze-rows';
+import { loadRows, rowsInFile } from './features/header-row';
+import { updateSettingsButton } from './features/settings-menu';
 
-function initWithData(text: string, delimiter: string): void {
+// The preview banner of Show Head and Show Tail: how many of the file's rows
+// are on screen. The paged view has its own (features/pagination.ts).
+export function updatePreviewBanner(): void {
+    const previewEl = document.getElementById('preview-text');
+    if (!previewEl) return;
+    const shownRows = state.data.length - 1;
+    const totalRows = rowsInFile();
+    if (PREVIEW_MODE === 'head') {
+        previewEl.textContent = `Showing first ${shownRows.toLocaleString()} of ${totalRows.toLocaleString()} rows (read-only preview)`;
+    } else if (PREVIEW_MODE === 'tail') {
+        previewEl.textContent = `Showing last ${shownRows.toLocaleString()} of ${totalRows.toLocaleString()} rows (read-only preview)`;
+    }
+}
+
+// firstRowIsHeader is what the extension remembers for this file. Only an
+// explicit false turns the header off.
+function initWithData(text: string, delimiter: string, firstRowIsHeader: boolean): void {
     state.rawCsvText      = text;
     state.currentDelimiter = delimiter;
+    state.firstRowIsHeader = firstRowIsHeader;
+    updateSettingsButton();
     // Untrimmed: the file's values exactly, see parseCsv.
-    state.data = parseCsv(text, delimiter, false, true);
+    state.data = loadRows(parseCsv(text, delimiter, false, true));
     state.lineFormat = detectLineFormat(text, delimiter);
     state.isAutoFitted     = false;
     state.autoFitCache     = null;
@@ -21,19 +41,7 @@ function initWithData(text: string, delimiter: string): void {
     state.zoomIndex        = Math.max(0, Math.min(INITIAL_ZOOM_INDEX, state.ZOOM_STEPS.length - 1));
 
     updateDelimiterBadge(delimiter);
-
-    if (IS_PREVIEW) {
-        const previewEl = document.getElementById('preview-text');
-        if (previewEl) {
-            const shownRows = state.data.length - 1;
-            const totalRows = TOTAL_LINE_COUNT - 1;
-            if (PREVIEW_MODE === 'head') {
-                previewEl.textContent = `Showing first ${shownRows.toLocaleString()} of ${totalRows.toLocaleString()} rows (read-only preview)`;
-            } else if (PREVIEW_MODE === 'tail') {
-                previewEl.textContent = `Showing last ${shownRows.toLocaleString()} of ${totalRows.toLocaleString()} rows (read-only preview)`;
-            }
-        }
-    }
+    updatePreviewBanner();
 
     setTimeout(() => { applyZoom(); buildGrid(); hideLoader(); }, 0);
 }
@@ -42,7 +50,7 @@ export function setupMessaging(): void {
     window.addEventListener('message', (event: MessageEvent) => {
         const msg = event.data;
         if (msg.type === 'init') {
-            initWithData(msg.text, msg.delimiter);
+            initWithData(msg.text, msg.delimiter, msg.firstRowIsHeader !== false);
         } else if (msg.type === 'update') {
             // External file change → re-parse. Re-anchor frozen rows by position so
             // they survive the reload (best effort: positions past the new row count
@@ -54,7 +62,7 @@ export function setupMessaging(): void {
             // it (features/delimiter.ts).
             const frozen = frozenRowPositions();
             state.rawCsvText = msg.text;
-            state.data = parseCsv(msg.text, state.currentDelimiter, false, true);
+            state.data = loadRows(parseCsv(msg.text, state.currentDelimiter, false, true));
             // An outside change or a revert can bring other line endings.
             state.lineFormat = detectLineFormat(msg.text, state.currentDelimiter);
             reanchorFrozenRows(frozen);

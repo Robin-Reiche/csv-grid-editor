@@ -4,6 +4,7 @@ import { buildGrid } from '../grid/builder';
 import { frozenRowPositions, reanchorFrozenRows } from './freeze-rows';
 import { closeAllPopups } from './popups';
 import { resetDuplicatesState } from './duplicates';
+import { loadRows } from './header-row';
 
 export function updateDelimiterBadge(delimiter: string): void {
     const badge = document.getElementById('delim-badge');
@@ -36,7 +37,7 @@ export function setupDelimiterBadge(): void {
             // so the rows are the same rows at the same positions — re-anchor the
             // frozen rows across the re-parse instead of losing them.
             const frozen = frozenRowPositions();
-            state.data = parseCsv(state.rawCsvText, state.currentDelimiter, false, true);
+            state.data = loadRows(parseCsv(state.rawCsvText, state.currentDelimiter, false, true));
             // Which line breaks end a row depends on where quoted values start.
             // That depends on the delimiter.
             state.lineFormat = detectLineFormat(state.rawCsvText, state.currentDelimiter);
