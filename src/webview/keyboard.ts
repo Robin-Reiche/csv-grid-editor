@@ -1,5 +1,6 @@
 import { state } from './state';
 import { tsvCell } from './utils/csv';
+import { shownValue } from './grid/control-char-cell';
 import { undo, redo } from './features/undo-redo';
 import { zoomIn, zoomOut, resetZoom } from './features/zoom';
 import { openFindBar } from './features/find-replace';
@@ -104,7 +105,10 @@ export function setupKeyboard(): void {
                     // Without it a cell holding a line break arrives in Excel as
                     // three separate cells, and pasting it back into the grid
                     // creates three rows. tsvCell leaves ordinary values alone.
-                    writeToClipboard(val != null ? tsvCell(String(val)) : '');
+                    // The value goes as the cell shows it, the way Export
+                    // writes it. With "Hide spaces around values" on, the
+                    // hidden spaces stay off the clipboard.
+                    writeToClipboard(val != null ? tsvCell(shownValue(String(val))) : '');
                     e.preventDefault();
                 }
             }

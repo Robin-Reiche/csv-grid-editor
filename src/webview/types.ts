@@ -67,4 +67,7 @@ export interface FindMatch {
     // so replace writes hit the correct row even under an active sort/filter.
     origIndex: number;
     colField: string;
+    // Set for a match in a frozen row. rowIndex then counts within the frozen
+    // band above the grid, the way AG Grid numbers those rows.
+    pinned?: boolean;
 }

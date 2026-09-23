@@ -1,7 +1,7 @@
 import { state, getNumCols, emptyTableKind, relabelVirtualHeader } from '../state';
 import { getColumnType, scheduleRecomputeColTypes, TYPE_LABELS } from './column-type';
 import { NoRowsOverlay, renderNoColumns } from '../features/empty-state';
-import { createCombinedFilter } from './filter';
+import { createCombinedFilter, markValueListsStale } from './filter';
 import { dataRowIndexForNode } from './row-mapping';
 import { partitionFrozenRows, updateCountsDisplay } from './refresh';
 import { ControlCharCellRenderer, shownValue } from './control-char-cell';
@@ -130,13 +130,16 @@ export function makeComparator(colType: string): (a: string, b: string) => numbe
 // listener must be attached once — not re-added on every buildGrid call.
 let dblclickWired = false;
 
-// The toolbar's Clear filters button is up while any filter is on. A grid built
-// fresh has no column filters but raises no filter change to say so. buildGrid
-// calls this itself for that reason. Otherwise the button would stay up after a
-// rebuild dropped the filters: insert or delete column, a delimiter switch, an
-// outside change or an undo that alters the columns.
+// The toolbar's Clear filters button is up while a column filter is on. It
+// clears the column filters only, so the "Show only duplicates" view does not
+// count. That view hides rows through a filter of its own. The button came up
+// for it and did nothing when clicked. A grid built fresh has no column
+// filters but raises no filter change to say so. buildGrid calls this itself
+// for that reason. Otherwise the button would stay up after a rebuild dropped
+// the filters: insert or delete column, a delimiter switch, an outside change
+// or an undo that alters the columns.
 function syncClearFiltersButton(): void {
-    const on  = !!state.gridApi?.isAnyFilterPresent();
+    const on  = !!state.gridApi?.isColumnFilterPresent();
     const btn = document.getElementById('btn-clear-filters');
     const sep = document.getElementById('sep-filters');
     if (btn) btn.style.display = on ? '' : 'none';
@@ -295,6 +298,13 @@ export function buildGrid(): void {
             editable: !IS_PREVIEW,
             sortable: true, resizable: true,
             cellClassRules,
+            // Every value in this grid is text. The column types the headers
+            // show come from column-type.ts. Left to itself, AG Grid guesses a
+            // type of its own from the first row and then refuses a typed
+            // value that does not fit it. A yyyy-mm-dd date there made the
+            // column take such dates only. Anything else typed in, an emptied
+            // cell too, was thrown away.
+            cellDataType: false,
         },
         // External filter for "show only duplicates" mode — kept independent of
         // user column filters so toggling dup-only doesn't clobber them.
@@ -385,6 +395,9 @@ export function buildGrid(): void {
         // A rowData reset (undo/redo, row insert/delete, paste, dup-view) shifts
         // display indices, so the display-coordinate selection must be dropped.
         onRowDataUpdated: () => {
+            // Every row swap arrives here: undo, paste, an insert or a delete,
+            // an outside change, a freeze and the duplicates view.
+            markValueListsStale();
             clearRangeSelection();
             // With getRowId set (Issue #5) AG Grid reuses row nodes across a
             // rowData swap, so the '#' gutter — a display-position valueGetter —
@@ -424,6 +437,7 @@ export function buildGrid(): void {
             pushUndo();
             while (state.data[dataIndex].length <= colIndex) state.data[dataIndex].push('');
             state.data[dataIndex][colIndex] = event.newValue != null ? String(event.newValue) : '';
+            markValueListsStale();
             notifyChange();
             scheduleRecomputeColTypes();
         },

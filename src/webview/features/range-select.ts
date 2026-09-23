@@ -4,6 +4,8 @@ import { recomputeColTypes } from '../grid/column-type';
 import { toClipboardBlock } from '../utils/csv';
 import type { ClipboardFormat } from '../utils/csv';
 import { closeAllPopups } from './popups';
+import { shownValue } from '../grid/control-char-cell';
+import { markValueListsStale } from '../grid/filter';
 
 // ── Excel-style range selection for the main grid ─────────────────────────────
 // AG Grid Community has no built-in cell-range selection (Enterprise only), so
@@ -211,19 +213,22 @@ export function copySelection(withHeader = false, format: ClipboardFormat = 'tsv
     const selCols = cols.filter(id => selColIds.has(id));
     const rowMap = displayRowToOrig();
 
+    // Values and column names go as the grid shows them, the way Export
+    // writes them. With "Hide spaces around values" on, the hidden spaces
+    // stay off the clipboard.
     const rows: string[][] = [];
     // A file without a header row has only the grid's column letters up
     // there, which are not in the file.
     if (withHeader && state.firstRowIsHeader) {
         const header = state.data[0] ?? [];
-        rows.push(selCols.map(colId => String(header[parseInt(colId.slice(4), 10)] ?? '')));
+        rows.push(selCols.map(colId => shownValue(String(header[parseInt(colId.slice(4), 10)] ?? ''))));
     }
     for (let r = selRowLo; r <= selRowHi; r++) {
         const orig = rowMap[r];
         const dataRow = orig != null && orig >= 0 ? state.data[orig] : undefined;
         rows.push(selCols.map(colId => {
             const v = dataRow?.[parseInt(colId.slice(4), 10)];
-            return v != null ? String(v) : '';
+            return v != null ? shownValue(String(v)) : '';
         }));
     }
     writeClipboard(toClipboardBlock(rows, format));
@@ -266,7 +271,10 @@ function clearSelectedCells(): void {
         }
     }
     // refreshCells (not a rowData reset) keeps the selection highlight in place.
+    // The grid is not told of the write that way, so the column filters' value
+    // lists are marked stale here.
     state.gridApi.refreshCells({ force: true });
+    markValueListsStale();
     recomputeColTypes();
     notifyChange();
 }

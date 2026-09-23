@@ -22,6 +22,7 @@ import { freezeRows, unfreezeRow, unfreezeAllRows, frozenRowCount } from './free
 import { closeAllPopups } from './popups';
 import { addFirstRow, addFirstColumn } from './empty-state';
 import { resetDuplicatesState } from './duplicates';
+import { shownValue } from '../grid/control-char-cell';
 
 // ── Data mutations ────────────────────────────────────────────────────────────
 
@@ -314,9 +315,10 @@ function showContextMenu(x: number, y: number, rowIndex: number | null, colId: s
     } else if (colId && rowIndex !== null && colId !== 'row-index') {
         // Read the value from the resolved grid node — rowIndex is a display
         // index, which differs from the state.data position when a sort is active.
+        // It goes as the cell shows it, the same as Ctrl+C.
         const node  = resolveNode();
         const raw   = node?.data?.[colId];
-        const value = raw != null ? String(raw) : '';
+        const value = raw != null ? shownValue(String(raw)) : '';
 
         const copyItem = makeRowItem('Copy', 'codicon-copy');
         copyItem.addEventListener('click', () => {

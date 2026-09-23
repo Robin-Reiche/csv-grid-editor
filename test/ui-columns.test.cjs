@@ -11,7 +11,9 @@
 // badge and the header tooltip went stale after an undo, a rename or the
 // "Hide spaces" switch, while the cells already used the new type. A column
 // with no name in the header row lost its type on every row swap: its badge
-// read Text and its checkboxes turned back into words.
+// read Text and its checkboxes turned back into words. A column whose first
+// row held a yyyy-mm-dd date took nothing but such dates, because AG Grid
+// guessed the column's type from that row.
 //
 // Run after `tsc -p ./`:  node test/ui-columns.test.cjs
 
@@ -387,5 +389,41 @@ runSuite('columns (browser)', [
             await t.wait(300);
             t.check(t.col(1) === 'a,c,b,d', 'ascending sorts by value: 0.5, 1.25, 1.5, 2 (' + t.col(1) + ')');
         `),
+    },
+    // ── what a cell takes ───────────────────────────────────────────────────
+    {
+        // AG Grid guesses a column's type from the first row. A yyyy-mm-dd
+        // value there made the column take dates only. Any other text typed
+        // in was thrown away without a word, an emptied cell too.
+        name: 'a column that starts with a date takes any text',
+        csv: 'id,date,note\n1,2024-01-05,a\n2,2024-02-01,b',
+        steps: `async (t, csv) => { ${HELPERS}
+            // createGrid is a getter that cannot be replaced, so the whole
+            // global is swapped for a proxy that hands out the grid it made.
+            let api = null;
+            const real = window.agGrid;
+            const wrap = (el, opts) => (api = real.createGrid(el, opts));
+            window.agGrid = new Proxy(real, { get: (o, k) => k === 'createGrid' ? wrap : o[k] });
+            const warned = [];
+            const warn = console.warn;
+            console.warn = (...a) => { warned.push(a.join(' ')); warn.apply(console, a); };
+            await t.init(csv);
+            await t.edit(1, 1, 'unknown');
+            t.check(t.lastEdit() === 'id,date,note\\n1,2024-01-05,a\\n2,unknown,b',
+                'text typed into the date column is written (' + JSON.stringify(t.lastEdit()) + ')');
+            await t.edit(0, 1, '');
+            t.check(t.lastEdit() === 'id,date,note\\n1,,a\\n2,unknown,b',
+                'an emptied date cell is written (' + JSON.stringify(t.lastEdit()) + ')');
+            await t.edit(0, 1, '31.12.2024');
+            t.check(t.lastEdit() === 'id,date,note\\n1,31.12.2024,a\\n2,unknown,b',
+                'a date in another form is written (' + JSON.stringify(t.lastEdit()) + ')');
+            t.check(t.col(1) === '31.12.2024,unknown', 'and the grid shows all of it (' + t.col(1) + ')');
+            const guessed = api ? api.getColumns().filter(c => c.getColDef().cellDataType !== false)
+                .map(c => c.getColId() + ':' + c.getColDef().cellDataType) : ['no grid'];
+            t.check(guessed.length === 0, 'no column has a type AG Grid guessed (' + guessed.join(', ') + ')');
+            t.check(!warned.some(w => /data type/i.test(w)), 'and AG Grid warned about none (' + warned.join(' / ') + ')');
+            window.agGrid = real;
+            console.warn = warn;
+        }`,
     },
 ]);
