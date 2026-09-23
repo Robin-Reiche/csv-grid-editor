@@ -5,13 +5,16 @@ import { getWebviewContent } from './webview';
 import { SETTING_DEFAULTS, isSettingKey, type Settings, type SettingKey } from './webview/settings';
 import {
     RowPageIndex,
+    PreviewEncoding,
     readFirstRecords,
     countRecords,
     readTailRecords,
     buildPageIndex,
     readFirstLine,
+    readPreviewEncoding,
     readPage
 } from './largeFileReader';
+import { FileEncoding, decodeFile, encodeFile, isFileEncoding } from './encoding';
 
 const LARGE_FILE_THRESHOLD   = 10  * 1024 * 1024; // 10 MB
 const CHUNKED_THRESHOLD      = 50  * 1024 * 1024; // 50 MB
@@ -19,16 +22,26 @@ const PREVIEW_ROW_COUNT      = 1000;
 const PAGE_SIZE              = 500;
 const CANCELLED_PREVIEW_MODE = '__cancelled__';
 
-// Excel writes UTF-8 CSV with a byte order mark and reads a file without one
-// as ANSI, so a save that drops the mark turns every umlaut into mojibake. The
-// grid never sees the mark (TextDecoder strips it, which also keeps it out of
-// the first header name), so the document remembers it and every write puts
-// it back.
-const UTF8_BOM = [0xEF, 0xBB, 0xBF];
+// A hot exit backup is written as UTF-8, which holds any edit whatever the
+// file's encoding. Its id carries that encoding back to the restore. An id
+// from before is the bare URI of a backup written the way a save wrote the
+// file then: UTF-8, behind the byte order mark if the file had one.
+function backupId(destination: vscode.Uri, encoding: FileEncoding): string {
+    return JSON.stringify({ backup: destination.toString(), encoding });
+}
 
-function decodeFile(raw: Uint8Array): { text: string; hasBom: boolean } {
-    const hasBom = raw.length >= 3 && raw[0] === UTF8_BOM[0] && raw[1] === UTF8_BOM[1] && raw[2] === UTF8_BOM[2];
-    return { text: new TextDecoder().decode(raw), hasBom };
+function parseBackupId(id: string): { uri: vscode.Uri; encoding?: FileEncoding } {
+    if (!id.startsWith('{')) return { uri: vscode.Uri.parse(id) };
+    const { backup, encoding } = JSON.parse(id) as { backup: string; encoding: unknown };
+    return { uri: vscode.Uri.parse(backup), encoding: isFileEncoding(encoding) ? encoding : undefined };
+}
+
+// Told after a save that could not keep the file in Windows-1252, see
+// CsvDocument.encode.
+function warnSavedAsUtf8(uri: vscode.Uri): void {
+    void vscode.window.showWarningMessage(
+        `${path.basename(uri.fsPath)} was saved as UTF-8 because it now holds characters that Windows-1252 cannot store.`
+    );
 }
 
 // The files whose first row is data, not a header ("First row is the header"
@@ -37,6 +50,14 @@ function decodeFile(raw: Uint8Array): { text: string; hasBom: boolean } {
 // files are in it, a file switched back on is taken out again. Nothing about
 // it is written into the file itself.
 const HEADERLESS_KEY = 'csvGridEditor.headerless';
+
+// The key of a document's file in that map. VS Code opens the HEAD side of a
+// Source Control diff as a grid too, under a git: URI with the file's path and
+// the ref in its query. Keyed by that URI, the two grids of the diff were one
+// row out of step and a switch made on the HEAD side stayed there.
+function headerKey(uri: vscode.Uri): string {
+    return uri.scheme === 'git' ? vscode.Uri.file(uri.fsPath).toString() : uri.toString();
+}
 
 function isHeaderless(stored: unknown, uri: string): boolean {
     return !!stored && typeof stored === 'object'
@@ -59,6 +80,33 @@ export function rememberHeaderRow(stored: unknown, uri: string, firstRowIsHeader
     return map;
 }
 
+// The map to store after the file or folder at `from` was renamed or moved to
+// `to`. Null when that changes nothing in it. A folder takes the files in it
+// along. What was stored for `to` belonged to a file the move replaced.
+export function moveHeaderRows(stored: unknown, from: string, to: string): Record<string, true> | null {
+    if (!stored || typeof stored !== 'object') return null;
+    const within = (key: string, base: string) => key === base || key.startsWith(base + '/');
+    if (!Object.keys(stored).some(key => within(key, from) || within(key, to))) return null;
+    const map: Record<string, true> = {};
+    for (const [key, value] of Object.entries(stored)) {
+        if (value !== true || within(key, to)) continue;
+        map[within(key, from) ? to + key.slice(from.length) : key] = true;
+    }
+    return map;
+}
+
+// The watcher's pattern for a file of this name. VS Code reads the pattern as
+// a glob. The bare name made data[1].csv match data1.csv and never itself
+// ([1] is a character class), the same with the braces in report{2024}.csv.
+// Such a file never reloaded. Each glob character goes into brackets of its
+// own, which match exactly that character. VS Code also trims the pattern, so
+// spaces at either end of the name are bracketed too.
+function watchPattern(fileName: string): string {
+    return fileName
+        .replace(/[[\]{}*?]/g, '[$&]')
+        .replace(/^\s+|\s+$/g, spaces => spaces.replace(/[\s\S]/g, '[$&]'));
+}
+
 class CsvDocument implements vscode.CustomDocument {
     public content: string;
     public pageIndex: RowPageIndex | null = null;
@@ -66,8 +114,18 @@ class CsvDocument implements vscode.CustomDocument {
     // last saved, or the outside change we last loaded. The watcher compares
     // against this, not only against content, see reload() below.
     public diskText: string;
-    // Whether the file started with a UTF-8 byte order mark, see decodeFile.
-    public hasBom = false;
+    // The file's encoding, byte order mark included (see encoding.ts). The
+    // grid never sees either, so the document remembers them and every write
+    // puts them back. Excel reads UTF-8 without the mark as ANSI, so a save
+    // that dropped it turned every umlaut into mojibake.
+    public encoding: FileEncoding = 'utf8';
+    // Every editor that shows this document. Usually one, but VS Code opens a
+    // second editor on the same document for the modified side of a Source
+    // Control diff while the grid tab stays open.
+    public readonly panels = new Set<vscode.WebviewPanel>();
+    // The one watcher on the file while any editor is open, see
+    // resolveCustomEditor. A preview has none.
+    public watcher: vscode.FileSystemWatcher | undefined;
 
     constructor(
         public readonly uri: vscode.Uri,
@@ -84,15 +142,21 @@ class CsvDocument implements vscode.CustomDocument {
 
     dispose(): void {}
 
-    // The bytes to write for this document: its text, behind the byte order
-    // mark when the file had one.
-    encode(): Uint8Array {
-        const body = new TextEncoder().encode(this.content);
-        if (!this.hasBom) return body;
-        const bytes = new Uint8Array(UTF8_BOM.length + body.length);
-        bytes.set(UTF8_BOM);
-        bytes.set(body, UTF8_BOM.length);
-        return bytes;
+    // Sends the message to every editor of this document but `except`.
+    post(message: unknown, except?: vscode.WebviewPanel): void {
+        for (const panel of this.panels) {
+            if (panel !== except) panel.webview.postMessage(message);
+        }
+    }
+
+    // The bytes to write for this document and the encoding they are in: the
+    // file's own, unless an edit brought in a character that encoding cannot
+    // hold. Writing that as a question mark would lose it, so the file turns
+    // into UTF-8 with a byte order mark instead, which Excel reads as UTF-8.
+    encode(): { bytes: Uint8Array; encoding: FileEncoding } {
+        const bytes = encodeFile(this.content, this.encoding);
+        if (bytes) return { bytes, encoding: this.encoding };
+        return { bytes: encodeFile(this.content, 'utf8bom') as Uint8Array, encoding: 'utf8bom' };
     }
 }
 
@@ -103,11 +167,11 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
     private readonly _onDidChangeCustomDocument = new vscode.EventEmitter<vscode.CustomDocumentContentChangeEvent<CsvDocument>>();
     public readonly onDidChangeCustomDocument = this._onDidChangeCustomDocument.event;
 
-    private readonly _webviews = new Map<string, vscode.WebviewPanel>();
-
-    // Per-open-document "re-read the file and push it to the grid" callbacks, so
-    // the reload command can reach the same code path the watcher uses.
-    private readonly _reloaders = new Map<string, () => Promise<boolean>>();
+    // The open documents by URI, so the reload command, which only knows the
+    // active tab, can reach the same reload the watcher uses. Keyed by URI
+    // and not by editor: an editor closing must not take the document out
+    // while another editor still shows it.
+    private readonly _documents = new Map<string, CsvDocument>();
 
     public static register(context: vscode.ExtensionContext): vscode.Disposable {
         const provider = new CsvEditorProvider(context);
@@ -117,8 +181,36 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
                 provider,
                 { webviewOptions: { retainContextWhenHidden: true } }
             ),
-            vscode.commands.registerCommand('csvViewer.reloadFromDisk', () => provider.reloadActiveFromDisk())
+            vscode.commands.registerCommand('csvViewer.reloadFromDisk', () => provider.reloadActiveFromDisk()),
+            vscode.workspace.onDidRenameFiles(e => provider.followRenames(e.files))
         );
+    }
+
+    // "First row is the header" is kept by URI. A file renamed or moved in VS
+    // Code takes it along, the same as the files in a renamed folder. VS Code
+    // opens the file again as a new document, which looks the switch up by
+    // the new URI.
+    private followRenames(files: readonly { readonly oldUri: vscode.Uri; readonly newUri: vscode.Uri }[]): void {
+        let stored: unknown = this.context.globalState.get(HEADERLESS_KEY);
+        let changed = false;
+        for (const { oldUri, newUri } of files) {
+            const moved = moveHeaderRows(stored, oldUri.toString(), newUri.toString());
+            if (moved) {
+                stored = moved;
+                changed = true;
+            }
+        }
+        if (changed) this.context.globalState.update(HEADERLESS_KEY, stored);
+    }
+
+    // A copy made by Save As holds the same rows, so it keeps the file's
+    // "First row is the header". VS Code opens the copy as a new document,
+    // which looks the switch up by the copy's URI.
+    private copyHeaderRow(from: vscode.Uri, to: vscode.Uri): void {
+        const stored = this.context.globalState.get(HEADERLESS_KEY);
+        const headerless = isHeaderless(stored, headerKey(from));
+        if (headerless === isHeaderless(stored, headerKey(to))) return;
+        this.context.globalState.update(HEADERLESS_KEY, rememberHeaderRow(stored, headerKey(to), !headerless));
     }
 
     // "CSV Grid: Reload from Disk". File > Revert File cannot serve as the manual
@@ -133,15 +225,15 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             return;
         }
 
-        const reload = this._reloaders.get(input.uri.toString());
-        if (!reload) {
+        const document = this._documents.get(input.uri.toString());
+        if (!document || document.isPreview) {
             vscode.window.showWarningMessage('This grid cannot be reloaded (preview mode).');
             return;
         }
 
         // Without this the command looks broken whenever the file is already in
         // sync, which is exactly the confusion that made #25 hard to report.
-        const changed = await reload();
+        const changed = await this.reloadFromDisk(document);
         if (!changed) {
             vscode.window.setStatusBarMessage('CSV Grid: already up to date', 3000);
         }
@@ -171,8 +263,9 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         let previewMode = 'full';
         let totalLineCount = 0;
         let isChunked = false;
-        let hasBom = false;
+        let encoding: FileEncoding = 'utf8';
         let scanDelimiter = ',';
+        let previewEncoding: PreviewEncoding = 'utf8';
 
         if (fileSize > LARGE_FILE_THRESHOLD) {
             const sizeMB = (fileSize / (1024 * 1024)).toFixed(2);
@@ -230,17 +323,18 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             // document gets below. Plain text and the full file never scan.
             if (previewMode === 'head' || previewMode === 'tail' || previewMode === 'chunked') {
                 scanDelimiter = this.detectDelimiter(filePath, await readFirstLine(filePath));
+                previewEncoding = await readPreviewEncoding(filePath);
             }
 
             if (previewMode === 'plaintext') {
-                content = await fs.promises.readFile(filePath, 'utf8');
+                content = decodeFile(await fs.promises.readFile(filePath)).text;
                 isPreview = true;
             } else if (previewMode === 'head') {
-                content = await readFirstRecords(filePath, PREVIEW_ROW_COUNT + 1, scanDelimiter);
+                content = await readFirstRecords(filePath, PREVIEW_ROW_COUNT + 1, scanDelimiter, previewEncoding);
                 totalLineCount = await countRecords(filePath, scanDelimiter);
                 isPreview = true;
             } else if (previewMode === 'tail') {
-                const result = await readTailRecords(filePath, PREVIEW_ROW_COUNT, scanDelimiter);
+                const result = await readTailRecords(filePath, PREVIEW_ROW_COUNT, scanDelimiter, previewEncoding);
                 content = result.content;
                 totalLineCount = result.totalRecordCount;
                 isPreview = true;
@@ -250,18 +344,18 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
                 // content stays empty — pages are served on demand
             } else {
                 const raw = await vscode.workspace.fs.readFile(uri);
-                ({ text: content, hasBom } = decodeFile(raw));
+                ({ text: content, encoding } = decodeFile(raw));
             }
         } else {
             const raw = await vscode.workspace.fs.readFile(uri);
-            ({ text: content, hasBom } = decodeFile(raw));
+            ({ text: content, encoding } = decodeFile(raw));
         }
 
         // The paged view learns its row total only from the index, and the preview
         // banner needs that number, so the index is built before the document
         // rather than hung on it afterwards. Header included, the way head and
         // tail count it.
-        const pageIndex = isChunked ? await buildPageIndex(uri.fsPath, PAGE_SIZE, scanDelimiter) : null;
+        const pageIndex = isChunked ? await buildPageIndex(uri.fsPath, PAGE_SIZE, scanDelimiter, previewEncoding) : null;
         if (pageIndex) totalLineCount = pageIndex.totalRows + 1;
 
         // The paged view holds no text of its own, its pages are served on demand,
@@ -272,17 +366,24 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
 
         const doc = new CsvDocument(uri, content, delimiter, isPreview, previewMode, totalLineCount, isChunked);
         doc.pageIndex = pageIndex;
-        doc.hasBom = hasBom;
+        doc.encoding = encoding;
 
         return doc;
     }
 
     // Only an editable document gets backed up (a preview never turns dirty),
     // so a restore always opens in full mode and skips the size question.
-    private async restoreBackup(uri: vscode.Uri, backupId: string): Promise<CsvDocument> {
-        const backup = decodeFile(await vscode.workspace.fs.readFile(vscode.Uri.parse(backupId)));
+    private async restoreBackup(uri: vscode.Uri, id: string): Promise<CsvDocument> {
+        const { uri: backupUri, encoding } = parseBackupId(id);
+        const raw = await vscode.workspace.fs.readFile(backupUri);
+        // The encoding comes with the id: nothing in plain ASCII text tells
+        // Windows-1252 from UTF-8. Every character of the text is the edits',
+        // a U+FEFF at its start included.
+        const backup = encoding
+            ? { text: new TextDecoder('utf-8', { ignoreBOM: true }).decode(raw), encoding }
+            : decodeFile(raw);
         const doc = new CsvDocument(uri, backup.text, this.detectDelimiter(uri.fsPath, backup.text), false, 'full', 0, false);
-        doc.hasBom = backup.hasBom;
+        doc.encoding = backup.encoding;
         // The watcher and Reload from Disk compare against the file, not
         // against the restored edits. A file deleted since the backup holds
         // nothing. Failing the restore over that would lose the edits too.
@@ -310,8 +411,16 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'media')]
         };
 
-        this._webviews.set(document.uri.toString(), webviewPanel);
-        webviewPanel.onDidDispose(() => this._webviews.delete(document.uri.toString()));
+        const key = document.uri.toString();
+        document.panels.add(webviewPanel);
+        this._documents.set(key, document);
+        webviewPanel.onDidDispose(() => {
+            document.panels.delete(webviewPanel);
+            if (document.panels.size > 0) return;
+            document.watcher?.dispose();
+            document.watcher = undefined;
+            if (this._documents.get(key) === document) this._documents.delete(key);
+        });
 
         const fileName  = path.basename(document.uri.fsPath);
         const zoomIndex = this.context.globalState.get<number>('csvGridEditor.zoomIndex', 4);
@@ -342,75 +451,14 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             profileLayout
         );
 
-        // F3: File System Watcher — auto-reload on external changes (non-preview only)
-        let watcher: vscode.FileSystemWatcher | undefined;
-        if (!document.isPreview) {
-            watcher = vscode.workspace.createFileSystemWatcher(
-                new vscode.RelativePattern(vscode.Uri.file(path.dirname(document.uri.fsPath)), path.basename(document.uri.fsPath))
+        // F3: File System Watcher. Reloads the grid on outside changes, not in a
+        // preview. One per document, however many editors show it. With one per
+        // editor the first to read a change took it, the others kept the old text.
+        if (!document.isPreview && !document.watcher) {
+            const watcher = vscode.workspace.createFileSystemWatcher(
+                new vscode.RelativePattern(vscode.Uri.file(path.dirname(document.uri.fsPath)), watchPattern(path.basename(document.uri.fsPath)))
             );
-            const reload = async (fromWatcher = false): Promise<boolean> => {
-                try {
-                    const raw = await vscode.workspace.fs.readFile(document.uri);
-                    const { text, hasBom } = decodeFile(raw);
-                    // Ignore our own writes. saveCustomDocument writes document.content
-                    // verbatim, so a watcher event whose content equals what we already
-                    // hold is the echo of our own save, not an external edit. Reloading
-                    // on it would re-parse the CSV into fresh arrays and wipe in-memory
-                    // view state (frozen rows, in particular). Only genuinely external
-                    // changes differ from document.content. The byte order mark
-                    // counts too: the grid never sees it, so a program that only
-                    // adds or removes it leaves the text as it was, but the next
-                    // save has to write the file the way it is now.
-                    if (text === document.content && hasBom === document.hasBom) return false;
-                    // The same echo, arriving late. The watcher reports a save only
-                    // after the write, and with auto-save on the next edit can land
-                    // in between: the editor has moved on, the disk still holds the
-                    // save, and the comparison above sees a difference. Taking that
-                    // for an outside change reset the grid to the saved text and threw
-                    // away the newest edit, all of it when the saved text was a header
-                    // of blank names like ",,,,". A disk that holds what we last knew
-                    // it holds has nothing new to say. Only the watcher waits like
-                    // this: Reload from Disk is the explicit request for the disk.
-                    if (fromWatcher && text === document.diskText && hasBom === document.hasBom) return false;
-                    // Another program changed the file while the grid holds
-                    // unsaved edits. Loading it silently replaced those edits and
-                    // left the tab dirty, so the next save made the loss final.
-                    // Like VS Code's own text editors, keep the edits and let the
-                    // user choose. Recording the new disk text makes a second
-                    // event for the same write stay quiet. A later save still
-                    // resets it to what we wrote. The mark is recorded as well,
-                    // so that save keeps the file's new mark or lack of one.
-                    if (fromWatcher && document.content !== document.diskText) {
-                        document.diskText = text;
-                        document.hasBom = hasBom;
-                        void vscode.window.showWarningMessage(
-                            `${fileName} changed on disk. Your unsaved edits in the grid were kept.`,
-                            'Reload from Disk'
-                        ).then(choice => {
-                            if (choice === 'Reload from Disk') void reload();
-                        });
-                        return false;
-                    }
-                    // When only the mark changed, the grid already shows this
-                    // text. Loading it again would cost the view state for nothing.
-                    const textChanged = text !== document.content;
-                    document.content = text;
-                    document.diskText = text;
-                    document.hasBom = hasBom;
-                    if (textChanged) {
-                        webviewPanel.webview.postMessage({
-                            type: 'update',
-                            text: document.content,
-                            delimiter: document.delimiter
-                        });
-                    }
-                    return true;
-                } catch {
-                    return false;
-                }
-            };
-            this._reloaders.set(document.uri.toString(), reload);
-            webviewPanel.onDidDispose(() => this._reloaders.delete(document.uri.toString()));
+            document.watcher = watcher;
 
             // Both events reload, not just onDidChange (issue #25). A rewrite in
             // place arrives as a change, but a script that replaces the file —
@@ -421,14 +469,13 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             // grid silently kept showing stale data. onDidDelete is deliberately
             // not wired: the file is gone at that point, and the create that
             // follows is what carries the new content.
-            watcher.onDidChange(() => void reload(true));
-            watcher.onDidCreate(() => void reload(true));
-            webviewPanel.onDidDispose(() => watcher?.dispose());
+            watcher.onDidChange(() => void this.reload(document, true));
+            watcher.onDidCreate(() => void this.reload(document, true));
         }
 
         webviewPanel.webview.onDidReceiveMessage(async (msg) => {
             if (msg.type === 'ready') {
-                const firstRowIsHeader = !isHeaderless(this.context.globalState.get(HEADERLESS_KEY), document.uri.toString());
+                const firstRowIsHeader = !isHeaderless(this.context.globalState.get(HEADERLESS_KEY), headerKey(document.uri));
                 if (document.isChunked && document.pageIndex) {
                     const pageText = await readPage(document.uri.fsPath, document.pageIndex, 0);
                     webviewPanel.webview.postMessage({
@@ -467,9 +514,8 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             // for the same trust boundary as above.
             } else if (msg.type === 'headerRowChanged') {
                 if (typeof msg.value === 'boolean') {
-                    const uri = document.uri.toString();
                     this.context.globalState.update(HEADERLESS_KEY,
-                        rememberHeaderRow(this.context.globalState.get(HEADERLESS_KEY), uri, msg.value));
+                        rememberHeaderRow(this.context.globalState.get(HEADERLESS_KEY), headerKey(document.uri), msg.value));
                 }
 
             } else if (msg.type === 'wrapTextChanged') {
@@ -482,6 +528,10 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
 
             } else if (msg.type === 'edit' && !document.isPreview) {
                 document.content = msg.text;
+                // Every edit sends the whole text. Another editor of this
+                // document that kept the old one would send that back with its
+                // next edit and undo this one.
+                document.post({ type: 'update', text: document.content, delimiter: document.delimiter }, webviewPanel);
                 this._onDidChangeCustomDocument.fire({ document });
 
             // F4: Export handler — the webview sends the converted text plus a
@@ -522,6 +572,109 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         });
     }
 
+    // Re-reads the file and hands it to every editor of the document. The
+    // watcher calls it with fromWatcher for a change on disk, Reload from Disk
+    // calls it without.
+    private async reload(document: CsvDocument, fromWatcher = false): Promise<boolean> {
+        try {
+            const raw = await vscode.workspace.fs.readFile(document.uri);
+            // Whether the file holds exactly what a save of this text writes.
+            const holds = (text: string): boolean => {
+                const bytes = encodeFile(text, document.encoding);
+                return !!bytes && Buffer.compare(bytes, raw) === 0;
+            };
+            // Ignore our own writes. saveCustomDocument writes document.content
+            // verbatim, so a watcher event whose file holds what we already
+            // hold is the echo of our own save, not an external edit. Reloading
+            // on it would re-parse the CSV into fresh arrays and wipe in-memory
+            // view state (frozen rows, in particular). Only genuinely external
+            // changes differ from document.content. The bytes are compared,
+            // not the text read back from them: bytes that are valid UTF-8 read
+            // as UTF-8 whatever they were written in, so the save of a
+            // Windows-1252 file with its last umlaut edited away looked like
+            // another program's. The encoding counts this way too, byte order
+            // mark included: the grid never sees it, so a program that only
+            // changes it leaves the text as it was, but the next save has to
+            // write the file the way it is now.
+            if (holds(document.content)) return false;
+            // The same echo, arriving late. The watcher reports a save only
+            // after the write. With auto-save on the next edit can land in
+            // between: the editor has moved on, the disk still holds the
+            // save and the comparison above sees a difference. Taking that
+            // for an outside change reset the grid to the saved text and threw
+            // away the newest edit, all of it when the saved text was a header
+            // of blank names like ",,,,". A disk that holds what we last knew
+            // it holds has nothing new to say. Only the watcher waits like
+            // this: Reload from Disk is the explicit request for the disk.
+            if (fromWatcher && holds(document.diskText)) return false;
+            const { text, encoding } = decodeFile(raw, document.encoding);
+            // Another program changed the file while the grid holds
+            // unsaved edits. Loading it silently replaced those edits and
+            // left the tab dirty, so the next save made the loss final.
+            // Like VS Code's own text editors, keep the edits and let the
+            // user choose. Recording the new disk text makes a second
+            // event for the same write stay quiet. A later save still
+            // resets it to what we wrote. The encoding is recorded as
+            // well, so that save keeps the file's new encoding.
+            if (fromWatcher && document.content !== document.diskText) {
+                document.diskText = text;
+                document.encoding = encoding;
+                void vscode.window.showWarningMessage(
+                    `${path.basename(document.uri.fsPath)} changed on disk. Your unsaved edits in the grid were kept.`,
+                    'Reload from Disk'
+                ).then(choice => {
+                    if (choice === 'Reload from Disk') void this.reloadFromDisk(document);
+                });
+                return false;
+            }
+            // When only the encoding changed, the grid already shows this
+            // text. Loading it again would cost the view state for nothing.
+            const textChanged = text !== document.content;
+            document.content = text;
+            document.diskText = text;
+            document.encoding = encoding;
+            if (textChanged) {
+                document.post({
+                    type: 'update',
+                    text: document.content,
+                    delimiter: document.delimiter
+                });
+            }
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    // Reload from Disk, the command and the button on the warning above. A
+    // reload under unsaved edits left the tab marked unsaved although the grid
+    // showed exactly the file, so closing it asked to save. Only a save or a
+    // revert takes that mark off. No API lets an extension revert a document
+    // itself. So a tab with unsaved edits goes through File > Revert File,
+    // which calls revertCustomDocument. VS Code drops that revert for a tab
+    // without unsaved edits (issue #25), so such a tab is reloaded here.
+    private async reloadFromDisk(document: CsvDocument): Promise<boolean> {
+        const isOwnTab = (tab: vscode.Tab | undefined): tab is vscode.Tab =>
+            tab?.input instanceof vscode.TabInputCustom
+            && tab.input.viewType === CsvEditorProvider.viewType
+            && tab.input.uri.toString() === document.uri.toString();
+        const tab = vscode.window.tabGroups.all.flatMap(group => group.tabs).find(isOwnTab);
+        if (tab?.isDirty) {
+            // The revert command works on the editor in front, so the tab
+            // comes to the front first. This also takes the focus from the
+            // Open Editors view, where the command would revert the selection
+            // instead. Should another tab still be in front, the command is
+            // not run: it would throw away that tab's unsaved edits.
+            await vscode.commands.executeCommand('vscode.openWith', document.uri, CsvEditorProvider.viewType,
+                { viewColumn: tab.group.viewColumn, preserveFocus: false });
+            if (isOwnTab(vscode.window.tabGroups.activeTabGroup.activeTab)) {
+                await vscode.commands.executeCommand('workbench.action.files.revert');
+                return true;
+            }
+        }
+        return this.reload(document);
+    }
+
     // ── Save / Revert / Backup ──
 
     async saveCustomDocument(document: CsvDocument, _cancellation: vscode.CancellationToken): Promise<void> {
@@ -530,9 +683,23 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             return;
         }
         // Recorded before the write, so the watcher event it causes is known as
-        // ours however late it arrives (see reload in resolveCustomEditor).
+        // ours however late it arrives (see reload). A write that fails (the
+        // file is locked or read-only) puts it back. The disk still holds the
+        // old text. Taking the edits for it let the next outside change or
+        // change event replace them without a warning. The encoding goes with
+        // the text, since the watcher compares both.
+        const { bytes, encoding } = document.encode();
+        const disk = { text: document.diskText, encoding: document.encoding };
         document.diskText = document.content;
-        await vscode.workspace.fs.writeFile(document.uri, document.encode());
+        document.encoding = encoding;
+        try {
+            await vscode.workspace.fs.writeFile(document.uri, bytes);
+        } catch (e) {
+            document.diskText = disk.text;
+            document.encoding = disk.encoding;
+            throw e;
+        }
+        if (encoding !== disk.encoding) warnSavedAsUtf8(document.uri);
     }
 
     async saveCustomDocumentAs(document: CsvDocument, destination: vscode.Uri, _cancellation: vscode.CancellationToken): Promise<void> {
@@ -542,10 +709,14 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         if (document.isPreview) {
             if (destination.toString() !== document.uri.toString()) {
                 await vscode.workspace.fs.copy(document.uri, destination, { overwrite: true });
+                this.copyHeaderRow(document.uri, destination);
             }
             return;
         }
-        await vscode.workspace.fs.writeFile(destination, document.encode());
+        const { bytes, encoding } = document.encode();
+        await vscode.workspace.fs.writeFile(destination, bytes);
+        if (encoding !== document.encoding) warnSavedAsUtf8(destination);
+        this.copyHeaderRow(document.uri, destination);
     }
 
     async revertCustomDocument(document: CsvDocument, _cancellation: vscode.CancellationToken): Promise<void> {
@@ -557,23 +728,20 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         // watcher, no Reload from Disk). So the preview stays as it is.
         if (document.isPreview) return;
         const raw = await vscode.workspace.fs.readFile(document.uri);
-        ({ text: document.content, hasBom: document.hasBom } = decodeFile(raw));
+        ({ text: document.content, encoding: document.encoding } = decodeFile(raw, document.encoding));
         document.diskText = document.content;
 
-        const panel = this._webviews.get(document.uri.toString());
-        if (panel) {
-            panel.webview.postMessage({
-                type: 'update',
-                text: document.content,
-                delimiter: document.delimiter
-            });
-        }
+        document.post({
+            type: 'update',
+            text: document.content,
+            delimiter: document.delimiter
+        });
     }
 
     async backupCustomDocument(document: CsvDocument, context: vscode.CustomDocumentBackupContext, _cancellation: vscode.CancellationToken): Promise<vscode.CustomDocumentBackup> {
-        await vscode.workspace.fs.writeFile(context.destination, document.encode());
+        await vscode.workspace.fs.writeFile(context.destination, new TextEncoder().encode(document.content));
         return {
-            id: context.destination.toString(),
+            id: backupId(context.destination, document.encoding),
             delete: async () => {
                 try { await vscode.workspace.fs.delete(context.destination); } catch {}
             }

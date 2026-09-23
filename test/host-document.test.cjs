@@ -11,6 +11,12 @@
 //   permanent.
 // - A UTF-8 byte order mark. Reading dropped it and saving never wrote it
 //   back, so Excel opened the saved file as ANSI and umlauts came out garbled.
+// - A save that fails (the file is locked or read-only). The provider took
+//   the unsaved edits for what the disk holds, so the next outside change or
+//   change event replaced them without a word.
+// - A file in Windows-1252 (Excel's plain "CSV") or in UTF-16. It was read
+//   as UTF-8, every umlaut became U+FFFD and the first save wrote that over
+//   the whole file.
 //
 // This drives the real provider against a stubbed vscode API on top of the
 // real file system, in a temp folder.
@@ -32,6 +38,8 @@ let quickPickChoice = null;
 // Lets a test pretend a small file is a large one, so the preview modes can be
 // reached without writing 50 MB to disk.
 let fakeSize = null;
+// The next write fails the way a file Excel holds open does on Windows.
+let failNextWrite = false;
 
 class EventEmitter {
     constructor() { this.listeners = []; this.event = l => { this.listeners.push(l); return { dispose() {} }; }; }
@@ -53,12 +61,22 @@ const vscodeStub = {
         fs: {
             stat: async uri => ({ size: fakeSize ?? fs.statSync(uri.fsPath).size }),
             readFile: async uri => new Uint8Array(fs.readFileSync(uri.fsPath)),
-            writeFile: async (uri, bytes) => fs.writeFileSync(uri.fsPath, bytes),
+            writeFile: async (uri, bytes) => {
+                if (failNextWrite) {
+                    failNextWrite = false;
+                    throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' });
+                }
+                fs.writeFileSync(uri.fsPath, bytes);
+            },
             copy: async (from, to) => fs.copyFileSync(from.fsPath, to.fsPath),
             delete: async uri => fs.rmSync(uri.fsPath, { force: true }),
         },
         createFileSystemWatcher: () => {
-            const w = { change: [], create: [], onDidChange(f) { this.change.push(f); }, onDidCreate(f) { this.create.push(f); }, dispose() {} };
+            const w = {
+                change: [], create: [], disposed: false,
+                onDidChange(f) { this.change.push(f); }, onDidCreate(f) { this.create.push(f); },
+                dispose() { this.disposed = true; },
+            };
             watchers.push(w);
             return w;
         },
@@ -76,6 +94,32 @@ const vscodeStub = {
     Disposable: { from() {} },
 };
 
+// VS Code's tabs, as far as the provider looks at them: one editor group with
+// a tab for each file open() opens. An edit marks a tab unsaved the way VS
+// Code marks it on a content change event. Only a save or a revert takes the
+// mark off again.
+class TabInputCustom { constructor(uri, viewType) { this.uri = uri; this.viewType = viewType; } }
+const group = { tabs: [], activeTab: null, viewColumn: 1, isActive: true };
+vscodeStub.TabInputCustom = TabInputCustom;
+vscodeStub.window.tabGroups = { all: [group], activeTabGroup: group };
+// Lets a test pretend VS Code could not bring a tab to the front.
+let openWithFails = false;
+vscodeStub.commands.executeCommand = async (id, ...args) => {
+    if (id === 'vscode.openWith') {
+        const [uri, viewType] = args;
+        const tab = group.tabs.find(t => t.input.uri.toString() === uri.toString() && t.input.viewType === viewType);
+        if (tab && !openWithFails) group.activeTab = tab;
+    } else if (id === 'workbench.action.files.revert') {
+        // File > Revert File reverts the active editor if it has unsaved
+        // edits. VS Code drops it for any other.
+        const tab = group.activeTab;
+        if (tab && tab.isDirty) {
+            tab.isDirty = false;
+            await tab.revert();
+        }
+    }
+};
+
 const load = Module._load;
 Module._load = function (request, ...rest) {
     if (request === 'vscode') return vscodeStub;
@@ -89,6 +133,10 @@ async function test(name, fn) {
     warnings.length = 0;
     fakeSize = null;
     quickPickChoice = null;
+    failNextWrite = false;
+    openWithFails = false;
+    group.tabs.length = 0;
+    group.activeTab = null;
     try { await fn(); console.log('  ✓ ' + name); }
     catch (e) { failures++; console.error('  ✗ ' + name + '\n      ' + e.message); }
 }
@@ -99,14 +147,11 @@ function file(name, content) {
     return p;
 }
 
-// Opens a file in the provider and hands back what a test needs to drive it.
-async function open(filePath, openContext = {}) {
-    watchers.length = 0;
-    const context = { extensionUri: uriFile('/ext'), globalState: { get: (_k, d) => d, update() {} } };
-    const provider = new CsvEditorProvider(context);
-    const uri = uriFile(filePath);
-    const doc = await provider.openCustomDocument(uri, openContext, {});
+// Shows `doc` in one more editor panel and hands back what a test needs to
+// drive that panel.
+async function attach(provider, doc) {
     const posted = [];
+    const disposeListeners = [];
     let onMessage = null;
     const panel = {
         webview: {
@@ -115,20 +160,56 @@ async function open(filePath, openContext = {}) {
             postMessage: m => { posted.push(m); return Promise.resolve(true); },
             onDidReceiveMessage: f => { onMessage = f; },
         },
-        onDidDispose() {},
+        onDidDispose(f) { disposeListeners.push(f); },
     };
     await provider.resolveCustomEditor(doc, panel, {});
-    const watcher = watchers[watchers.length - 1];
     return {
-        provider, doc, posted, uri,
+        posted,
         ready: () => onMessage({ type: 'ready' }),
         edit: text => onMessage({ type: 'edit', text }),
-        save: () => provider.saveCustomDocument(doc, {}),
+        updates: () => posted.filter(m => m.type === 'update'),
+        close: () => { for (const f of disposeListeners) f(); },
+    };
+}
+
+// Opens a file in the provider and hands back what a test needs to drive it.
+async function open(filePath, openContext = {}) {
+    const context = { extensionUri: uriFile('/ext'), globalState: { get: (_k, d) => d, update() {} } };
+    const provider = new CsvEditorProvider(context);
+    const uri = uriFile(filePath);
+    const doc = await provider.openCustomDocument(uri, openContext, {});
+    const tab = {
+        input: new TabInputCustom(uri, 'csvViewer.grid'), group, isActive: true, isDirty: false,
+        revert: () => provider.revertCustomDocument(doc, {}),
+    };
+    provider.onDidChangeCustomDocument(e => { if (e.document === doc) tab.isDirty = true; });
+    group.tabs.push(tab);
+    group.activeTab = tab;
+    // The watchers made for this file, see fireWatcher.
+    const own = [];
+    const watched = async fn => {
+        const before = watchers.length;
+        const result = await fn();
+        own.push(...watchers.slice(before));
+        return result;
+    };
+    const editor = await watched(() => attach(provider, doc));
+    return {
+        ...editor, provider, doc, uri, tab, watchers: own,
+        save: async () => {
+            await provider.saveCustomDocument(doc, {});
+            tab.isDirty = false;
+        },
         saveAs: dest => provider.saveCustomDocumentAs(doc, uriFile(dest), {}),
         backup: dest => provider.backupCustomDocument(doc, { destination: uriFile(dest) }, {}),
-        // The watcher's listeners fire and forget, so give the read a moment.
-        fireWatcher: async () => { for (const f of watcher.change) f(); await new Promise(r => setTimeout(r, 20)); },
-        updates: () => posted.filter(m => m.type === 'update'),
+        // A second editor on the same document, which VS Code opens for the
+        // modified side of a Source Control diff while the grid tab is open.
+        openSecondEditor: () => watched(() => attach(provider, doc)),
+        // The watchers' listeners fire and forget, so give the read a moment.
+        fireWatcher: async () => {
+            for (const w of own) if (!w.disposed) for (const f of w.change) f();
+            await new Promise(r => setTimeout(r, 20));
+        },
     };
 }
 
@@ -159,8 +240,7 @@ async function main() {
         await before.edit('h\nedited\n');
         const backup = await before.backup(path.join(tmpDir, 'hot2.backup'));
         const after = await open(p, { backupId: backup.id });
-        const reload = after.provider._reloaders.get(after.uri.toString());
-        assert.strictEqual(await reload(), true, 'Reload from Disk thought the restored edits were the file');
+        assert.strictEqual(await after.provider.reload(after.doc), true, 'Reload from Disk thought the restored edits were the file');
         assert.strictEqual(after.doc.content, 'h\nold\n');
     });
 
@@ -247,6 +327,70 @@ async function main() {
         assert.strictEqual(t.updates()[0].text, 'h\ntheirs\n');
     });
 
+    // Loading the disk under unsaved edits left the tab marked unsaved,
+    // although the grid now showed exactly the file. Closing it asked to
+    // save and hot exit kept it as unsaved. Only a save or a revert takes
+    // that mark off.
+    await test('Reload from Disk on the warning takes the unsaved mark off the tab', async () => {
+        const p = file('dirty-mark.csv', 'h\n1\n');
+        const t = await open(p);
+        await t.edit('h\nmine\n');
+        assert.strictEqual(t.tab.isDirty, true, 'the test did not reach a tab with unsaved edits');
+        fs.writeFileSync(p, 'h\ntheirs\n');
+        await t.fireWatcher();
+        warnings[0].pick('Reload from Disk');
+        await tick();
+        assert.strictEqual(t.doc.content, 'h\ntheirs\n', 'the action did not load the disk');
+        assert.deepStrictEqual(t.updates().map(m => m.text), ['h\ntheirs\n']);
+        assert.strictEqual(t.tab.isDirty, false, 'the tab is still marked unsaved');
+    });
+
+    await test('the Reload from Disk command takes the unsaved mark off the tab', async () => {
+        const p = file('dirty-mark-command.csv', 'h\n1\n');
+        const t = await open(p);
+        await t.edit('h\nmine\n');
+        fs.writeFileSync(p, 'h\ntheirs\n');
+        await t.provider.reloadActiveFromDisk();
+        await tick();
+        assert.strictEqual(t.doc.content, 'h\ntheirs\n', 'the command did not load the disk');
+        assert.deepStrictEqual(t.updates().map(m => m.text), ['h\ntheirs\n']);
+        assert.strictEqual(t.tab.isDirty, false, 'the tab is still marked unsaved');
+    });
+
+    // File > Revert File works on the editor in front. Run with another tab
+    // in front, it would throw away that tab's unsaved edits.
+    await test('Reload from Disk on the warning of a tab behind another reverts only its own tab', async () => {
+        const p = file('dirty-behind.csv', 'h\n1\n');
+        const t = await open(p);
+        await t.edit('h\nmine\n');
+        const front = await open(file('dirty-front.csv', 'x\n1\n'));
+        await front.edit('x\nFRONT UNSAVED\n');
+        fs.writeFileSync(p, 'h\ntheirs\n');
+        await t.fireWatcher();
+        warnings[0].pick('Reload from Disk');
+        await tick();
+        assert.strictEqual(front.doc.content, 'x\nFRONT UNSAVED\n', 'the tab in front lost its unsaved edits');
+        assert.strictEqual(front.tab.isDirty, true);
+        assert.strictEqual(t.doc.content, 'h\ntheirs\n', 'the action did not load the disk');
+        assert.strictEqual(t.tab.isDirty, false, 'the tab is still marked unsaved');
+    });
+
+    await test('Reload from Disk reverts no other tab when its own cannot come to the front', async () => {
+        const p = file('dirty-stuck.csv', 'h\n1\n');
+        const t = await open(p);
+        await t.edit('h\nmine\n');
+        const front = await open(file('dirty-stuck-front.csv', 'x\n1\n'));
+        await front.edit('x\nFRONT UNSAVED\n');
+        fs.writeFileSync(p, 'h\ntheirs\n');
+        await t.fireWatcher();
+        openWithFails = true;
+        warnings[0].pick('Reload from Disk');
+        await tick();
+        assert.strictEqual(front.doc.content, 'x\nFRONT UNSAVED\n', 'the tab in front lost its unsaved edits');
+        assert.strictEqual(front.tab.isDirty, true);
+        assert.strictEqual(t.doc.content, 'h\ntheirs\n', 'the action did not load the disk');
+    });
+
     await test('saving after the warning keeps the edits', async () => {
         const p = file('dirty-save.csv', 'h\n1\n');
         const t = await open(p);
@@ -258,6 +402,92 @@ async function main() {
         await t.fireWatcher();                          // the echo of that save
         assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\nmine\n');
         assert.strictEqual(t.updates().length, 0);
+    });
+
+    await test('an outside change after a failed save does not replace the edits', async () => {
+        const p = file('locked.csv', 'h\n1\n');
+        const t = await open(p);
+        await t.edit('h\nMY EDIT\n');
+        failNextWrite = true;
+        await assert.rejects(t.save(), /EBUSY/, 'the failed write did not reach VS Code');
+        fs.writeFileSync(p, 'h\nEXCEL\n');
+        await t.fireWatcher();
+        assert.strictEqual(t.doc.content, 'h\nMY EDIT\n', 'the outside change replaced the unsaved edit');
+        assert.strictEqual(t.updates().length, 0, 'the grid was reloaded over the unsaved edit');
+        assert.strictEqual(warnings.length, 1, 'the user was not told the file changed on disk');
+    });
+
+    await test('a change event after a failed save leaves the edits alone', async () => {
+        const p = file('locked-event.csv', 'h\n1\n');
+        const t = await open(p);
+        await t.edit('h\nMY EDIT\n');
+        failNextWrite = true;
+        await assert.rejects(t.save(), /EBUSY/);
+        await t.fireWatcher();                          // the file itself did not change
+        assert.strictEqual(t.doc.content, 'h\nMY EDIT\n', 'the grid went back to the old disk text');
+        assert.strictEqual(t.updates().length, 0);
+    });
+
+    // A Source Control diff of the file opens a second editor on the same
+    // document next to the grid tab. Each editor used to keep its own watcher
+    // and the provider kept only the last editor per file.
+    await test('an outside change reaches every editor of the file', async () => {
+        const p = file('two-editors.csv', 'a\n1\n');
+        const t = await open(p);
+        const diff = await t.openSecondEditor();
+        fs.writeFileSync(p, 'a\n2\n');
+        await t.fireWatcher();
+        assert.deepStrictEqual(t.updates().map(m => m.text), ['a\n2\n'], 'the grid tab kept the old text');
+        assert.deepStrictEqual(diff.updates().map(m => m.text), ['a\n2\n'], 'the diff kept the old text');
+    });
+
+    await test('Revert File reaches every editor of the file', async () => {
+        const p = file('two-editors-revert.csv', 'a\n1\n');
+        const t = await open(p);
+        const diff = await t.openSecondEditor();
+        await t.edit('a\nEDIT\n');
+        await t.provider.revertCustomDocument(t.doc, {});
+        const last = editor => (editor.updates().slice(-1)[0] || {}).text;
+        assert.strictEqual(last(t), 'a\n1\n', 'the grid tab still shows the reverted edit');
+        assert.strictEqual(last(diff), 'a\n1\n', 'the diff still shows the reverted edit');
+    });
+
+    await test('closing one editor leaves the other one working', async () => {
+        const p = file('two-editors-close.csv', 'a\n1\n');
+        const t = await open(p);
+        const diff = await t.openSecondEditor();
+        diff.close();
+        await t.edit('a\nEDIT\n');
+        await t.provider.revertCustomDocument(t.doc, {});
+        assert.deepStrictEqual(t.updates().map(m => m.text), ['a\n1\n'], 'Revert File no longer reached the grid tab');
+        fs.writeFileSync(p, 'a\n2\n');
+        await t.fireWatcher();
+        assert.deepStrictEqual(t.updates().map(m => m.text), ['a\n1\n', 'a\n2\n'], 'an outside change no longer reached the grid tab');
+        fs.writeFileSync(p, 'a\n3\n');
+        await t.provider.reloadActiveFromDisk();
+        assert.deepStrictEqual(warnings.map(w => w.msg), [], 'Reload from Disk refused an editable grid');
+        assert.strictEqual(t.doc.content, 'a\n3\n', 'Reload from Disk did not load the file');
+    });
+
+    await test('closing the last editor stops watching the file', async () => {
+        const p = file('two-editors-gone.csv', 'a\n1\n');
+        const t = await open(p);
+        const diff = await t.openSecondEditor();
+        diff.close();
+        assert.ok(t.watchers.some(w => !w.disposed), 'closing one of two editors stopped the watcher');
+        t.close();
+        assert.ok(t.watchers.every(w => w.disposed), 'the file is still watched with no editor open');
+    });
+
+    await test('an edit in one editor reaches the other', async () => {
+        // Each editor sends the whole text with every edit. An editor that
+        // missed the other's edit would write its own old text back over it.
+        const p = file('two-editors-edit.csv', 'a\n1\n');
+        const t = await open(p);
+        const diff = await t.openSecondEditor();
+        await diff.edit('a\nFROM THE DIFF\n');
+        assert.deepStrictEqual(t.updates().map(m => m.text), ['a\nFROM THE DIFF\n'], 'the grid tab missed the edit');
+        assert.strictEqual(diff.updates().length, 0, 'the editor that made the edit was sent it back');
     });
 
     await test('an unchanged document still reloads silently', async () => {
@@ -331,7 +561,8 @@ async function main() {
         const t = await open(p);
         fs.writeFileSync(p, Buffer.concat([BOM, Buffer.from('a,b\n1,2\n')]));
         await t.fireWatcher();
-        assert.strictEqual(t.doc.hasBom, true, 'the document missed the new byte order mark');
+        // The document keeps the mark as part of its encoding, utf8bom.
+        assert.strictEqual(t.doc.encoding, 'utf8bom', 'the document missed the new byte order mark');
         assert.strictEqual(t.updates().length, 0, 'the grid was reloaded although its text did not change');
         await t.edit('a,b\n1,3\n');
         await t.save();
@@ -343,7 +574,8 @@ async function main() {
         const t = await open(p);
         fs.writeFileSync(p, EXCEL.subarray(3));
         await t.fireWatcher();
-        assert.strictEqual(t.doc.hasBom, false, 'the document kept a byte order mark the file no longer has');
+        // utf8 is the encoding without the mark, see above.
+        assert.strictEqual(t.doc.encoding, 'utf8', 'the document kept a byte order mark the file no longer has');
         await t.edit('name,city\nJürgen,Köln\nAnna,Wien\n');
         await t.save();
         assert.strictEqual(fs.readFileSync(p, 'utf8'), 'name,city\nJürgen,Köln\nAnna,Wien\n');
@@ -353,9 +585,9 @@ async function main() {
         const p = file('bom-reload.csv', 'a\n1\n');
         const t = await open(p);
         fs.writeFileSync(p, Buffer.concat([BOM, Buffer.from('a\n1\n')]));
-        const reload = t.provider._reloaders.get(t.uri.toString());
-        assert.strictEqual(await reload(), true, 'Reload from Disk said the file was already up to date');
-        assert.strictEqual(t.doc.hasBom, true);
+        assert.strictEqual(await t.provider.reload(t.doc), true, 'Reload from Disk said the file was already up to date');
+        // The mark is part of the encoding, see above.
+        assert.strictEqual(t.doc.encoding, 'utf8bom');
     });
 
     await test('a byte order mark added outside under unsaved edits warns once and is kept', async () => {
@@ -371,6 +603,219 @@ async function main() {
         assert.ok(fs.readFileSync(p).equals(Buffer.concat([BOM, Buffer.from('a\nmine\n')])),
             'the save did not keep the byte order mark the file now has');
     });
+
+    // Excel's plain "CSV" is written in the Windows code page, Windows-1252 in
+    // Western Europe.
+    const ANSI_TEXT = 'Name;Stadt\r\nJörg;Köln\r\nAnna;Wien\r\n';
+    const ANSI = Buffer.from(ANSI_TEXT, 'latin1');
+    const ansi = text => Buffer.from(text, 'latin1');
+    const hex = p => fs.readFileSync(p).toString('hex');
+
+    await test('a Windows-1252 file shows its umlauts', async () => {
+        const t = await open(file('ansi-read.csv', ANSI));
+        assert.strictEqual(t.doc.content, ANSI_TEXT);
+    });
+
+    await test('editing one cell of a Windows-1252 file keeps every other byte', async () => {
+        const p = file('ansi-save.csv', ANSI);
+        const t = await open(p);
+        await t.edit('Name;Stadt\r\nJörg;Köln\r\nAnna;Graz\r\n');
+        await t.save();
+        assert.ok(fs.readFileSync(p).equals(ansi('Name;Stadt\r\nJörg;Köln\r\nAnna;Graz\r\n')), 'saved ' + hex(p));
+        await t.fireWatcher();                          // the echo of that save
+        assert.strictEqual(t.updates().length, 0, 'the echo of the save was taken for an outside change');
+        assert.strictEqual(warnings.length, 0);
+    });
+
+    await test('the Windows-1252 characters from 0x80 to 0x9F survive a save', async () => {
+        // The euro sign, typographic quotes and dashes plus the five bytes
+        // Windows-1252 leaves unassigned.
+        const high = Buffer.from(Array.from({ length: 32 }, (_, i) => 0x80 + i));
+        const p = file('ansi-high.csv', Buffer.concat([ansi('a;b\r\n'), high, ansi(';x\r\n')]));
+        const t = await open(p);
+        assert.ok(t.doc.content.includes('\u20AC'), 'the euro sign did not come through');
+        await t.edit(t.doc.content.replace(';x', ';y'));
+        await t.save();
+        assert.ok(fs.readFileSync(p).equals(Buffer.concat([ansi('a;b\r\n'), high, ansi(';y\r\n')])), 'saved ' + hex(p));
+    });
+
+    // Plain ASCII reads the same in UTF-8 and Windows-1252. A file without a
+    // byte above 0x7F is taken for UTF-8. Once the last umlaut of a
+    // Windows-1252 file was edited away, the echo of its save no longer looked
+    // like ours. With auto-save the next edit could land before it: the user
+    // was told the file changed on disk. Reload from Disk on that warning then
+    // threw the newest edit away.
+    await test('the echo of a Windows-1252 save without umlauts is ours, whatever edit came after it', async () => {
+        const p = file('ansi-ascii-echo.csv', ANSI);
+        const t = await open(p);
+        await t.edit('Name;Stadt\r\nAnna;Wien\r\n');
+        await t.save();
+        await t.edit('Name;Stadt\r\nAnna;Graz\r\n');   // auto-save's next edit, before the watcher reports the save
+        await t.fireWatcher();                          // the echo of that save
+        assert.deepStrictEqual(warnings.map(w => w.msg), [], 'the echo of our own save was taken for an outside change');
+        assert.strictEqual(t.updates().length, 0);
+        assert.strictEqual(t.doc.content, 'Name;Stadt\r\nAnna;Graz\r\n', 'the newest edit was lost');
+    });
+
+    await test('a Windows-1252 file stays Windows-1252 through the echo of a save without umlauts', async () => {
+        const p = file('ansi-ascii-stays.csv', ANSI);
+        const t = await open(p);
+        await t.edit('Name;Stadt\r\nAnna;Wien\r\n');
+        await t.save();
+        await t.fireWatcher();                          // the echo of that save
+        assert.strictEqual(t.doc.encoding, 'windows1252', 'the echo turned the document into UTF-8');
+        await t.edit('Name;Stadt\r\nAnna;Wien\r\nJörg;Köln\r\n');
+        await t.save();
+        assert.ok(fs.readFileSync(p).equals(ansi('Name;Stadt\r\nAnna;Wien\r\nJörg;Köln\r\n')), 'saved ' + hex(p));
+    });
+
+    await test('Revert File keeps a Windows-1252 file Windows-1252 when the disk holds no umlaut', async () => {
+        const p = file('ansi-ascii-revert.csv', ANSI);
+        const t = await open(p);
+        await t.edit('Name;Stadt\r\nAnna;Wien\r\n');
+        await t.save();
+        await t.edit('Name;Stadt\r\nAnna;Graz\r\n');
+        await t.provider.revertCustomDocument(t.doc, {});
+        assert.strictEqual(t.doc.content, 'Name;Stadt\r\nAnna;Wien\r\n');
+        assert.strictEqual(t.doc.encoding, 'windows1252', 'the revert turned the document into UTF-8');
+    });
+
+    // The two bytes of "Ã¶" in Windows-1252 are "ö" in UTF-8. A file left
+    // with nothing else above 0x7F reads back as other text than we wrote.
+    await test('the echo of a Windows-1252 save that reads as UTF-8 is still ours', async () => {
+        const p = file('ansi-mojibake.csv', ansi('Name\r\nJörg\r\nJÃ¶rg\r\n'));
+        const t = await open(p);
+        await t.edit('Name\r\nJÃ¶rg\r\n');
+        await t.save();
+        await t.fireWatcher();                          // the echo of that save
+        assert.strictEqual(t.updates().length, 0, 'the grid was handed ' + JSON.stringify((t.updates()[0] || {}).text));
+        assert.strictEqual(t.doc.content, 'Name\r\nJÃ¶rg\r\n');
+        await t.edit('Name\r\nJÃ¶rg\r\nAnna\r\n');
+        await t.save();
+        await t.edit('Name\r\nJÃ¶rg\r\nAnna\r\nEva\r\n');
+        await t.fireWatcher();                          // the echo, after the next edit
+        assert.deepStrictEqual(warnings.map(w => w.msg), [], 'the echo of our own save was taken for an outside change');
+        assert.strictEqual(t.doc.content, 'Name\r\nJÃ¶rg\r\nAnna\r\nEva\r\n', 'the newest edit was lost');
+    });
+
+    await test('Save As writes a Windows-1252 file in Windows-1252', async () => {
+        const t = await open(file('ansi-saveas.csv', ANSI));
+        const dest = path.join(tmpDir, 'ansi-saveas-copy.csv');
+        await t.saveAs(dest);
+        assert.ok(fs.readFileSync(dest).equals(ANSI), 'Save As wrote ' + hex(dest));
+    });
+
+    await test('a hot exit backup of a Windows-1252 file restores and saves the same bytes', async () => {
+        const p = file('ansi-backup.csv', ANSI);
+        const before = await open(p);
+        await before.edit('Name;Stadt\r\nJörg;Köln\r\nAnna;Graz\r\n');
+        const backup = await before.backup(path.join(tmpDir, 'ansi.backup'));
+        const after = await open(p, { backupId: backup.id });
+        assert.strictEqual(after.doc.content, 'Name;Stadt\r\nJörg;Köln\r\nAnna;Graz\r\n', 'the restore lost the umlauts');
+        await after.save();
+        assert.ok(fs.readFileSync(p).equals(ansi('Name;Stadt\r\nJörg;Köln\r\nAnna;Graz\r\n')), 'saved ' + hex(p));
+    });
+
+    await test('a restored Windows-1252 document stays Windows-1252 when its edits are plain ASCII', async () => {
+        // Nothing in plain ASCII tells Windows-1252 from UTF-8, so the
+        // encoding has to come back with the backup rather than be guessed.
+        const p = file('ansi-backup-ascii.csv', ANSI);
+        const before = await open(p);
+        await before.edit('Name;Stadt\r\nAnna;Graz\r\n');
+        const backup = await before.backup(path.join(tmpDir, 'ansi-ascii.backup'));
+        const after = await open(p, { backupId: backup.id });
+        await after.edit('Name;Stadt\r\nAnna;Gräz\r\n');
+        await after.save();
+        assert.ok(fs.readFileSync(p).equals(ansi('Name;Stadt\r\nAnna;Gräz\r\n')), 'saved ' + hex(p));
+    });
+
+    const UTF16_TEXT = 'name,city\r\nJürgen,Köln\r\n';
+    const UTF16_EDIT = 'name,city\r\nJürgen,Köln\r\nAnna,Wien\r\n';
+    const utf16 = (text, bigEndian) => {
+        const body = Buffer.from(text, 'utf16le');
+        return Buffer.concat([Buffer.from(bigEndian ? [0xFE, 0xFF] : [0xFF, 0xFE]), bigEndian ? body.swap16() : body]);
+    };
+    for (const [name, bigEndian] of [['LE', false], ['BE', true]]) {
+        await test(`a UTF-16 ${name} file keeps its encoding through an edit`, async () => {
+            const p = file(`utf16${name}.csv`, utf16(UTF16_TEXT, bigEndian));
+            const t = await open(p);
+            assert.strictEqual(t.doc.content, UTF16_TEXT, 'the grid did not get the text');
+            await t.edit(UTF16_EDIT);
+            await t.save();
+            assert.ok(fs.readFileSync(p).equals(utf16(UTF16_EDIT, bigEndian)), 'saved ' + hex(p));
+        });
+    }
+
+    await test('an edit Windows-1252 cannot hold saves the file as UTF-8 and says so', async () => {
+        const p = file('ansi-unencodable.csv', ANSI);
+        const t = await open(p);
+        const text = 'Name;Stadt\r\nJörg;Köln\r\nAnna;Łódź\r\n';
+        await t.edit(text);
+        await t.save();
+        assert.ok(fs.readFileSync(p).equals(Buffer.concat([BOM, Buffer.from(text, 'utf8')])),
+            'not saved as UTF-8 with a byte order mark: ' + hex(p));
+        assert.strictEqual(warnings.length, 1, 'the user was not told the file is UTF-8 now');
+        assert.match(warnings[0].msg, /UTF-8/);
+        await t.fireWatcher();                          // the echo of that save
+        assert.strictEqual(t.updates().length, 0, 'the echo of the save was taken for an outside change');
+        await t.edit(text + 'Eva;Graz\r\n');
+        await t.save();
+        assert.strictEqual(warnings.length, 1, 'the next save warned again');
+        assert.ok(fs.readFileSync(p).equals(Buffer.concat([BOM, Buffer.from(text + 'Eva;Graz\r\n', 'utf8')])));
+    });
+
+    await test('Save As of an edit Windows-1252 cannot hold writes UTF-8 and says so', async () => {
+        const p = file('ansi-unencodable-saveas.csv', ANSI);
+        const t = await open(p);
+        const text = 'Name;Stadt\r\nAnna;Łódź\r\n';
+        await t.edit(text);
+        const dest = path.join(tmpDir, 'ansi-unencodable-copy.csv');
+        await t.saveAs(dest);
+        assert.ok(fs.readFileSync(dest).equals(Buffer.concat([BOM, Buffer.from(text, 'utf8')])), 'Save As wrote ' + hex(dest));
+        assert.strictEqual(warnings.length, 1, 'the user was not told the copy is UTF-8');
+    });
+
+    await test('a failed save of an edit Windows-1252 cannot hold changes nothing', async () => {
+        const p = file('ansi-unencodable-locked.csv', ANSI);
+        const t = await open(p);
+        await t.edit('Name;Stadt\r\nAnna;Łódź\r\n');
+        failNextWrite = true;
+        await assert.rejects(t.save(), /EBUSY/);
+        assert.strictEqual(warnings.length, 0, 'the user was told of a save that did not happen');
+        assert.strictEqual(t.doc.encoding, 'windows1252', 'the document took the encoding of a save that failed');
+        await t.fireWatcher();                          // the file did not change
+        assert.strictEqual(warnings.length, 0, 'the untouched file was taken for an outside change');
+        assert.ok(fs.readFileSync(p).equals(ANSI));
+    });
+
+    await test('an outside change of the encoding alone is picked up', async () => {
+        const p = file('ansi-to-utf8.csv', ANSI);
+        const t = await open(p);
+        fs.writeFileSync(p, Buffer.from(ANSI_TEXT, 'utf8'));
+        await t.fireWatcher();
+        assert.strictEqual(t.doc.encoding, 'utf8', 'the document missed the new encoding');
+        assert.strictEqual(t.updates().length, 0, 'the grid was reloaded although its text did not change');
+        await t.edit('Name;Stadt\r\nJörg;Köln\r\nAnna;Graz\r\n');
+        await t.save();
+        assert.strictEqual(fs.readFileSync(p, 'utf8'), 'Name;Stadt\r\nJörg;Köln\r\nAnna;Graz\r\n');
+    });
+
+    // A preview reads only part of the file, so it decides the encoding by
+    // the start of it. Plain text reads all of it.
+    for (const mode of ['head', 'tail', 'chunked', 'plaintext']) {
+        await test(`a Windows-1252 file shows its umlauts in ${mode}`, async () => {
+            const text = 'id;city\n' + Array.from({ length: 1500 }, (_, i) => `${i};Köln ${i}`).join('\n') + '\n';
+            const p = file(`ansi-${mode}.csv`, ansi(text));
+            fakeSize = 60 * 1024 * 1024;
+            quickPickChoice = mode;
+            const t = await open(p);
+            assert.strictEqual(t.doc.isPreview, true, 'the test did not reach the preview');
+            await t.ready();
+            const shown = t.posted.find(m => m.type === 'init').text;
+            assert.ok(shown.includes('Köln'), 'the preview shows ' + JSON.stringify(shown.slice(0, 40)));
+            assert.ok(!shown.includes('\uFFFD'), 'the preview holds U+FFFD');
+        });
+    }
 
     fs.rmSync(tmpDir, { recursive: true, force: true });
     if (failures) { console.error(`\n${failures} test(s) failed`); process.exit(1); }

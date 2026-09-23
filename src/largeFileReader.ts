@@ -1,9 +1,14 @@
 import * as fs from 'fs';
+import { decodeWindows1252, startsAsUtf8 } from './encoding';
+
+// The encodings a preview reads, see readPreviewEncoding.
+export type PreviewEncoding = 'utf8' | 'windows1252';
 
 export interface RowPageIndex {
     offsets: number[];   // byte offset of the first byte of each page's first data record
     totalRows: number;
     headerLine: string;
+    encoding: PreviewEncoding;   // what readPage decodes the pages as
 }
 
 const QUOTE = 0x22;
@@ -22,8 +27,21 @@ function bomLength(buf: Buffer): number {
 
 // Decodes bytes that were read from `start` on. Only the very start of the
 // file can hold the mark.
-function decode(buf: Buffer, start: number): string {
+function decode(buf: Buffer, start: number, encoding: PreviewEncoding): string {
+    if (encoding === 'windows1252') return decodeWindows1252(buf);
     return buf.toString('utf8', start === 0 ? bomLength(buf) : 0);
+}
+
+// Open Full File reads a file that is not valid UTF-8 as Windows-1252, the way
+// Excel writes plain "CSV" (see encoding.ts). A preview reads only part of the
+// file, so it goes by the first 64 KB: UTF-8 unless they are not valid UTF-8.
+// A file whose first invalid byte comes later still shows U+FFFD there. A
+// preview cannot be saved, so that costs no data. A UTF-16 file cannot be
+// previewed readably at all: the scanners below look for the line break and
+// the quote as single bytes, which UTF-16 does not have.
+export async function readPreviewEncoding(filePath: string): Promise<PreviewEncoding> {
+    const start = await readRange(filePath, 0, 64 * 1024 - 1);
+    return startsAsUtf8(start) ? 'utf8' : 'windows1252';
 }
 
 // A CSV record is not a line: a quoted field may hold line breaks, so one record
@@ -38,7 +56,8 @@ function decode(buf: Buffer, start: number): string {
 // part of the value, as in 5" disk. Telling the two apart takes the delimiter,
 // which is why every reader below asks for it. Scanning bytes rather than
 // characters is safe because ", \n, \r and the delimiters the provider detects
-// are ASCII and never appear inside a multi-byte UTF-8 sequence.
+// are ASCII and never appear inside a multi-byte UTF-8 sequence. Windows-1252
+// has a single byte for every character.
 class RecordScanner {
     private inQuotes = false;
     // Whether the current field holds anything but leading spaces or tabs,
@@ -140,7 +159,12 @@ export async function readFirstLine(filePath: string): Promise<string> {
 }
 
 // Head preview: the first `recordCount` records, header included.
-export async function readFirstRecords(filePath: string, recordCount: number, delimiter: string): Promise<string> {
+export async function readFirstRecords(
+    filePath: string,
+    recordCount: number,
+    delimiter: string,
+    encoding: PreviewEncoding = 'utf8'
+): Promise<string> {
     const scanner = new RecordScanner(delimiter);
     const chunks: Buffer[] = [];
     let found = 0;
@@ -156,7 +180,7 @@ export async function readFirstRecords(filePath: string, recordCount: number, de
         chunks.push(buf);
     }
 
-    return decode(Buffer.concat(chunks), 0);
+    return decode(Buffer.concat(chunks), 0, encoding);
 }
 
 // Total records in the file, header included — the number the preview banner
@@ -176,7 +200,8 @@ export async function countRecords(filePath: string, delimiter: string): Promise
 export async function readTailRecords(
     filePath: string,
     recordCount: number,
-    delimiter: string
+    delimiter: string,
+    encoding: PreviewEncoding = 'utf8'
 ): Promise<{ content: string; totalRecordCount: number }> {
     const scanner = new RecordScanner(delimiter);
     // Start offsets of the records after the header. One slot more than asked
@@ -209,22 +234,27 @@ export async function readTailRecords(
     const totalRecordCount = ended + (scanner.remainderHasContent ? 1 : 0);
     if (headerEnd < 0) {
         // No record boundary at all: the whole file is one record.
-        return { content: decode(await readRange(filePath, 0), 0), totalRecordCount };
+        return { content: decode(await readRange(filePath, 0), 0, encoding), totalRecordCount };
     }
 
     const header = await readRange(filePath, 0, headerEnd - 1);
     const kept = Math.min(pushed, recordCount);
     if (kept === 0) {
-        return { content: decode(header, 0), totalRecordCount };
+        return { content: decode(header, 0, encoding), totalRecordCount };
     }
 
     const tail = await readRange(filePath, ring[(pushed - kept) % capacity]);
-    return { content: decode(Buffer.concat([header, tail]), 0), totalRecordCount };
+    return { content: decode(Buffer.concat([header, tail]), 0, encoding), totalRecordCount };
 }
 
 // ── F7: Chunked / Paged Mode ──
 
-export async function buildPageIndex(filePath: string, pageSize: number, delimiter: string): Promise<RowPageIndex> {
+export async function buildPageIndex(
+    filePath: string,
+    pageSize: number,
+    delimiter: string,
+    encoding: PreviewEncoding = 'utf8'
+): Promise<RowPageIndex> {
     const scanner = new RecordScanner(delimiter);
     const offsets: number[] = [];
     let base = 0;
@@ -261,14 +291,14 @@ export async function buildPageIndex(filePath: string, pageSize: number, delimit
 
     const headerLine = headerEnd < 0
         ? ''
-        : decode(await readRange(filePath, 0, headerEnd - 1), 0).replace(/\r?\n$/, '');
+        : decode(await readRange(filePath, 0, headerEnd - 1), 0, encoding).replace(/\r?\n$/, '');
 
-    return { offsets, totalRows: dataRows, headerLine };
+    return { offsets, totalRows: dataRows, headerLine, encoding };
 }
 
 export async function readPage(filePath: string, index: RowPageIndex, pageNum: number): Promise<string> {
     const startOffset = index.offsets[pageNum];
     const endOffset   = index.offsets[pageNum + 1]; // undefined = read to EOF
     const buf = await readRange(filePath, startOffset, endOffset === undefined ? undefined : endOffset - 1);
-    return index.headerLine + '\n' + decode(buf, startOffset);
+    return index.headerLine + '\n' + decode(buf, startOffset, index.encoding);
 }

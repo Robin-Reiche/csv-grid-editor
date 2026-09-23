@@ -273,6 +273,34 @@ async function main() {
         assert.strictEqual(await readFirstLine(file), 'id,city,note');
     });
 
+    // Excel's plain "CSV" is Windows-1252. Open Full File reads a file that is
+    // not valid UTF-8 that way (src/encoding.ts). The previews have to show
+    // the same text rather than U+FFFD for every umlaut.
+    await test('a Windows-1252 file reads the same in every preview', async () => {
+        const { readPreviewEncoding } = require('../out/largeFileReader.js');
+        const text = 'id;city\n1;Köln\n2;"München\nOst"\n3;Zürich\n';
+        const ansi = path.join(tmpDir, 'ansi.csv');
+        fs.writeFileSync(ansi, Buffer.from(text, 'latin1'));
+        const want = parseCsv(text, ';');
+        assert.strictEqual(await readPreviewEncoding(ansi), 'windows1252');
+        assert.strictEqual(await readPreviewEncoding(file), 'utf8', 'a UTF-8 file was taken for Windows-1252');
+        assert.strictEqual(await readFirstRecords(ansi, 10, ';', 'windows1252'), text);
+        const { content } = await readTailRecords(ansi, 2, ';', 'windows1252');
+        assert.deepStrictEqual(parseCsv(content, ';'), [want[0], ...want.slice(-2)]);
+        const index = await buildPageIndex(ansi, 2, ';', 'windows1252');
+        assert.deepStrictEqual(parseCsv(await readPage(ansi, index, 1), ';'), [want[0], want[3]]);
+    });
+
+    await test('a UTF-8 file cut in the middle of a character is still UTF-8', async () => {
+        // The encoding is taken from the first 64 KB, which can end half way
+        // through a character.
+        const { readPreviewEncoding } = require('../out/largeFileReader.js');
+        const head = 'id,note\n' + 'x'.repeat(CHUNK - 9) + 'ö\n';
+        assert.strictEqual(Buffer.byteLength(head.slice(0, -2)), CHUNK - 1, 'the ö does not straddle the 64 KB mark');
+        const cut = fixture('utf8-cut.csv', head + '1,Köln\n');
+        assert.strictEqual(await readPreviewEncoding(cut), 'utf8');
+    });
+
     // ── wiring ──────────────────────────────────────────────────────────────
 
     await test('the paged view hands its record total to the banner', () => {

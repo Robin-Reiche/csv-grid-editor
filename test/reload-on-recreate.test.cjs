@@ -40,19 +40,26 @@ test('both listeners run the same reload path', () => {
     const change = src.match(/watcher\.onDidChange\(([^\n]*)\)/);
     const create = src.match(/watcher\.onDidCreate\(([^\n]*)\)/);
     assert.ok(change && create, 'could not read both listener bodies');
-    // reload(true): the watcher's variant, which also ignores a late echo of our
-    // own save (test/autosave-echo.test.cjs). Both events have to use it.
-    assert.ok(/reload\(true\)/.test(change[1]), 'onDidChange does not call reload(true)');
-    assert.ok(/reload\(true\)/.test(create[1]), 'onDidCreate does not call reload(true)');
+    // reload(document, true): the watcher's variant, which also ignores a late
+    // echo of our own save (test/autosave-echo.test.cjs). Both events have to
+    // use it. The reload takes the document first because there is one per
+    // document, shared by every editor that shows it.
+    assert.ok(/reload\(document, true\)/.test(change[1]), 'onDidChange does not call reload(document, true)');
+    assert.ok(/reload\(document, true\)/.test(create[1]), 'onDidCreate does not call reload(document, true)');
 });
 
 test('reload still ignores the echo of our own save', () => {
-    // The guard compares the byte order mark as well. Text alone would take a
-    // program that only adds or removes the mark for our own echo. The
-    // document would keep the mark as it was. The next save would then write
-    // that back.
-    assert.ok(/if \(text === document\.content && hasBom === document\.hasBom\) return false;/.test(src),
+    // The guard compares the file's bytes with the bytes a save of the
+    // document's text writes in the document's encoding. Comparing the text
+    // read back from the file and its detected encoding was not enough: plain
+    // ASCII reads as UTF-8 whatever it was written in, so the save of a
+    // Windows-1252 file without umlauts looked like another program's. The
+    // bytes carry the encoding and the byte order mark too, so a program that
+    // only changes those is still not taken for our own echo.
+    assert.ok(/if \(holds\(document\.content\)\) return false;/.test(src),
         'the identical-content guard is gone — saving would wipe frozen rows');
+    assert.ok(/const bytes = encodeFile\(text, document\.encoding\);\s*return !!bytes && Buffer\.compare\(bytes, raw\) === 0;/.test(src),
+        'the guard no longer compares what a save writes with the bytes on disk');
 });
 
 test('reload command is declared in package.json', () => {
