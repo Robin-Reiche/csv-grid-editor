@@ -10,7 +10,7 @@ import { resetDuplicatesState } from './features/duplicates';
 import { frozenRowPositions, reanchorFrozenRows } from './features/freeze-rows';
 import { loadRows, rowsInFile } from './features/header-row';
 import { updateSettingsButton } from './features/settings-menu';
-import { closeAllPopups } from './features/popups';
+import { closePlacedPopups } from './features/popups';
 import { closeRenamePopover } from './features/rename-column';
 
 // The preview banner of Show Head and Show Tail: how many of the file's rows
@@ -44,7 +44,7 @@ export function readText(text: string): void {
     // took the row that had moved into that place, Delete column took its
     // neighbour and Rename wrote a header wider than the rows. They close
     // like the editor. A pending rename is given up.
-    closeAllPopups();
+    closePlacedPopups();
     closeRenamePopover();
     state.rawCsvText = text;
     // Untrimmed: the file's values exactly, see parseCsv.

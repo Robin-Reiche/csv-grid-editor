@@ -51,6 +51,25 @@ runSuite('menus across an outside change (browser)', [
         `),
     },
     {
+        // Menus that hold no row or column stay open. A file another program
+        // rewrites every few seconds, a growing log, closed them under the user
+        // before they could pick anything.
+        name: 'the settings menu and the export list stay open',
+        csv: 'k,v\nA,1\nB,2\n',
+        steps: steps(`
+            document.getElementById('btn-settings').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(150);
+            t.check(t.shown('settings-popover'), 'the settings menu opens');
+            await t.update('k,v\\nA,1\\nB,2\\nC,3\\n');
+            t.check(t.shown('settings-popover'), 'it stays open across the outside change');
+            document.getElementById('btn-export').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(150);
+            t.check(t.shown('export-dropdown'), 'the export list opens');
+            await t.update('k,v\\nA,1\\nB,2\\nC,3\\nD,4\\n');
+            t.check(t.shown('export-dropdown'), 'and stays open too');
+        `),
+    },
+    {
         name: 'the column menu closes',
         csv: 'k,v\nA,1\nB,2\n',
         steps: steps(`
@@ -88,13 +107,21 @@ runSuite('menus across an outside change (browser)', [
         name: 'the keys go back to the grid from a closed popover',
         csv: 'k,v\nA,1\nB,2\nC,3\n',
         steps: steps(`
+            // The column chooser lists the columns by index, so it closes on an
+            // outside change. Its search box had the keyboard.
             await t.focusCell(1, 1);
+            document.getElementById('btn-columns').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(200);
+            t.check(t.shown('col-chooser-popover') && t.onCell() === 'INPUT', 'the column chooser has the keyboard (' + t.onCell() + ')');
+            await t.update('k,v\\nA,1\\nB,2\\nC,3\\nD,4\\n');
+            t.check(!t.shown('col-chooser-popover'), 'the column chooser is closed');
+            t.check(t.onCell() === '1/col_1', 'the keyboard is back on the cell (' + t.onCell() + ')');
+            // Go to row holds no row until Go is pressed, so it stays open for
+            // the number being typed.
             document.getElementById('btn-go-to-row').dispatchEvent(new MouseEvent('click', { bubbles: true }));
             await t.wait(200);
-            t.check(t.shown('goto-popover') && t.onCell() === 'INPUT', 'Go to row has the keyboard (' + t.onCell() + ')');
-            await t.update('k,v\\nA,1\\nB,2\\nC,3\\nD,4\\n');
-            t.check(!t.shown('goto-popover'), 'Go to row is closed');
-            t.check(t.onCell() === '1/col_1', 'the keyboard is back on the cell (' + t.onCell() + ')');
+            await t.update('k,v\\nA,1\\nB,2\\nC,3\\nD,4\\nE,5\\n');
+            t.check(t.shown('goto-popover'), 'Go to row stays open');
         `),
     },
 ]);

@@ -157,7 +157,7 @@ function writeCellValue(node: any, colField: string | undefined, newValue: unkno
 // file after the save. The file was saved without it and the tab showed it as
 // saved. The value is committed and written here, while the key is still on
 // its way. The edit message then reaches VS Code before the key does.
-export function commitOpenEditor(): void {
+export function commitOpenEditor(keepFocus = true): void {
     const api = state.gridApi;
     const cell = api?.getEditingCells()[0];
     if (!cell) return;
@@ -167,8 +167,9 @@ export function commitOpenEditor(): void {
     api.stopEditing();
     // Enter hands the keyboard back to the cell. stopEditing() does not, so
     // the focus fell to the page and the arrow keys and typing went nowhere
-    // until the next click.
-    api.setFocusedCell(cell.rowIndex, cell.column, cell.rowPinned);
+    // until the next click. Not when the page is losing the focus: taking it
+    // back would pull it out of the menu or view the user just clicked.
+    if (keepFocus) api.setFocusedCell(cell.rowIndex, cell.column, cell.rowPinned);
     const colId = cell.column.getColId();
     if (node?.data) writeCellValue(node, colId, node.data[colId]);
 }

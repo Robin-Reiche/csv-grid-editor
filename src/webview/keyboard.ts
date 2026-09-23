@@ -129,6 +129,12 @@ function copiedCell(): { node: any; colId: string } | null {
 export function setupKeyboard(): void {
     document.addEventListener('keydown', onGridShortcut, true /* capture */);
     document.addEventListener('keydown', onSaveKey, true /* capture */);
+    // Every other way to save starts outside the page: File > Save from the
+    // menu, Save All by its key chord, a click on another editor that auto-save
+    // follows. Each takes the focus out of the page first, and an open cell
+    // editor kept its value to itself, so the file was saved without it and
+    // the tab looked saved. The value is written as the page loses the focus.
+    window.addEventListener('blur', () => commitOpenEditor(false));
 
     document.addEventListener('keydown', e => {
         // Single-cell copy. Multi-cell range copy is handled in capture phase by

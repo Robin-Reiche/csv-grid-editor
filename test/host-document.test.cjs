@@ -164,7 +164,7 @@ Module._load = function (request, ...rest) {
     return load.call(this, request, ...rest);
 };
 
-const { CsvEditorProvider } = require('../out/csvEditorProvider.js');
+const { CsvEditorProvider, sameResource } = require('../out/csvEditorProvider.js');
 
 let failures = 0;
 async function test(name, fn) {
@@ -1227,6 +1227,40 @@ async function main() {
             assert.strictEqual(u.doc.delimiter, ';', 'the file with decimal commas');
         });
     }
+
+    // Only a file with no LF at all ends its first line at a CR. A CR inside
+    // the header of an LF or CRLF file cut the line short, so the separators
+    // after it were not counted and a semicolon file opened split at commas.
+    for (const [eol, name] of [['\n', 'LF'], ['\r\n', 'CRLF']]) {
+        await test(`a CR inside the header of a ${name} file does not end the first line`, async () => {
+            const text = ['"Name\rZusatz";Stadt;Land', 'A;B;C', 'D;E;F'].join(eol) + eol;
+            const t = await open(file(`delim-cr-in-${name}.csv`, text));
+            assert.strictEqual(t.doc.delimiter, ';');
+            const { readFirstLine } = require('../out/largeFileReader.js');
+            assert.strictEqual(await readFirstLine(t.uri.fsPath), '"Name\rZusatz";Stadt;Land',
+                'the first line the previews detect from');
+        });
+    }
+
+    await test('Save As onto the file itself is recognized the way VS Code names files', () => {
+        // On Windows and macOS VS Code takes Data.csv and data.csv for the same
+        // file, so Save As typed in another case is a save of the file itself.
+        const a = uriFile('C:\\work\\data.csv');
+        const b = uriFile('C:\\Work\\Data.csv');
+        assert.strictEqual(sameResource(a, b, 'win32'), true);
+        assert.strictEqual(sameResource(a, b, 'darwin'), true);
+        assert.strictEqual(sameResource(a, b, 'linux'), false, 'Linux file names are case sensitive');
+        assert.strictEqual(sameResource(a, uriFile('C:\\work\\other.csv'), 'win32'), false);
+        assert.strictEqual(sameResource(a, uriGit('C:\\work\\data.csv'), 'win32'), false, 'a git side is not the file');
+    });
+
+    await test('a quoted header name right behind a byte order mark is read as quoted', async () => {
+        const { readFirstLine } = require('../out/largeFileReader.js');
+        const p = file('bom-quoted-header.csv', Buffer.concat([BOM, Buffer.from('"Name, Vorname";Stadt\nA;B\n')]));
+        assert.strictEqual(await readFirstLine(p), '"Name, Vorname";Stadt');
+        const t = await open(p);
+        assert.strictEqual(t.doc.delimiter, ';');
+    });
 
     // The previews of a large Mac file read it as one record: all of it went
     // to the grid, the banner said "of 0 rows" and the paged view put every

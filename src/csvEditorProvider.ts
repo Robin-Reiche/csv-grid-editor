@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { createHash } from 'crypto';
 import { getWebviewContent } from './webview';
+import { firstLineOf } from './webview/utils/csv';
 import { SETTING_DEFAULTS, isSettingKey, type Settings, type SettingKey } from './webview/settings';
 import {
     RowPageIndex,
@@ -128,6 +129,15 @@ function watchPattern(fileName: string): string {
     return fileName
         .replace(/[[\]{}*?]/g, '[$&]')
         .replace(/^\s+|\s+$/g, spaces => spaces.replace(/[\s\S]/g, '[$&]'));
+}
+
+// Whether two URIs name the same file the way VS Code decides it: paths are
+// compared without regard to case except on Linux, where file names are case
+// sensitive. Save As onto data.csv typed as Data.csv on Windows is Save As
+// onto the file itself, and VS Code keeps the document open for it.
+export function sameResource(a: vscode.Uri, b: vscode.Uri, platform: string = process.platform): boolean {
+    if (a.scheme !== 'file' || b.scheme !== 'file') return a.toString() === b.toString();
+    return platform === 'linux' ? a.fsPath === b.fsPath : a.fsPath.toLowerCase() === b.fsPath.toLowerCase();
 }
 
 class CsvDocument implements vscode.CustomDocument {
@@ -834,7 +844,7 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         // and writing that produced a truncated or empty copy. A preview cannot
         // be edited, so the file on disk is exactly what Save As should give.
         if (document.isPreview) {
-            if (destination.toString() !== document.uri.toString()) {
+            if (!sameResource(destination, document.uri)) {
                 await vscode.workspace.fs.copy(document.uri, destination, { overwrite: true });
                 this.copyHeaderRow(document.uri, destination);
             }
@@ -845,7 +855,7 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         // document went on taking the text from before for the disk's: an
         // outside change after it was ignored or reported as clashing with
         // unsaved edits the tab did not have.
-        if (destination.toString() === document.uri.toString()) {
+        if (sameResource(destination, document.uri)) {
             return this.saveCustomDocument(document, cancellation);
         }
         const { bytes, encoding } = document.encode();
@@ -894,9 +904,13 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
 
     private detectDelimiter(fileName: string, content: string): string {
         if (fileName.endsWith('.tsv')) return '\t';
-        // The first line ends at a CR as well. A classic Mac file has no LF,
-        // so the separators of the whole file were counted.
-        const firstLine = content.slice(0, content.search(/[\r\n]|$/));
+        // The first line ends where the grid ends the first row (firstLineOf):
+        // counting to an LF in a classic Mac file counted the separators of the
+        // whole file, and cutting at any CR split a header whose quoted name
+        // holds one.
+        // Separators inside a quoted name are part of the name and do not
+        // count: "Name, Vorname";Stadt is a semicolon file.
+        const firstLine = firstLineOf(content).replace(/"(?:[^"]|"")*"/g, '');
         const semicolons = (firstLine.match(/;/g) || []).length;
         const commas     = (firstLine.match(/,/g) || []).length;
         const tabs       = (firstLine.match(/\t/g) || []).length;

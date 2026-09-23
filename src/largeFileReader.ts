@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import { decodeUtf8KeepingStrays, decodeWindows1252, startsAsUtf8 } from './encoding';
+import { firstLineOf } from './webview/utils/csv';
 
 // The encodings a preview reads, see readPreviewEncoding. utf8bom is UTF-8
 // behind a byte order mark, whose stray bytes read as Windows-1252.
@@ -205,18 +206,14 @@ async function scannerFor(filePath: string, delimiter: string): Promise<RecordSc
 // The line ends at the first CR as well as at the first LF. A classic Mac file
 // has no LF, so its separators were counted up to that cap.
 export async function readFirstLine(filePath: string): Promise<string> {
-    const chunks: Buffer[] = [];
-    let size = 0;
-    for await (const chunk of fs.createReadStream(filePath, { highWaterMark: 64 * 1024 })) {
-        const buf = chunk as Buffer;
-        const lf = buf.indexOf(LF);
-        const cr = buf.indexOf(CR);
-        const end = cr >= 0 && (lf < 0 || cr < lf) ? cr : lf;
-        chunks.push(end < 0 ? buf : buf.subarray(0, end));
-        size += buf.length;
-        if (end >= 0 || size >= 1024 * 1024) break;
-    }
-    return Buffer.concat(chunks).toString('utf8');
+    // Where the first line ends depends on the quotes and, in a classic Mac
+    // file, on there being no LF outside them at all, so it is decided on a
+    // prefix the way the provider decides it on a whole text (firstLineOf).
+    // The prefix is capped: a header longer than 1 MB is cut there.
+    // A byte order mark in front would keep a quote right behind it from
+    // counting as the start of a field.
+    const prefix = await readRange(filePath, 0, 1024 * 1024);
+    return firstLineOf(prefix.toString('utf8').replace(/^\uFEFF/, ''));
 }
 
 // Head preview: the first `recordCount` records, header included.

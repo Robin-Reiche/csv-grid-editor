@@ -24,6 +24,18 @@ const POPUP_IDS = [
     'rename-popover',
 ];
 
+// The popups that act on a row or a column by its place: the row menu, the
+// column menu and the column chooser, which lists the columns by index. When
+// the rows are replaced from outside, whatever they point at may have moved,
+// so they close. The others (settings, export, delimiter, Go to row) hold no
+// place and stay open: closing them on every outside change shut them under
+// the user of a file another program keeps rewriting.
+export function closePlacedPopups(): void {
+    for (const id of ['row-context-menu', 'col-context-menu', 'col-chooser-popover']) {
+        document.getElementById(id)?.classList.add('hidden');
+    }
+}
+
 // Hide every popup except the one about to be shown (pass its id as `except` to
 // avoid a redundant hide-then-show of the same element).
 export function closeAllPopups(except?: string): void {

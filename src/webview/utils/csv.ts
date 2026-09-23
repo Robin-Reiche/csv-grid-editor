@@ -189,6 +189,36 @@ export function parseCsv(text: string, delimiter: string, trimFields: boolean = 
 // module writes on Windows. A lone CR ends the rows of a classic Mac file.
 export type LineFormat = { eol: '\n' | '\r\n' | '\r\r\n' | '\r'; finalNewline: boolean };
 
+// The first line of a file, for detecting its delimiter before the delimiter
+// is known. It ends where parseCsv would end the first row: at the first LF
+// outside a quoted value, or, in a file with no such LF at all, at the first
+// CR outside one (a classic Mac file, see rowsEndWithCr). The delimiter is not
+// known yet, so a quote opens a quoted value after any of the delimiters the
+// grid offers. That is what matters here: a line break inside a quoted header
+// name does not end the line, and an inch mark further into a name does not
+// open a quote. The CR of a CRLF row end is left off.
+export function firstLineOf(text: string): string {
+    let inQuotes = false;
+    let fieldStart = true;
+    let firstCr = -1;
+    for (let i = 0; i < text.length; i++) {
+        const ch = text[i];
+        if (inQuotes) {
+            if (ch === '"') {
+                if (text[i + 1] === '"') i++;
+                else inQuotes = false;
+            }
+            continue;
+        }
+        if (ch === '"' && fieldStart) { inQuotes = true; continue; }
+        if (ch === '\n') return text.slice(0, i).replace(/\r+$/, '');
+        if (ch === '\r') { if (firstCr < 0) firstCr = i; fieldStart = true; continue; }
+        if (ch === ',' || ch === ';' || ch === '\t' || ch === '|') { fieldStart = true; continue; }
+        if (ch !== ' ') fieldStart = false;
+    }
+    return firstCr >= 0 ? text.slice(0, firstCr) : text;
+}
+
 // Reads the line format from the text parseCsv is about to split into rows. It
 // counts only the breaks that end a row, so it tracks quotes exactly the way
 // parseCsv does and has to stay in step with it. A break inside a quoted value

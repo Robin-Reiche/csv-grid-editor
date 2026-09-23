@@ -160,6 +160,28 @@ runSuite('keyboard (browser)', [
         `),
     },
     {
+        // File > Save from the menu, Save All by its key chord or a click
+        // anywhere else in VS Code takes the focus out of the page first. The
+        // editor stayed open, so the save wrote the file without the value and
+        // the tab looked saved.
+        name: 'leaving the page saves the value being typed',
+        csv: 'name,city\nAnna,Berlin\nBen,Oslo\n',
+        steps: steps(`
+            const ta = await t.type(0, 1, 'TYPED');
+            if (!ta) return;
+            window.dispatchEvent(new FocusEvent('blur'));
+            t.check(t.lastEdit() === 'name,city\\nAnna,TYPED\\nBen,Oslo\\n', 'the edit is sent as the page loses the focus ('
+                + JSON.stringify(t.lastEdit()) + ')');
+            await t.wait(300);
+            t.check(!document.querySelector('#grid-container textarea'), 'the editor is closed');
+            t.check(t.sent('edit').length === 1, 'the value is written once (' + t.sent('edit').length + ')');
+            // Without an open editor leaving the page writes nothing.
+            window.dispatchEvent(new FocusEvent('blur'));
+            await t.wait(100);
+            t.check(t.sent('edit').length === 1, 'a second blur writes nothing');
+        `),
+    },
+    {
         name: 'Ctrl+S with the value unchanged writes nothing',
         csv: 'name,city\nAnna,Berlin\n',
         steps: steps(`
