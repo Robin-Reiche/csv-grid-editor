@@ -130,6 +130,19 @@ function makeComparator(colType: string): (a: string, b: string) => number {
 // listener must be attached once — not re-added on every buildGrid call.
 let dblclickWired = false;
 
+// The toolbar's Clear filters button is up while any filter is on. A grid built
+// fresh has no column filters but raises no filter change to say so. buildGrid
+// calls this itself for that reason. Otherwise the button would stay up after a
+// rebuild dropped the filters: insert or delete column, a delimiter switch, an
+// outside change or an undo that alters the columns.
+function syncClearFiltersButton(): void {
+    const on  = !!state.gridApi?.isAnyFilterPresent();
+    const btn = document.getElementById('btn-clear-filters');
+    const sep = document.getElementById('sep-filters');
+    if (btn) btn.style.display = on ? '' : 'none';
+    if (sep) sep.style.display = on ? '' : 'none';
+}
+
 export function buildGrid(): void {
     // No columns to build: an empty file, or every column deleted. This used to
     // return and leave a blank area with nothing to click (issue #40). Tear down
@@ -142,6 +155,7 @@ export function buildGrid(): void {
         state.focusedCellRowIndex = null;
         renderNoColumns(document.getElementById('grid-container')!);
         updateCountsDisplay();
+        syncClearFiltersButton();
         updateButtons();
         return;
     }
@@ -373,11 +387,7 @@ export function buildGrid(): void {
         onFilterChanged: () => {
             clearRangeSelection();
             state.gridApi?.refreshCells({ columns: ['row-index'], force: true });
-            const isAnyFilter = state.gridApi?.isAnyFilterPresent();
-            const cfBtn = document.getElementById('btn-clear-filters') as HTMLButtonElement | null;
-            const sepBtn = document.getElementById('sep-filters') as HTMLElement | null;
-            if (cfBtn) cfBtn.style.display = isAnyFilter ? '' : 'none';
-            if (sepBtn) sepBtn.style.display = isAnyFilter ? '' : 'none';
+            syncClearFiltersButton();
 
             updateCountsDisplay();
         },
@@ -422,6 +432,7 @@ export function buildGrid(): void {
     }
 
     updateCountsDisplay();
+    syncClearFiltersButton();
     refreshProfileIfOpen(); // column add/delete changes the column set the profile shows
 
     setTimeout(attachHeaderContextMenus, 80);

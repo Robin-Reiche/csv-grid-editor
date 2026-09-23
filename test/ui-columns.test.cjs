@@ -4,11 +4,12 @@
 // add, remove or rename a column. An outside change to the file, undo and
 // redo of a column insert or delete all arrive that way. The grid kept the
 // old columns: a restored column stayed invisible, a removed one stayed on
-// screen and renamed headers kept their old names. The type badge and the
-// header tooltip went stale after an undo, a rename or the "Hide spaces"
-// switch, while the cells already used the new type. A column with no name in
-// the header row lost its type on every row swap: its badge read Text and its
-// checkboxes turned back into words.
+// screen and renamed headers kept their old names. Building the columns again
+// drops the column filters, yet the Clear filters button stayed up. The type
+// badge and the header tooltip went stale after an undo, a rename or the
+// "Hide spaces" switch, while the cells already used the new type. A column
+// with no name in the header row lost its type on every row swap: its badge
+// read Text and its checkboxes turned back into words.
 //
 // Run after `tsc -p ./`:  node test/ui-columns.test.cjs
 
@@ -61,6 +62,20 @@ const HELPERS = `
         item.dispatchEvent(new MouseEvent('click', { bubbles: true }));
         await t.wait(400);
     };
+    // Unticks one value in a column's value filter.
+    t.filterOut = async (col, value) => {
+        t.click(t.header(col).querySelector('.ag-header-cell-filter-button, .ag-header-cell-menu-button'));
+        await t.wait(300);
+        const row = [...document.querySelectorAll('.csv-filter-value-row')].find(r => r.textContent === value);
+        if (!row) { t.check(false, 'the filter lists ' + value); return; }
+        const cb = row.querySelector('input');
+        cb.checked = false;
+        cb.dispatchEvent(new Event('change'));
+        await t.wait(300);
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        await t.wait(200);
+    };
+    t.shown = (id) => document.getElementById(id).style.display !== 'none';
     t.edit = async (row, col, value) => {
         await t.focusCell(row, col);
         await t.pressEnter();
@@ -187,6 +202,18 @@ runSuite('columns (browser)', [
             await t.update('a,b\\n1,2');
             await t.update('a,b,x\\n1,2,3');
             t.check(t.names() === 'a|b|x|-', 'a column that comes back later is a new one and is shown (' + t.names() + ')');
+        `),
+    },
+    {
+        name: 'a rebuild turns the Clear filters button off',
+        csv: 'city,n\nBerlin,1\nParis,2\nRome,3',
+        steps: steps(`
+            await t.filterOut(0, 'Rome');
+            t.check(t.col(0) === 'Berlin,Paris', 'Rome is filtered out (' + t.col(0) + ')');
+            t.check(t.shown('btn-clear-filters') && t.shown('sep-filters'), 'the Clear filters button is up');
+            await t.update('city,n,x\\nBerlin,1,1\\nParis,2,2\\nRome,3,3');
+            t.check(t.col(0) === 'Berlin,Paris,Rome', 'the new columns start without a filter (' + t.col(0) + ')');
+            t.check(!t.shown('btn-clear-filters') && !t.shown('sep-filters'), 'so the button goes away');
         `),
     },
 
