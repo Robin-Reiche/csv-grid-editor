@@ -33,6 +33,20 @@ const FIND = `
     item.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await t.wait(300);
   }
+  // Right-clicks a cell of the row and picks the named entry of the row menu.
+  async function rowMenu(t, row, label) {
+    const c = t.cell(row, 0);
+    const r = c.getBoundingClientRect();
+    c.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 5, clientY: r.top + 5 }));
+    await t.wait(200);
+    const item = [...document.querySelectorAll('#row-context-menu .row-ctx-item')].find(i => i.textContent === label);
+    if (!item) { t.check(false, 'the row menu offers ' + label); return; }
+    item.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await t.wait(400);
+  }
+  // The rows of the grid that hold the active mark, as the cells there read.
+  const activeAt = () => [...document.querySelectorAll('#grid-container .ag-center-cols-container .cell-find-active')]
+    .map(el => el.closest('.ag-row').getAttribute('row-index') + ':' + el.textContent).join(',');
   const frozen = (c) => document.querySelector('#grid-container .ag-floating-top .ag-cell[col-id="col_' + c + '"]');
   const marks = (el) => !el ? '-' : el.classList.contains('cell-find-active') ? 'active'
     : el.classList.contains('cell-find-match') ? 'match' : 'none';
@@ -549,6 +563,213 @@ runSuite('find and replace (browser)', [
             t.check(marks(frozen(0)) === 'none' && marks(t.cell(0, 0)) !== 'none' && marks(t.cell(1, 0)) !== 'none',
                 'both b rows below it are marked and the frozen x row is not ('
                 + [marks(frozen(0)), marks(t.cell(0, 0)), marks(t.cell(1, 0))].join(',') + ')');
+        `),
+    },
+    {
+        // A match remembered its row by the place it had in the file. Deleting
+        // a row above moved every row below up by one, so the search that ran
+        // again looked for the active match one row too far down. The counter
+        // went back to 1 and Replace took the first match of the file.
+        name: 'deleting a row above keeps the active match',
+        csv: 'k,v\na,apple\nb,x\nc,apple\nd,apple',
+        steps: steps(`
+            await t.init(csv);
+            await find(t, 'apple', 'R');
+            await press(t, 'find-next');
+            await press(t, 'find-next');
+            t.check(count() === '3 / 3' && activeAt() === '3:apple', 'Next moved to the d row (' + count() + ', ' + activeAt() + ')');
+            await rowMenu(t, 1, 'Delete row');
+            t.check(t.lastEdit() === 'k,v\\na,apple\\nc,apple\\nd,apple', 'the b row is deleted (' + JSON.stringify(t.lastEdit()) + ')');
+            t.check(count() === '3 / 3' && activeAt() === '2:apple', 'the d row keeps the active match (' + count() + ', ' + activeAt() + ')');
+            await press(t, 'replace-one');
+            t.check(t.lastEdit() === 'k,v\\na,apple\\nc,apple\\nd,R', 'Replace takes the d row (' + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
+    {
+        name: 'inserting a row above keeps the active match',
+        csv: 'k,v\na,apple\nb,apple\nc,apple',
+        steps: steps(`
+            await t.init(csv);
+            await find(t, 'apple', 'R');
+            await press(t, 'find-next');
+            t.check(count() === '2 / 3', 'Next moved to the b row (' + count() + ')');
+            await rowMenu(t, 0, 'Insert row above');
+            t.check(t.lastEdit() === 'k,v\\n,\\na,apple\\nb,apple\\nc,apple', 'a row is added on top (' + JSON.stringify(t.lastEdit()) + ')');
+            t.check(count() === '2 / 3' && activeAt() === '2:apple', 'the b row keeps the active match (' + count() + ', ' + activeAt() + ')');
+            await press(t, 'replace-one');
+            t.check(t.lastEdit() === 'k,v\\n,\\na,apple\\nb,R\\nc,apple', 'Replace takes the b row (' + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
+    {
+        // An insert under a sort writes the sorted order into the file first,
+        // which moves nearly every row.
+        name: 'an insert under a sort keeps the active match',
+        csv: 'k,v\n1,apple\n2,x\n3,apple\n4,x\n5,apple\n6,x',
+        steps: steps(`
+            await t.init(csv);
+            const label = t.header(0).querySelector('.ag-header-cell-label');
+            label.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(300);
+            label.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(300);
+            t.check(col(t, 0, 6) === '6,5,4,3,2,1', 'sorted by k, highest first (' + col(t, 0, 6) + ')');
+            await find(t, 'apple', 'R');
+            await press(t, 'find-next');
+            t.check(count() === '2 / 3' && activeAt() === '3:apple', 'Next moved to the row of 3 (' + count() + ', ' + activeAt() + ')');
+            await t.focusCell(0, 0);
+            document.querySelector('#grid-container .ag-cell-focus')
+                .dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true, cancelable: true }));
+            await t.wait(400);
+            t.check(t.lastEdit() === 'k,v\\n6,x\\n,\\n5,apple\\n4,x\\n3,apple\\n2,x\\n1,apple',
+                'Ctrl+Enter adds a row under the top one (' + JSON.stringify(t.lastEdit()) + ')');
+            t.check(count() === '2 / 3' && activeAt() === '4:apple', 'the row of 3 keeps the active match (' + count() + ', ' + activeAt() + ')');
+            await press(t, 'replace-one');
+            t.check(t.lastEdit() === 'k,v\\n6,x\\n,\\n5,apple\\n4,x\\n3,R\\n2,x\\n1,apple',
+                'Replace takes the row of 3 (' + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
+    {
+        // The search that runs after the delete cannot find the row it was on.
+        // The next match after it is where Next would have gone, so that one
+        // becomes the active match, not the first match of the file. The rows
+        // are sorted here, so the file order is no help in finding it.
+        name: 'deleting the row of the active match moves on to the next match',
+        csv: 'k,v,w\n2,apple,apple\n4,x,x\n3,apple,x\n1,apple,x',
+        steps: steps(`
+            await t.init(csv);
+            t.header(0).querySelector('.ag-header-cell-label').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(300);
+            t.check(col(t, 0, 4) === '1,2,3,4', 'sorted by k (' + col(t, 0, 4) + ')');
+            await find(t, 'apple', 'R');
+            await press(t, 'find-next');
+            t.check(count() === '2 / 4' && activeAt() === '1:apple', 'Next moved to the row of 2 (' + count() + ', ' + activeAt() + ')');
+            await rowMenu(t, 1, 'Delete row');
+            t.check(t.lastEdit() === 'k,v,w\\n4,x,x\\n3,apple,x\\n1,apple,x', 'the row of 2 is deleted (' + JSON.stringify(t.lastEdit()) + ')');
+            t.check(count() === '2 / 2' && activeAt() === '1:apple', 'the row of 3 has the active match (' + count() + ', ' + activeAt() + ')');
+            await press(t, 'replace-one');
+            t.check(t.lastEdit() === 'k,v,w\\n4,x,x\\n3,R,x\\n1,apple,x', 'Replace takes the row of 3 (' + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
+    {
+        // "Hide spaces around values" is on by default. Find went by the
+        // value in the file, so two spaces found cells that show no space at
+        // all and Replace All rewrote padding nobody could see.
+        name: 'spaces hidden: find sees what the grid shows',
+        csv: 'k,v\na,  Berlin  \nb,New York\nc,   \nd,plain',
+        steps: steps(`
+            await t.init(csv);
+            await find(t, '  ', 'X');
+            t.check(count() === '0 matches', 'two spaces match nothing on screen (' + count() + ')');
+            await find(t, 'n  ', 'X');
+            t.check(count() === '0 matches', 'nor does n and two spaces (' + count() + ')');
+            await find(t, ' ', '_');
+            t.check(count() === '1 / 1' && activeAt() === '1:New York', 'one space finds New York only (' + count() + ', ' + activeAt() + ')');
+            await press(t, 'replace-all');
+            t.check(t.lastEdit() === 'k,v\\na,  Berlin  \\nb,New_York\\nc,   \\nd,plain',
+                'Replace All leaves the hidden spaces alone (' + JSON.stringify(t.lastEdit()) + ')');
+            await find(t, 'berlin', 'Rome');
+            t.check(count() === '1 / 1', 'Berlin is found (' + count() + ')');
+            await press(t, 'replace-one');
+            t.check(t.lastEdit() === 'k,v\\na,  Rome  \\nb,New_York\\nc,   \\nd,plain',
+                'Replace changes what is shown and keeps the spaces around it (' + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
+    {
+        name: 'spaces hidden: replace steps through a padded cell',
+        csv: 'k,v\nx, abab ',
+        steps: steps(`
+            await t.init(csv);
+            await find(t, 'b', 'bb');
+            await press(t, 'replace-one');
+            t.check(t.lastEdit() === 'k,v\\nx, abbab ', 'the first b is replaced (' + JSON.stringify(t.lastEdit()) + ')');
+            await press(t, 'replace-one');
+            t.check(t.lastEdit() === 'k,v\\nx, abbabb ', 'the second press takes the second b (' + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
+    {
+        // The search text is a space here, so it is in the hidden padding too.
+        // A replace that went over the whole value took the first space of
+        // the padding and Replace All rewrote the padding as well.
+        name: 'spaces hidden: replace keeps padding that holds the search text',
+        csv: 'k,v\na,  New York  \nb,  San Jose del Monte  ',
+        steps: steps(`
+            await t.init(csv);
+            await find(t, ' ', '_');
+            t.check(count() === '1 / 2', 'both cells match (' + count() + ')');
+            await press(t, 'replace-one');
+            t.check(t.lastEdit() === 'k,v\\na,  New_York  \\nb,  San Jose del Monte  ',
+                'Replace changes the space between the words (' + JSON.stringify(t.lastEdit()) + ')');
+            await press(t, 'replace-all');
+            t.check(t.lastEdit() === 'k,v\\na,  New_York  \\nb,  San_Jose_del_Monte  ',
+                'Replace All changes only the spaces on screen (' + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
+    {
+        // With the spaces shown they are part of what the user sees, so find
+        // goes on matching them.
+        name: 'spaces shown: find sees the spaces',
+        csv: 'k,v\na,  Berlin  \nb,New York\nc,   \nd,plain',
+        settings: { trimDisplay: false },
+        steps: steps(`
+            await t.init(csv);
+            await find(t, '  ', '');
+            t.check(count() === '1 / 2', 'two spaces are found around Berlin and in the blank cell (' + count() + ')');
+            await find(t, ' ', '_');
+            await press(t, 'replace-all');
+            t.check(t.lastEdit() === 'k,v\\na,__Berlin__\\nb,New_York\\nc,___\\nd,plain',
+                'Replace All replaces every space (' + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
+    {
+        // The setting changes what the cells show, so it changes what find
+        // matches. The counter and the marks kept the old matches until the
+        // next search. A cell that showed Berlin stayed marked for two spaces
+        // and Replace then found nothing to change.
+        name: 'switching Hide spaces around values searches again',
+        csv: 'k,v\na,  Berlin  \nb,New York\nc,   \nd,plain',
+        settings: { trimDisplay: false },
+        steps: steps(`
+            await t.init(csv);
+            await find(t, '  ', 'X');
+            t.check(count() === '1 / 2' && marks(t.cell(0, 1)) === 'active', 'two spaces are found around Berlin (' + count() + ', ' + marks(t.cell(0, 1)) + ')');
+            await t.setSetting('trimDisplay', true);
+            t.check(count() === '0 matches', 'with the spaces hidden nothing matches (' + count() + ')');
+            t.check(marks(t.cell(0, 1)) === 'none' && marks(t.cell(2, 1)) === 'none',
+                'and no cell stays marked (' + marks(t.cell(0, 1)) + ', ' + marks(t.cell(2, 1)) + ')');
+            await t.setSetting('trimDisplay', false);
+            t.check(count() === '1 / 2', 'shown again, the spaces are found again (' + count() + ')');
+        `),
+    },
+    {
+        // The grid asks every cell it draws whether it holds a match. A sort
+        // draws them all again. Going through the matches for each cell took
+        // over a second per sort with a search like 'e' on 100,000 rows.
+        // The virtual clock of the page does not see that time, so the steps
+        // of the array scans are counted over one sort instead.
+        name: 'a sort with many matches does not scan them for each cell',
+        csv: 'a,b\n' + Array.from({ length: 1000 }, (_, i) => 'e' + (999 - i) + ',e' + i).join('\n'),
+        steps: steps(`
+            await t.init(csv);
+            await find(t, 'e', '');
+            t.check(count() === '1 / 2000', 'every cell is a match (' + count() + ')');
+            const names = ['some', 'every', 'find', 'findIndex', 'filter'];
+            const orig = names.map(n => Array.prototype[n]);
+            let calls = 0;
+            names.forEach((n, i) => {
+                Array.prototype[n] = function (cb, ...rest) {
+                    return orig[i].call(this, function (...a) { calls++; return cb.apply(this, a); }, ...rest);
+                };
+            });
+            try {
+                t.header(0).querySelector('.ag-header-cell-label').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+                await t.wait(300);
+            } finally {
+                names.forEach((n, i) => { Array.prototype[n] = orig[i]; });
+            }
+            t.check(col(t, 0, 3) === 'e0,e1,e2', 'sorted by a (' + col(t, 0, 3) + ')');
+            t.check(marks(t.cell(0, 0)) !== 'none' && marks(t.cell(1, 1)) === 'match',
+                'the drawn cells are marked (' + marks(t.cell(0, 0)) + ', ' + marks(t.cell(1, 1)) + ')');
+            t.check(calls < 10000, 'the sort takes far fewer steps than matches times drawn cells (' + calls + ')');
         `),
     },
     {

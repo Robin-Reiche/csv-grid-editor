@@ -4,7 +4,8 @@ import { scheduleRecomputeColTypes } from '../grid/column-type';
 import { markValueListsStale } from '../grid/filter';
 import { dataRowIndexForFindMatch } from '../grid/row-mapping';
 import { focusCell } from '../grid/refresh';
-import type { FindMatch } from '../types';
+import { shownValue } from '../grid/control-char-cell';
+import type { CsvRow, FindMatch } from '../types';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -27,9 +28,33 @@ function isOnCell(m: FindMatch | undefined, p: any): boolean {
         && m.colField === p.column.getColId();
 }
 
+// A cell as isOnCell tells them apart: its band, its row and its column.
+function cellKey(pinned: boolean, rowIndex: number, colId: string): string {
+    return (pinned ? 't' : 'b') + rowIndex + ':' + colId;
+}
+
+// The cells of state.findMatches, made once for each new list of matches.
+// The rule below runs for every cell the grid draws. A sort, a filter or a
+// scroll draws them all again. Going through the matches for each of them
+// took over a second per sort with a search like 'e' that matches most cells.
+let matchCells: { of: FindMatch[]; size: number; keys: Set<string> } | null = null;
+
+function isMatchCell(p: any): boolean {
+    const list = state.findMatches;
+    // Let go of a closed search's matches, which can run into the hundreds
+    // of thousands.
+    if (!list.length) { matchCells = null; return false; }
+    if (matchCells?.of !== list || matchCells.size !== list.length) {
+        const keys = new Set<string>();
+        for (const m of list) keys.add(cellKey(!!m.pinned, m.rowIndex, m.colField));
+        matchCells = { of: list, size: list.length, keys };
+    }
+    return matchCells.keys.has(cellKey(!!p.node?.rowPinned, p.rowIndex, p.column.getColId()));
+}
+
 export function getFindCellClassRules(): Record<string, (p: any) => boolean> {
     return {
-        'cell-find-match': (p: any) => state.findMatches.some(m => isOnCell(m, p)),
+        'cell-find-match': isMatchCell,
         'cell-find-active': (p: any) =>
             state.findMatchIndex >= 0 && isOnCell(state.findMatches[state.findMatchIndex], p),
     };
@@ -125,12 +150,23 @@ function execFind(anchor?: { rowIndex: number; origIndex?: number; colField: str
 
     const lowerNeedle = cs ? '' : needle.toLowerCase();
 
+    // Find goes by what a cell shows. With "Hide spaces around values" on the
+    // spaces around a value are not on screen. A search that saw them found
+    // cells that show no space at all. The shown value is a part of the whole
+    // one, so it is only made for a cell that holds the text at all.
+    const has = (s: string): boolean => cs ? s.includes(needle) : s.toLowerCase().includes(lowerNeedle);
+
     const search = (node: any, rowIndex: number, pinned: boolean): void => {
         for (const col of cols) {
             const raw = node.data[col.field];
             if (raw == null) continue;
-            const val = cs ? String(raw) : String(raw).toLowerCase();
-            if (val.includes(cs ? needle : lowerNeedle)) {
+            const val = String(raw);
+            if (!has(val)) continue;
+            // Most values have no space at either end and show as they
+            // stand. trim() tells so in about a third of the time the
+            // pattern in shownValue takes.
+            const shown = val.trim() === val ? val : shownValue(val);
+            if (shown === val || has(shown)) {
                 // Capture _origIndex now so a later replace writes to the right
                 // state.data row even if the user changes sort/filter meanwhile.
                 state.findMatches.push({
@@ -217,6 +253,34 @@ export function refreshFindInPlace(): void {
     execFind(state.findMatches[state.findMatchIndex], true, false);
 }
 
+// Public: an insert or a delete moved the rows of state.data, which held
+// `before` until then. The row arrays themselves are the same ones. A match
+// remembers its row by the place it had in state.data. The search that runs
+// again next finds the active match there. The row that has taken that place
+// is another one, so the active match jumped and Replace changed that row.
+// Each match is moved to where its row is now. When the row of the active
+// match is gone, the next match whose row is still there becomes the active
+// one, the match Next would have gone to.
+export function followMovedRows(before: CsvRow[]): void {
+    const matches = state.findMatches;
+    if (!matches.length) return;
+    const now = new Map<CsvRow, number>();
+    state.data.forEach((row, i) => now.set(row, i));
+    const kept = matches.map(m => {
+        const at = now.get(before[m.origIndex]);
+        if (at === undefined) return false;
+        m.origIndex = at;
+        return true;
+    });
+    const from = state.findMatchIndex;
+    if (from < 0 || kept[from]) return;
+    state.findMatchIndex = -1;
+    for (let k = 1; k < matches.length; k++) {
+        const i = (from + k) % matches.length;
+        if (kept[i]) { state.findMatchIndex = i; return; }
+    }
+}
+
 // ── navigation ────────────────────────────────────────────────────────────────
 
 export function navigateFind(dir: 1 | -1): void {
@@ -260,10 +324,17 @@ export function closeFindBar(): void {
 // to both, otherwise the grid kept showing the old value and the next search
 // found it again. The grid is not told of the write, so the column filters'
 // value lists are marked stale here.
+// `edit` gets the part of the value the cell shows, the part find searched.
+// The spaces the grid hides around it stay as the file has them. The shown
+// part cannot start inside those spaces, so its first place in the value is
+// where it starts.
 function replaceInCell(m: FindMatch, edit: (old: string) => string): any {
     const colIdx = parseInt(m.colField.replace('col_', ''));
     const dataIndex = dataRowIndexForFindMatch(m);
-    const newVal = edit(String(state.data[dataIndex][colIdx] ?? ''));
+    const old = String(state.data[dataIndex][colIdx] ?? '');
+    const shown = shownValue(old);
+    const lead = shown === old ? 0 : old.indexOf(shown);
+    const newVal = old.slice(0, lead) + edit(shown) + old.slice(lead + shown.length);
     state.data[dataIndex][colIdx] = newVal;
     markValueListsStale();
     const node = rowNodeFor(dataIndex);

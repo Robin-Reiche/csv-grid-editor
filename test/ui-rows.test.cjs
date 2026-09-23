@@ -192,6 +192,46 @@ runSuite('rows (browser)', [
         }`,
     },
     {
+        // An insert under a sort writes the order on screen into the file.
+        // The frozen rows were left out of that order and went to the end of
+        // the file, with the rows a filter hides. On screen they sit on top,
+        // in the order they were frozen. That is where they go now.
+        name: 'insert under a sort with frozen rows',
+        csv: 'n,v\nd,4\nb,2\na,1\nc,3\ne,5\n',
+        steps: `async (t, csv) => {
+            ${FRAMES}
+            const press = ${PRESS};
+            await t.init(csv);
+            const freeze = async (row) => {
+                const c = t.cell(row, 0);
+                const r = c.getBoundingClientRect();
+                c.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 5, clientY: r.top + 5 }));
+                await t.wait(200);
+                const item = [...document.querySelectorAll('#row-context-menu .row-ctx-item')].find(i => i.textContent === 'Freeze row');
+                if (!item) { t.check(false, 'the row menu offers Freeze row'); return; }
+                item.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+                await t.wait(300);
+            };
+            // In the order on screen. The grid moves a row it keeps rather
+            // than its element, so the page order can differ.
+            const band = () => [...document.querySelectorAll('#grid-container .ag-floating-top .ag-cell[col-id="col_0"]')]
+                .sort((a, b) => a.closest('.ag-row').getAttribute('row-index').localeCompare(b.closest('.ag-row').getAttribute('row-index')))
+                .map(c => c.textContent).join(',');
+            const body = () => [0, 1, 2, 3, 4].map(i => t.cell(i, 0) ? t.cell(i, 0).textContent : '-').join(',');
+            await freeze(4);
+            await freeze(1);
+            t.check(band() === 'e,b', 'e and then b are frozen (' + band() + ')');
+            t.header(0).querySelector('.ag-header-cell-label').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(300);
+            t.check(body() === 'a,c,d,-,-', 'the rows below are sorted (' + body() + ')');
+            await t.focusCell(0, 0);
+            await press(t, 'Enter', { ctrlKey: true });
+            t.check(t.lastEdit() === 'n,v\\ne,5\\nb,2\\na,1\\n,\\nc,3\\nd,4\\n',
+                'the frozen rows go on top of the file as shown (' + JSON.stringify(t.lastEdit()) + ')');
+            t.check(band() === 'e,b' && body() === 'a,,c,d,-', 'the grid looks as before, with the new row (' + band() + ' | ' + body() + ')');
+        }`,
+    },
+    {
         name: 'insert in the duplicates view with a filter on',
         csv: 'city,n\nBerlin,1\nParis,\nBerlin,1\nRome,4',
         steps: `async (t, csv) => {

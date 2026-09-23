@@ -23,6 +23,7 @@ import { closeAllPopups } from './popups';
 import { addFirstRow, addFirstColumn } from './empty-state';
 import { resetDuplicatesState } from './duplicates';
 import { shownValue } from '../grid/control-char-cell';
+import { followMovedRows } from './find-replace';
 
 // ── Data mutations ────────────────────────────────────────────────────────────
 
@@ -66,7 +67,9 @@ function deleteRows(displayIndices: number[]): void {
     // already. Deleting nothing must not leave an undo step or write the file.
     if (toDelete.size === 0) return;
     pushUndo();
+    const before = state.data;
     state.data = deleteRowsFromData(state.data, toDelete);
+    followMovedRows(before);
     state.isAutoFitted = false;
     state.autoFitCache = null;
     refreshGrid();
@@ -104,6 +107,7 @@ function insertRows(anchorDisplayIndex: number, position: 'above' | 'below', cou
     const hasActiveSort = colState.some((s: any) => s.sort);
 
     pushUndo();
+    const before = state.data;
 
     if (hasActiveSort) {
         const header = state.data[0];
@@ -120,11 +124,22 @@ function insertRows(anchorDisplayIndex: number, position: 'above' | 'below', cou
         });
         // Preserve filtered-out rows by appending them at the end in their
         // original file order — they'd otherwise be lost on reorder.
+        // The walk above leaves the frozen rows out as well. They are not
+        // hidden, they sit in the band above the others, so they go first, in
+        // the order the band shows them. Appended with the hidden rows, a row
+        // frozen at the top, such as a line of units under the header, moved
+        // to the end of the file while the screen still showed it on top.
+        // Export puts them first for the same reason (features/export.ts).
+        const frozen = new Set(state.frozenRowRefs);
         const hidden: string[][] = [];
+        const found = new Set<string[]>();
         for (let i = 1; i < state.data.length; i++) {
-            if (!visibleOrigs.has(i)) hidden.push(state.data[i]);
+            const row = state.data[i];
+            if (frozen.has(row)) found.add(row);
+            else if (!visibleOrigs.has(i)) hidden.push(row);
         }
-        state.data = [header, ...visible, ...hidden];
+        const pinned = state.frozenRowRefs.filter(r => found.has(r));
+        state.data = [header, ...pinned, ...visible, ...hidden];
 
         // Clear the sort indicator. The data now equals what the user saw, so
         // there's nothing left to sort against and a stale arrow would lie.
@@ -140,6 +155,7 @@ function insertRows(anchorDisplayIndex: number, position: 'above' | 'below', cou
     const insertAt = position === 'above' ? targetIndex : targetIndex + 1;
     const numCols = getNumCols(state.data);
     state.data = insertRowsIntoData(state.data, insertAt, count, numCols);
+    followMovedRows(before);
 
     state.isAutoFitted = false;
     state.autoFitCache = null;

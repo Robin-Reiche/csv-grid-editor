@@ -6,6 +6,7 @@ import { applyBoolCheckboxes } from './bool-checkbox';
 import { syncColumnHeaders } from '../grid/refresh';
 import { reapplySortAndFilter } from '../grid/builder';
 import { setFirstRowIsHeader } from './header-row';
+import { refreshFindInPlace } from './find-replace';
 
 /**
  * Settings menu (issue #41).
@@ -91,6 +92,10 @@ const ITEMS: SettingItem[] = [
             // padding without showing it (media/webview.css).
             document.body.classList.toggle('spaces-shown', !state.settings.trimDisplay);
             redrawCells(); syncColumnHeaders(); dropAutoFit(); reapplySortAndFilter();
+            // Find goes by what a cell shows as well. Without a sort or a
+            // filter nothing above made it search again. The counter and the
+            // marks then kept the matches of the old setting.
+            refreshFindInPlace();
         },
     },
     {
