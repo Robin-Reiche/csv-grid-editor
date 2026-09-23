@@ -47,6 +47,24 @@ export function readText(text: string): void {
     state.lineFormat = detectLineFormat(text, state.currentDelimiter, state.lineFormat);
 }
 
+// Searches again once the grid shows other rows: after an outside change, an
+// undo or redo, another page of the paged view or a delimiter switch. The
+// matches found before point at rows that are gone. A search moves the view
+// to its match (features/find-replace.ts). That is right when the user asks
+// for it, but here it took them away from the rows they were looking at, so
+// the view goes back to where it was.
+export function refreshFindInPlace(): void {
+    const viewport = document.querySelector<HTMLElement>('#grid-container .ag-body-viewport');
+    const top = viewport?.scrollTop ?? 0;
+    refreshFindIfOpen();
+    if (!viewport || viewport.scrollTop === top) return;
+    viewport.scrollTop = top;
+    // The grid drew the rows around the match but still counts itself at the
+    // old place. To the grid the scroll back is no scroll at all, so without
+    // the redraw the rows there stayed blank until the user scrolled.
+    state.gridApi?.redrawRows();
+}
+
 // firstRowIsHeader is what the extension remembers for this file. Only an
 // explicit false turns the header off.
 function initWithData(text: string, delimiter: string, firstRowIsHeader: boolean): void {
@@ -91,7 +109,7 @@ export function setupMessaging(): void {
             // The find matches belong to the rows before the change. Kept, the
             // counter went on counting them, a cell that no longer matched was
             // marked and Replace sent the file back unchanged.
-            refreshFindIfOpen();
+            refreshFindInPlace();
         } else if (msg.type === 'pageData') {
             handlePageData(msg);
         }

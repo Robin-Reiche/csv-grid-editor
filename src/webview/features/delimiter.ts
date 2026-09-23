@@ -1,10 +1,9 @@
 import { state } from '../state';
 import { buildGrid } from '../grid/builder';
-import { readText } from '../messaging';
+import { readText, refreshFindInPlace } from '../messaging';
 import { frozenRowPositions, reanchorFrozenRows } from './freeze-rows';
 import { closeAllPopups } from './popups';
 import { resetDuplicatesState } from './duplicates';
-import { refreshFindIfOpen } from './find-replace';
 
 export function updateDelimiterBadge(delimiter: string): void {
     const badge = document.getElementById('delim-badge');
@@ -52,7 +51,7 @@ export function setupDelimiterBadge(): void {
             // The find matches were found in the columns as they were split
             // before. Replace on one of them changed nothing and still sent
             // the file.
-            refreshFindIfOpen();
+            refreshFindInPlace();
         });
     });
 

@@ -6,7 +6,7 @@ import { recomputeColTypes } from '../grid/column-type';
 import { resetDuplicatesState } from './duplicates';
 import { refreshProfileIfOpen } from './profile';
 import { updateDelimiterBadge } from './delimiter';
-import { refreshFindIfOpen } from './find-replace';
+import { refreshFindInPlace } from '../messaging';
 import type { UndoSnapshot } from '../types';
 
 // Captures the undoable view state: a deep clone of the data plus the freeze
@@ -93,7 +93,7 @@ export function undo(): void {
     updateButtons();
     recomputeColTypes();
     // The rows are replaced, so the find matches point at the rows before.
-    refreshFindIfOpen();
+    refreshFindInPlace();
 }
 
 export function redo(): void {
@@ -105,7 +105,7 @@ export function redo(): void {
     notifyChange();
     updateButtons();
     recomputeColTypes();
-    refreshFindIfOpen();
+    refreshFindInPlace();
 }
 
 export function updateButtons(): void {
