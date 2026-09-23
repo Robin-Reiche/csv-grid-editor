@@ -14,6 +14,9 @@
 // - A save that fails (the file is locked or read-only). The provider took
 //   the unsaved edits for what the disk holds, so the next outside change or
 //   change event replaced them without a word.
+// - A file in Windows-1252 (Excel's plain "CSV") or in UTF-16. It was read
+//   as UTF-8, every umlaut became U+FFFD and the first save wrote that over
+//   the whole file.
 //
 // This drives the real provider against a stubbed vscode API on top of the
 // real file system, in a temp folder.
@@ -558,7 +561,8 @@ async function main() {
         const t = await open(p);
         fs.writeFileSync(p, Buffer.concat([BOM, Buffer.from('a,b\n1,2\n')]));
         await t.fireWatcher();
-        assert.strictEqual(t.doc.hasBom, true, 'the document missed the new byte order mark');
+        // The document keeps the mark as part of its encoding, utf8bom.
+        assert.strictEqual(t.doc.encoding, 'utf8bom', 'the document missed the new byte order mark');
         assert.strictEqual(t.updates().length, 0, 'the grid was reloaded although its text did not change');
         await t.edit('a,b\n1,3\n');
         await t.save();
@@ -570,7 +574,7 @@ async function main() {
         const t = await open(p);
         fs.writeFileSync(p, EXCEL.subarray(3));
         await t.fireWatcher();
-        assert.strictEqual(t.doc.hasBom, false, 'the document kept a byte order mark the file no longer has');
+        assert.strictEqual(t.doc.encoding, 'utf8', 'the document kept a byte order mark the file no longer has');
         await t.edit('name,city\nJürgen,Köln\nAnna,Wien\n');
         await t.save();
         assert.strictEqual(fs.readFileSync(p, 'utf8'), 'name,city\nJürgen,Köln\nAnna,Wien\n');
@@ -581,7 +585,7 @@ async function main() {
         const t = await open(p);
         fs.writeFileSync(p, Buffer.concat([BOM, Buffer.from('a\n1\n')]));
         assert.strictEqual(await t.provider.reload(t.doc), true, 'Reload from Disk said the file was already up to date');
-        assert.strictEqual(t.doc.hasBom, true);
+        assert.strictEqual(t.doc.encoding, 'utf8bom');
     });
 
     await test('a byte order mark added outside under unsaved edits warns once and is kept', async () => {
@@ -597,6 +601,160 @@ async function main() {
         assert.ok(fs.readFileSync(p).equals(Buffer.concat([BOM, Buffer.from('a\nmine\n')])),
             'the save did not keep the byte order mark the file now has');
     });
+
+    // Excel's plain "CSV" is written in the Windows code page, Windows-1252 in
+    // Western Europe.
+    const ANSI_TEXT = 'Name;Stadt\r\nJörg;Köln\r\nAnna;Wien\r\n';
+    const ANSI = Buffer.from(ANSI_TEXT, 'latin1');
+    const ansi = text => Buffer.from(text, 'latin1');
+    const hex = p => fs.readFileSync(p).toString('hex');
+
+    await test('a Windows-1252 file shows its umlauts', async () => {
+        const t = await open(file('ansi-read.csv', ANSI));
+        assert.strictEqual(t.doc.content, ANSI_TEXT);
+    });
+
+    await test('editing one cell of a Windows-1252 file keeps every other byte', async () => {
+        const p = file('ansi-save.csv', ANSI);
+        const t = await open(p);
+        await t.edit('Name;Stadt\r\nJörg;Köln\r\nAnna;Graz\r\n');
+        await t.save();
+        assert.ok(fs.readFileSync(p).equals(ansi('Name;Stadt\r\nJörg;Köln\r\nAnna;Graz\r\n')), 'saved ' + hex(p));
+        await t.fireWatcher();                          // the echo of that save
+        assert.strictEqual(t.updates().length, 0, 'the echo of the save was taken for an outside change');
+        assert.strictEqual(warnings.length, 0);
+    });
+
+    await test('the Windows-1252 characters from 0x80 to 0x9F survive a save', async () => {
+        // The euro sign, typographic quotes and dashes plus the five bytes
+        // Windows-1252 leaves unassigned.
+        const high = Buffer.from(Array.from({ length: 32 }, (_, i) => 0x80 + i));
+        const p = file('ansi-high.csv', Buffer.concat([ansi('a;b\r\n'), high, ansi(';x\r\n')]));
+        const t = await open(p);
+        assert.ok(t.doc.content.includes('\u20AC'), 'the euro sign did not come through');
+        await t.edit(t.doc.content.replace(';x', ';y'));
+        await t.save();
+        assert.ok(fs.readFileSync(p).equals(Buffer.concat([ansi('a;b\r\n'), high, ansi(';y\r\n')])), 'saved ' + hex(p));
+    });
+
+    await test('Save As writes a Windows-1252 file in Windows-1252', async () => {
+        const t = await open(file('ansi-saveas.csv', ANSI));
+        const dest = path.join(tmpDir, 'ansi-saveas-copy.csv');
+        await t.saveAs(dest);
+        assert.ok(fs.readFileSync(dest).equals(ANSI), 'Save As wrote ' + hex(dest));
+    });
+
+    await test('a hot exit backup of a Windows-1252 file restores and saves the same bytes', async () => {
+        const p = file('ansi-backup.csv', ANSI);
+        const before = await open(p);
+        await before.edit('Name;Stadt\r\nJörg;Köln\r\nAnna;Graz\r\n');
+        const backup = await before.backup(path.join(tmpDir, 'ansi.backup'));
+        const after = await open(p, { backupId: backup.id });
+        assert.strictEqual(after.doc.content, 'Name;Stadt\r\nJörg;Köln\r\nAnna;Graz\r\n', 'the restore lost the umlauts');
+        await after.save();
+        assert.ok(fs.readFileSync(p).equals(ansi('Name;Stadt\r\nJörg;Köln\r\nAnna;Graz\r\n')), 'saved ' + hex(p));
+    });
+
+    await test('a restored Windows-1252 document stays Windows-1252 when its edits are plain ASCII', async () => {
+        // Nothing in plain ASCII tells Windows-1252 from UTF-8, so the
+        // encoding has to come back with the backup rather than be guessed.
+        const p = file('ansi-backup-ascii.csv', ANSI);
+        const before = await open(p);
+        await before.edit('Name;Stadt\r\nAnna;Graz\r\n');
+        const backup = await before.backup(path.join(tmpDir, 'ansi-ascii.backup'));
+        const after = await open(p, { backupId: backup.id });
+        await after.edit('Name;Stadt\r\nAnna;Gräz\r\n');
+        await after.save();
+        assert.ok(fs.readFileSync(p).equals(ansi('Name;Stadt\r\nAnna;Gräz\r\n')), 'saved ' + hex(p));
+    });
+
+    const UTF16_TEXT = 'name,city\r\nJürgen,Köln\r\n';
+    const UTF16_EDIT = 'name,city\r\nJürgen,Köln\r\nAnna,Wien\r\n';
+    const utf16 = (text, bigEndian) => {
+        const body = Buffer.from(text, 'utf16le');
+        return Buffer.concat([Buffer.from(bigEndian ? [0xFE, 0xFF] : [0xFF, 0xFE]), bigEndian ? body.swap16() : body]);
+    };
+    for (const [name, bigEndian] of [['LE', false], ['BE', true]]) {
+        await test(`a UTF-16 ${name} file keeps its encoding through an edit`, async () => {
+            const p = file(`utf16${name}.csv`, utf16(UTF16_TEXT, bigEndian));
+            const t = await open(p);
+            assert.strictEqual(t.doc.content, UTF16_TEXT, 'the grid did not get the text');
+            await t.edit(UTF16_EDIT);
+            await t.save();
+            assert.ok(fs.readFileSync(p).equals(utf16(UTF16_EDIT, bigEndian)), 'saved ' + hex(p));
+        });
+    }
+
+    await test('an edit Windows-1252 cannot hold saves the file as UTF-8 and says so', async () => {
+        const p = file('ansi-unencodable.csv', ANSI);
+        const t = await open(p);
+        const text = 'Name;Stadt\r\nJörg;Köln\r\nAnna;Łódź\r\n';
+        await t.edit(text);
+        await t.save();
+        assert.ok(fs.readFileSync(p).equals(Buffer.concat([BOM, Buffer.from(text, 'utf8')])),
+            'not saved as UTF-8 with a byte order mark: ' + hex(p));
+        assert.strictEqual(warnings.length, 1, 'the user was not told the file is UTF-8 now');
+        assert.match(warnings[0].msg, /UTF-8/);
+        await t.fireWatcher();                          // the echo of that save
+        assert.strictEqual(t.updates().length, 0, 'the echo of the save was taken for an outside change');
+        await t.edit(text + 'Eva;Graz\r\n');
+        await t.save();
+        assert.strictEqual(warnings.length, 1, 'the next save warned again');
+        assert.ok(fs.readFileSync(p).equals(Buffer.concat([BOM, Buffer.from(text + 'Eva;Graz\r\n', 'utf8')])));
+    });
+
+    await test('Save As of an edit Windows-1252 cannot hold writes UTF-8 and says so', async () => {
+        const p = file('ansi-unencodable-saveas.csv', ANSI);
+        const t = await open(p);
+        const text = 'Name;Stadt\r\nAnna;Łódź\r\n';
+        await t.edit(text);
+        const dest = path.join(tmpDir, 'ansi-unencodable-copy.csv');
+        await t.saveAs(dest);
+        assert.ok(fs.readFileSync(dest).equals(Buffer.concat([BOM, Buffer.from(text, 'utf8')])), 'Save As wrote ' + hex(dest));
+        assert.strictEqual(warnings.length, 1, 'the user was not told the copy is UTF-8');
+    });
+
+    await test('a failed save of an edit Windows-1252 cannot hold changes nothing', async () => {
+        const p = file('ansi-unencodable-locked.csv', ANSI);
+        const t = await open(p);
+        await t.edit('Name;Stadt\r\nAnna;Łódź\r\n');
+        failNextWrite = true;
+        await assert.rejects(t.save(), /EBUSY/);
+        assert.strictEqual(warnings.length, 0, 'the user was told of a save that did not happen');
+        assert.strictEqual(t.doc.encoding, 'windows1252', 'the document took the encoding of a save that failed');
+        await t.fireWatcher();                          // the file did not change
+        assert.strictEqual(warnings.length, 0, 'the untouched file was taken for an outside change');
+        assert.ok(fs.readFileSync(p).equals(ANSI));
+    });
+
+    await test('an outside change of the encoding alone is picked up', async () => {
+        const p = file('ansi-to-utf8.csv', ANSI);
+        const t = await open(p);
+        fs.writeFileSync(p, Buffer.from(ANSI_TEXT, 'utf8'));
+        await t.fireWatcher();
+        assert.strictEqual(t.doc.encoding, 'utf8', 'the document missed the new encoding');
+        assert.strictEqual(t.updates().length, 0, 'the grid was reloaded although its text did not change');
+        await t.edit('Name;Stadt\r\nJörg;Köln\r\nAnna;Graz\r\n');
+        await t.save();
+        assert.strictEqual(fs.readFileSync(p, 'utf8'), 'Name;Stadt\r\nJörg;Köln\r\nAnna;Graz\r\n');
+    });
+
+    // A preview reads only part of the file, so it decides the encoding by
+    // the start of it. Plain text reads all of it.
+    for (const mode of ['head', 'tail', 'chunked', 'plaintext']) {
+        await test(`a Windows-1252 file shows its umlauts in ${mode}`, async () => {
+            const text = 'id;city\n' + Array.from({ length: 1500 }, (_, i) => `${i};Köln ${i}`).join('\n') + '\n';
+            const p = file(`ansi-${mode}.csv`, ansi(text));
+            fakeSize = 60 * 1024 * 1024;
+            quickPickChoice = mode;
+            const t = await open(p);
+            assert.strictEqual(t.doc.isPreview, true, 'the test did not reach the preview');
+            await t.ready();
+            const shown = t.posted.find(m => m.type === 'init').text;
+            assert.ok(shown.includes('Köln'), 'the preview shows ' + JSON.stringify(shown.slice(0, 40)));
+            assert.ok(!shown.includes('\uFFFD'), 'the preview holds U+FFFD');
+        });
+    }
 
     fs.rmSync(tmpDir, { recursive: true, force: true });
     if (failures) { console.error(`\n${failures} test(s) failed`); process.exit(1); }
