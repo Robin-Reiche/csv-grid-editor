@@ -17,7 +17,8 @@ const TAB   = 9;
 // Whether the rows of the text end with a lone CR, the way a classic Mac file
 // ends them. That takes no LF outside a quoted value anywhere and a CR there.
 // Otherwise an LF ends a row together with the CRs right in front of it. Any
-// other CR is then a character of the value it sits in. parseCsv and
+// other CR is then a character of the value it sits in, unless it comes at the
+// very end of the text (see the end of parseCsv). parseCsv and
 // detectLineFormat both ask this first, so they agree on where rows end. The
 // quotes are tracked the way parseCsv tracks them in a Mac file: a CR starts
 // a new field there, so a quote right after it opens a quoted value. Mac Excel
@@ -140,8 +141,9 @@ export function parseCsv(text: string, delimiter: string, trimFields: boolean = 
             // CRLF or the CR CR LF Python's csv module writes on Windows. In a
             // file whose rows end with a lone CR that CR is the break. Such a
             // file has no LF outside quotes, see rowsEndWithCr. Any other CR
-            // is part of the value. It used to be dropped, which lost a byte
-            // from a row nobody touched and read a whole Mac file as one row.
+            // but those at the very end of the text is part of the value. It
+            // used to be dropped, which lost a byte from a row nobody touched
+            // and read a whole Mac file as one row.
             let end = i;
             if (ch === LF) {
                 while (end > start && text.charCodeAt(end - 1) === CR) end--;
@@ -157,7 +159,14 @@ export function parseCsv(text: string, delimiter: string, trimFields: boolean = 
             padOnly = false;
         }
     }
-    row.push(finalize(field + text.slice(start)));
+    // CRs at the very end of a file whose rows end with LF are its last line
+    // break, cut short. Other programs read them as one. Kept in the last
+    // value, they gained quotes on the first edit and from then on belonged
+    // to the value for those programs too. A CR in quotes is not touched:
+    // an unclosed quote leaves `start` at the end.
+    let end = n;
+    if (!crRows) while (end > start && text.charCodeAt(end - 1) === CR) end--;
+    row.push(finalize(field + text.slice(start, end)));
     // A last line with nothing in it is a trailing blank line, not a row, and is
     // dropped. Except when it is the only line and holds a delimiter: that is a
     // header of unnamed columns, ",,,," is five of them. Dropping it opened the
@@ -238,8 +247,10 @@ export function detectLineFormat(text: string, delimiter: string, previous?: Lin
     else if (cr > 0) eol = '\r';
     else if (crcrlf > crlf && crcrlf > lf) eol = '\r\r\n';
     else eol = crlf > lf ? '\r\n' : '\n';
+    // A CR at the very end outside quotes is the last break in any file,
+    // see the end of parseCsv.
     const last = text[text.length - 1];
-    return { eol, finalNewline: !inQuotes && (last === '\n' || (crRows && last === '\r')) };
+    return { eol, finalNewline: !inQuotes && (last === '\n' || last === '\r') };
 }
 
 // Whether parseCsv would drop this row as a trailing blank line when it is the

@@ -139,8 +139,34 @@ test('rows ending with CR CR LF keep that ending', () => {
 test('a CR inside an unquoted value is part of the value', () => {
     assert.deepStrictEqual(parseCsv('a,b\n1,x\ry\n3,4\n', ',', false, true), [['a', 'b'], ['1', 'x\ry'], ['3', '4']]);
     assert.deepStrictEqual(parseCsv('a,b\r\n1,x\ry\r\n', ',', false, true), [['a', 'b'], ['1', 'x\ry']]);
-    // One at the very end of the file has no LF after it either.
-    assert.deepStrictEqual(parseCsv('a,b\n1,2\n3,4\r', ',', false, true), [['a', 'b'], ['1', '2'], ['3', '4\r']]);
+});
+
+test('a CR at the very end of the file is its last line break', () => {
+    // Other programs read it as one. Kept in the last value, it showed as a
+    // line break in that cell and gained quotes on the first edit. From then
+    // on those programs read it as part of the value.
+    assert.deepStrictEqual(parseCsv('a,b\n1,2\n3,4\r', ',', false, true), [['a', 'b'], ['1', '2'], ['3', '4']]);
+    assert.deepStrictEqual(detectLineFormat('a,b\n1,2\n3,4\r', ','), { eol: '\n', finalNewline: true });
+    assert.deepStrictEqual(detectLineFormat('a,b\r\n1,2\r', ','), CRLF_END);
+    // A last line of nothing but CRs is a trailing blank line.
+    assert.deepStrictEqual(parseCsv('a\n\r', ',', false, true), [['a']]);
+    assert.deepStrictEqual(parseCsv('a\n\r\r', ',', false, true), [['a']]);
+    // In quotes it is part of the value, closed or not.
+    assert.deepStrictEqual(parseCsv('a,b\n1,"2\r"', ',', false, true), [['a', 'b'], ['1', '2\r']]);
+    assert.deepStrictEqual(detectLineFormat('a,b\n1,"2\r"', ','), { eol: '\n', finalNewline: false });
+    assert.deepStrictEqual(parseCsv('a,b\n1,"2\r', ',', false, true), [['a', 'b'], ['1', '2\r']]);
+    assert.deepStrictEqual(detectLineFormat('a,b\n1,"2\r', ','), { eol: '\n', finalNewline: false });
+    // An edit writes it as the file's own line break.
+    const cases = [
+        ['a,b\n1,2\n3,4\r', 'a,b\n1,X\n3,4\n'],
+        ['a,b\r\n1,2\r\n3,4\r', 'a,b\r\n1,X\r\n3,4\r\n'],
+        ['a,b\n1,2\n\r', 'a,b\n1,X\n'],
+    ];
+    for (const [text, want] of cases) {
+        const rows = parseCsv(text, ',', false, true);
+        rows[1][1] = 'X';
+        assert.strictEqual(toCsv(rows, ',', detectLineFormat(text, ',')), want, JSON.stringify(text));
+    }
 });
 
 test('a CR outside quotes is written back in quotes and read back the same', () => {
@@ -150,8 +176,7 @@ test('a CR outside quotes is written back in quotes and read back the same', () 
     const cases = [
         ['a,b\n1,x\ry\n3,4\n', 'a,b\n1,"x\ry"\n3,4\n'],
         ['a,b\r\n1,x\ry\r\n3,4\r\n', 'a,b\r\n1,"x\ry"\r\n3,4\r\n'],
-        ['a,b\n1,2\n3,4\r', 'a,b\n1,2\n3,"4\r"'],
-        ['a\n\r', 'a\n"\r"'],
+        ['a,b\n1,x\ry', 'a,b\n1,"x\ry"'],
     ];
     for (const [text, want] of cases) {
         const rows = parseCsv(text, ',', false, true);
@@ -185,9 +210,6 @@ test('an edit changes only the edited cell whatever ends the rows', () => {
         rows[2][1] = 'X';
         assert.strictEqual(toCsv(rows, ',', detectLineFormat(text, ',')), want, JSON.stringify(text));
     }
-    const tail = parseCsv('a,b\n1,2\n3,4\r', ',', false, true);
-    tail[1][1] = 'X';
-    assert.strictEqual(toCsv(tail, ',', detectLineFormat('a,b\n1,2\n3,4\r', ',')), 'a,b\n1,X\n3,"4\r"');
 });
 
 test('a quoted value with a lone CR keeps its quotes through an edit elsewhere', () => {

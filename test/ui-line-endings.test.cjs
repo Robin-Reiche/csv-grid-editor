@@ -147,12 +147,15 @@ runSuite('line endings (browser)', [
         `),
     },
     {
-        // Kept for the same reason in quotes.
+        // Other programs read it as the last line break. Kept in the last
+        // value, it gained quotes on the first edit and turned into part of
+        // the value for them.
         name: 'a CR at the end of the file',
         csv: 'a,b\n1,2\n3,4\r',
         steps: steps(`
+            t.check(t.cell(1, 1).textContent === '4', 'the last value has no CR (' + JSON.stringify(t.cell(1, 1).textContent) + ')');
             await t.edit(0, 1, 'X');
-            t.same(csv.replace('1,2', '1,X').replace('3,4', '3,"4') + '"', 'the CR at the end stays');
+            t.same('a,b\\n1,X\\n3,4\\n', 'it is written as the file ends its rows');
         `),
     },
     {
