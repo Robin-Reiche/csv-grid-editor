@@ -624,6 +624,24 @@ runSuite('find and replace (browser)', [
         `),
     },
     {
+        // The search text is a space here, so it is in the hidden padding too.
+        // A replace that went over the whole value took the first space of
+        // the padding and Replace All rewrote the padding as well.
+        name: 'spaces hidden: replace keeps padding that holds the search text',
+        csv: 'k,v\na,  New York  \nb,  San Jose del Monte  ',
+        steps: steps(`
+            await t.init(csv);
+            await find(t, ' ', '_');
+            t.check(count() === '1 / 2', 'both cells match (' + count() + ')');
+            await press(t, 'replace-one');
+            t.check(t.lastEdit() === 'k,v\\na,  New_York  \\nb,  San Jose del Monte  ',
+                'Replace changes the space between the words (' + JSON.stringify(t.lastEdit()) + ')');
+            await press(t, 'replace-all');
+            t.check(t.lastEdit() === 'k,v\\na,  New_York  \\nb,  San_Jose_del_Monte  ',
+                'Replace All changes only the spaces on screen (' + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
+    {
         // With the spaces shown they are part of what the user sees, so find
         // goes on matching them.
         name: 'spaces shown: find sees the spaces',
