@@ -107,4 +107,68 @@ runSuite('delimiter switch (browser)', [
                 + t.col(0) + ' / ' + t.col(1) + ')');
         `),
     },
+    {
+        // Undo put back rows that were split on the comma and wrote them with
+        // the semicolon, which quoted every line of the file into one value.
+        name: 'undo past a switch brings the old delimiter back',
+        csv: 'a;b\n1;2\n3;4',
+        steps: steps(`
+            const badge = () => document.getElementById('delim-badge').textContent;
+            await t.edit(0, 0, '1;9');
+            t.check(t.lastEdit() === 'a;b\\n1;9\\n3;4', 'the edit is written (' + JSON.stringify(t.lastEdit()) + ')');
+            await t.delim(';');
+            t.check(t.names() === 'a|b|-|-', 'the semicolon splits the file (' + t.names() + ')');
+            await t.button('btn-undo');
+            t.check(t.lastEdit() === 'a;b\\n1;2\\n3;4', 'undo writes the file as it was opened ('
+                + JSON.stringify(t.lastEdit()) + ')');
+            t.check(badge() === 'Delim: ,', 'the badge is back on the comma (' + badge() + ')');
+            t.check(t.names() === 'a;b|-|-|-', 'the grid is split on the comma again (' + t.names() + ')');
+            await t.button('btn-redo');
+            t.check(t.lastEdit() === 'a;b\\n1;9\\n3;4', 'redo writes the edit again (' + JSON.stringify(t.lastEdit()) + ')');
+            t.check(badge() === 'Delim: ;', 'with the semicolon on the badge (' + badge() + ')');
+            t.check(t.names() === 'a|b|-|-', 'and in the grid (' + t.names() + ')');
+        `),
+    },
+    {
+        // Undo put back rows split on the comma and wrote them with the
+        // semicolon, so every comma of the file turned into a semicolon.
+        name: 'undo of an edit made before a switch',
+        csv: 'name,city\nAnna,Berlin\nBen,Hanoi',
+        steps: steps(`
+            await t.edit(0, 0, 'X');
+            await t.delim(';');
+            await t.edit(1, 0, 'Y,Hanoi');
+            t.check(t.lastEdit() === 'name,city\\nX,Berlin\\nY,Hanoi', 'an edit after the switch ('
+                + JSON.stringify(t.lastEdit()) + ')');
+            await t.button('btn-undo');
+            t.check(t.lastEdit() === 'name,city\\nX,Berlin\\nBen,Hanoi', 'the first undo takes back that edit ('
+                + JSON.stringify(t.lastEdit()) + ')');
+            t.check(t.names() === 'name,city|-|-|-', 'the semicolon stays (' + t.names() + ')');
+            await t.button('btn-undo');
+            t.check(t.lastEdit() === 'name,city\\nAnna,Berlin\\nBen,Hanoi', 'the second writes the file as it was ('
+                + JSON.stringify(t.lastEdit()) + ')');
+            t.check(t.names() === 'name|city|-|-', 'split on the comma it was made with (' + t.names() + ')');
+            await t.edit(1, 1, 'Rome');
+            t.check(t.lastEdit() === 'name,city\\nAnna,Berlin\\nBen,Rome', 'the next edit writes commas ('
+                + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
+    {
+        // The edit wrote the last row without its quotes. The switch read the
+        // text again and took the spaces for a trailing blank line.
+        name: 'a quoted last row of spaces',
+        csv: 'name,note\nx,1\n"   ","   "',
+        steps: steps(`
+            await t.edit(0, 0, 'y');
+            t.check(t.lastEdit() === 'name,note\\ny,1\\n"   ","   "', 'the edit keeps the quotes ('
+                + JSON.stringify(t.lastEdit()) + ')');
+            await t.delim(';');
+            await t.delim(',');
+            const info = document.getElementById('info').textContent;
+            t.check(info === '2 rows × 2 columns', 'the row is still there after a switch (' + info + ')');
+            await t.edit(0, 1, '2');
+            t.check(t.lastEdit() === 'name,note\\ny,2\\n"   ","   "', 'and in the file after the next edit ('
+                + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
 ]);

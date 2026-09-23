@@ -80,8 +80,14 @@ async function main() {
     });
 
     await test('a delimiter switch re-splits the page on display', () => {
+        // The page reaches state.rawCsvText through readText in messaging.ts,
+        // the one place every text read into the grid goes through. Looking
+        // for the assignment in pagination.ts itself would fail although the
+        // page text is kept.
         const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'webview', 'features', 'pagination.ts'), 'utf8');
-        assert.ok(/state\.rawCsvText = msg\.text;/.test(src),
+        const messaging = fs.readFileSync(path.join(__dirname, '..', 'src', 'webview', 'messaging.ts'), 'utf8');
+        assert.ok(/readText\(msg\.text\);/.test(src)
+            && /export function readText\(text: string\)[\s\S]*?state\.rawCsvText = text;/.test(messaging),
             'the page text is not kept, switching the delimiter would jump back to page 1');
     });
 

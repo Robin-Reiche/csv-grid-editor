@@ -83,6 +83,17 @@ test('a new break typed into a cell that arrived as CRLF follows the file', () =
     assert.strictEqual(restoreLineBreaks('a\r\nb', 'a\nb\nc'), 'a\r\nb\r\nc');
 });
 
+// The textarea shows a lone CR and a mix of CRLF and LF as LF too. Committed
+// untouched, such a value came back with other breaks, so the file was
+// rewritten and marked unsaved by an edit that changed nothing.
+test('a value committed untouched comes back exactly, whatever its breaks', () => {
+    assert.strictEqual(restoreLineBreaks('x\ry', 'x\ny'), 'x\ry');
+    assert.strictEqual(restoreLineBreaks('x\r\ny\nz', 'x\ny\nz'), 'x\r\ny\nz');
+    assert.strictEqual(restoreLineBreaks('x\r\ry\r\n', 'x\n\ny\n'), 'x\r\ry\r\n');
+    // Changed, it still takes the style of the value it came from.
+    assert.strictEqual(restoreLineBreaks('x\r\ny\nz', 'x\ny\nz!'), 'x\r\ny\r\nz!');
+});
+
 test('an edited CRLF cell round-trips through the file unchanged', () => {
     const fromFile = parseCsv('note\n"a\r\nb"\n', ',')[1][0];
     const committed = restoreLineBreaks(fromFile, 'a\nb');          // what the textarea returns

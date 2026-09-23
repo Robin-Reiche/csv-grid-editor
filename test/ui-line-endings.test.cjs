@@ -115,6 +115,76 @@ runSuite('line endings (browser)', [
         `),
     },
     {
+        // A classic Mac file ends its rows with a lone CR. It opened as one
+        // header of four columns. The first edit joined its lines for good.
+        name: 'rows ending with a lone CR',
+        csv: 'a,b\r1,2\r3,4\r',
+        steps: steps(`
+            const info = document.getElementById('info').textContent;
+            t.check(info === '2 rows × 2 columns', 'the file opens as its rows (' + info + ')');
+            await t.edit(1, 1, 'X');
+            t.same(csv.replace('3,4', '3,X'), 'only the edited cell changes');
+        `),
+    },
+    {
+        // What Python's csv module writes on Windows without newline=''.
+        name: 'rows ending with CR CR LF',
+        csv: 'a,b\r\r\n1,2\r\r\n3,4\r\r\n',
+        steps: steps(`
+            await t.edit(1, 1, 'X');
+            t.same(csv.replace('3,4', '3,X'), 'only the edited cell changes');
+        `),
+    },
+    {
+        // The CR stays in its value. Written back bare, other programs would
+        // read it as a line break and split the row, so it gains quotes.
+        name: 'a CR inside an unquoted value',
+        csv: 'a,b\n1,x\ry\n3,4\n',
+        steps: steps(`
+            await t.edit(1, 1, 'X');
+            t.same(csv.replace('3,4', '3,X').replace('x', '"x').replace('y', 'y"'),
+                'the CR stays in the row nobody touched');
+        `),
+    },
+    {
+        // Other programs read it as the last line break. Kept in the last
+        // value, it gained quotes on the first edit and turned into part of
+        // the value for them.
+        name: 'a CR at the end of the file',
+        csv: 'a,b\n1,2\n3,4\r',
+        steps: steps(`
+            t.check(t.cell(1, 1).textContent === '4', 'the last value has no CR (' + JSON.stringify(t.cell(1, 1).textContent) + ')');
+            await t.edit(0, 1, 'X');
+            t.same('a,b\\n1,X\\n3,4\\n', 'it is written as the file ends its rows');
+        `),
+    },
+    {
+        // Python's csv module writes a value with a lone CR in quotes. The
+        // first edit in another row wrote it back bare.
+        name: 'a quoted value with a lone CR',
+        csv: 'a,b\n"x\ry",2\n3,4\n',
+        steps: steps(`
+            await t.edit(1, 1, 'X');
+            t.same(csv.replace('3,4', '3,X'), 'the value keeps its quotes');
+        `),
+    },
+    {
+        // The editor shows every break as LF. Enter on a value with a lone CR
+        // or with CRLF and LF mixed wrote it back with other breaks.
+        name: 'the editor opened and closed without a change',
+        csv: 'a,b\n"x\ry",2\n"x\r\ny\nz",4\n',
+        steps: steps(`
+            for (const row of [0, 1]) {
+                await t.focusCell(row, 0);
+                await t.pressEnter();
+                t.check(!!document.querySelector('#grid-container textarea'), 'the editor opens on row ' + row);
+                await t.pressEnter();
+                await t.wait(300);
+            }
+            t.check(t.sent('edit').length === 0, 'nothing is written (' + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
+    {
         // Deleting the only row leaves a CRLF file with no row break to read.
         // A delimiter switch reads the text again and fell back to LF, so the
         // next added row went into the file with LF.

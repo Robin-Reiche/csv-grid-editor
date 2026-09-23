@@ -89,6 +89,28 @@ test('a last line of spaces written in quotes is a value and keeps its row', () 
     assert.deepStrictEqual(parseCsv('a\n""', ',', false, true), [['a']]);
 });
 
+// The grid writes the file back after every edit. It wrote such a row without
+// its quotes, so the next read took it for a trailing blank line and the row
+// was gone after a save and reopen or a delimiter switch.
+test('a quoted last line of spaces keeps its row through an edit', () => {
+    const file = 'name,note\nx,1\n"   ","   "';
+    const format = { eol: '\n', finalNewline: false };
+    const rows = parseCsv(file, ',', false, true);
+    assert.strictEqual(toCsv(rows, ',', format), file);
+    rows[1][0] = 'y';
+    const written = toCsv(rows, ',', format);
+    assert.strictEqual(written, 'name,note\ny,1\n"   ","   "');
+    assert.deepStrictEqual(parseCsv(written, ',', false, true), [['name', 'note'], ['y', '1'], ['   ', '   ']]);
+    // Only the last line of a file without a final line break needs the
+    // quotes. Anywhere else a line of spaces is a row and stays unquoted.
+    assert.strictEqual(toCsv([['a'], ['   '], ['b']], ',', format), 'a\n   \nb');
+    assert.strictEqual(toCsv([['a'], ['   ']], ',', { eol: '\n', finalNewline: true }), 'a\n   \n');
+    // A single line of blank names with a delimiter is kept as a header anyway.
+    assert.strictEqual(toCsv([['  ', ' ']], ',', format), '  , ');
+    // The clipboard gets the spaces as they are.
+    assert.strictEqual(toCsv([['a'], ['   ']], ','), 'a\n   ');
+});
+
 test('a header of blank column names is still read as one', () => {
     assert.deepStrictEqual(parseCsv(',,,,', ',', false, true), [['', '', '', '', '']]);
 });

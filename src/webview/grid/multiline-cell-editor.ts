@@ -35,7 +35,13 @@ const MAX_ROWS     = 12;
 // LF the moment it was edited, even when the edit never went near the break
 // (issue #31), and saving wrote back a line nobody had touched. Whatever style
 // the value carried into the editor is the style it carries out.
+//
+// A value with a lone CR or with CRLF and LF mixed has no one style to put
+// back. Committed without a change it comes back exactly as it went in, so an
+// editor opened and closed again writes nothing. Changed, it takes CRLF when
+// it had any.
 export function restoreLineBreaks(original: string, edited: string): string {
+    if (edited === original.replace(/\r\n?/g, '\n')) return original;
     return original.includes('\r\n') ? edited.replace(/\r?\n/g, '\r\n') : edited;
 }
 

@@ -1,10 +1,9 @@
 import { state } from '../state';
-import { parseCsv, detectLineFormat } from '../utils/csv';
 import { buildGrid } from '../grid/builder';
+import { readText, refreshFindInPlace } from '../messaging';
 import { frozenRowPositions, reanchorFrozenRows } from './freeze-rows';
 import { closeAllPopups } from './popups';
 import { resetDuplicatesState } from './duplicates';
-import { loadRows } from './header-row';
 
 export function updateDelimiterBadge(delimiter: string): void {
     const badge = document.getElementById('delim-badge');
@@ -37,10 +36,7 @@ export function setupDelimiterBadge(): void {
             // so the rows are the same rows at the same positions — re-anchor the
             // frozen rows across the re-parse instead of losing them.
             const frozen = frozenRowPositions();
-            state.data = loadRows(parseCsv(state.rawCsvText, state.currentDelimiter, false, true));
-            // Which line breaks end a row depends on where quoted values start.
-            // That depends on the delimiter.
-            state.lineFormat = detectLineFormat(state.rawCsvText, state.currentDelimiter, state.lineFormat);
+            readText(state.rawCsvText);
             reanchorFrozenRows(frozen);
             state.hiddenCols.clear(); // re-parse may change the column set — drop index-based hide state
             state.autoFitCache = null;
@@ -52,6 +48,10 @@ export function setupDelimiterBadge(): void {
             // nothing, so notifyChange, which ends the view after every edit,
             // never runs here.
             resetDuplicatesState();
+            // The find matches were found in the columns as they were split
+            // before. Replace on one of them changed nothing and still sent
+            // the file.
+            refreshFindInPlace();
         });
     });
 

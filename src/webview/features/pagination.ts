@@ -1,8 +1,8 @@
 import { state } from '../state';
-import { parseCsv, detectLineFormat } from '../utils/csv';
 import { buildGrid } from '../grid/builder';
 import { hideLoader } from '../utils/loader';
-import { loadRows, rowsInFile } from './header-row';
+import { readText, refreshFindInPlace } from '../messaging';
+import { rowsInFile } from './header-row';
 
 export function requestPage(pageNum: number): void {
     vscodeApi.postMessage({ type: 'requestPage', pageNumber: pageNum });
@@ -42,11 +42,11 @@ export function handlePageData(msg: { pageNumber: number; totalPages: number; te
     // Switching the delimiter by hand re-splits this text (features/delimiter.ts),
     // so it has to be the page on display. It used to keep whatever the first page
     // held, which sent you back to page 1 while the bar still said page 6 (#34).
-    state.rawCsvText = msg.text;
-    state.data = loadRows(parseCsv(msg.text, state.currentDelimiter, false, true));
-    state.lineFormat = detectLineFormat(msg.text, state.currentDelimiter, state.lineFormat);
+    readText(msg.text);
     buildGrid();
     hideLoader();
+    // Another page, so the find matches of the last one are gone.
+    refreshFindInPlace();
 }
 
 export function setupPagination(): void {

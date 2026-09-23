@@ -1,9 +1,12 @@
 import { state, fileRows } from '../state';
 import { toCsv } from '../utils/csv';
 import { refreshGrid } from '../grid/refresh';
+import { buildGrid } from '../grid/builder';
 import { recomputeColTypes } from '../grid/column-type';
 import { resetDuplicatesState } from './duplicates';
 import { refreshProfileIfOpen } from './profile';
+import { updateDelimiterBadge } from './delimiter';
+import { refreshFindInPlace } from '../messaging';
 import type { UndoSnapshot } from '../types';
 
 // Captures the undoable view state: a deep clone of the data plus the freeze
@@ -11,24 +14,52 @@ import type { UndoSnapshot } from '../types';
 // indices) so it survives the deep clone — the clone makes new row arrays, so the
 // reference-based state.frozenRowRefs would otherwise go stale after a restore.
 // Captured together with the data so positions and data are always consistent.
+// The delimiter and the line format go along, since the rows are only what the
+// file says when they are written back with the delimiter they were split on.
 export function snapshot(): UndoSnapshot {
     return {
         data: JSON.parse(JSON.stringify(state.data)),
         frozenRowIdx: state.frozenRowRefs.map(r => state.data.indexOf(r)).filter(i => i >= 0),
         pinnedCols: [...state.pinnedCols],
+        delimiter: state.currentDelimiter,
+        lineFormat: { ...state.lineFormat },
     };
 }
 
+// Puts a step back and shows it. A step taken before a delimiter switch brings
+// its delimiter back, since its rows were split on that one. They used to be
+// written with the delimiter on the badge. A value holding the new delimiter
+// got quoted, which turned every line of the file into a single value. Where
+// the rows held the old one, it was swapped for the new one all through the
+// file.
 function restore(snap: UndoSnapshot): void {
+    const resplit = snap.delimiter !== state.currentDelimiter;
     state.data = snap.data;
+    state.currentDelimiter = snap.delimiter;
+    state.lineFormat = snap.lineFormat;
     // Re-anchor frozen rows to the restored (cloned) arrays at their saved
     // positions, and restore the frozen-column set.
     state.frozenRowRefs = snap.frozenRowIdx.map(i => state.data[i]).filter(Boolean) as string[][];
     state.pinnedCols = new Set(snap.pinnedCols);
+    if (!resplit) { refreshGrid(); return; }
+    // Other columns, so the grid is built for them the way a switch builds it
+    // (features/delimiter.ts).
+    updateDelimiterBadge(state.currentDelimiter);
+    state.hiddenCols.clear();
+    state.autoFitCache = null;
+    state.colTypes = [];
+    buildGrid();
 }
 
+// The step the last pushUndo took and the redo steps it cleared. Every change
+// that takes a step ends in notifyChange, which drops the step again when the
+// change left the table as it was (see there).
+let lastPushed: { step: UndoSnapshot; redo: UndoSnapshot[] } | null = null;
+
 export function pushUndo(): void {
-    state.undoStack.push(snapshot());
+    const step = snapshot();
+    lastPushed = { step, redo: state.redoStack };
+    state.undoStack.push(step);
     state.redoStack = [];
     state.autoFitCache = null;
     updateButtons();
@@ -58,10 +89,11 @@ export function undo(): void {
     if (state.undoStack.length === 0) return;
     state.redoStack.push(snapshot());
     restore(state.undoStack.pop()!);
-    refreshGrid();
     notifyChange();
     updateButtons();
     recomputeColTypes();
+    // The rows are replaced, so the find matches point at the rows before.
+    refreshFindInPlace();
 }
 
 export function redo(): void {
@@ -70,10 +102,10 @@ export function redo(): void {
     if (state.redoStack.length === 0) return;
     state.undoStack.push(snapshot());
     restore(state.redoStack.pop()!);
-    refreshGrid();
     notifyChange();
     updateButtons();
     recomputeColTypes();
+    refreshFindInPlace();
 }
 
 export function updateButtons(): void {
@@ -104,6 +136,23 @@ export function notifyChange(): void {
     // A file without a header row gets its rows only, never the column
     // letters the grid shows in its place (state.firstRowIsHeader).
     const text = toCsv(fileRows(state.data, !state.firstRowIsHeader), state.currentDelimiter, state.lineFormat);
+    // The file already holds this text when it is the one last sent or
+    // received. The extension marks the file unsaved for every edit it gets,
+    // so a Replace on a cell that no longer held the search text made the tab
+    // dirty with nothing changed. Such a change is not sent. The undo step it
+    // took is dropped as well when the table is still the one in that step,
+    // since it would undo nothing. The redo steps the step cleared come back.
+    const pushed = lastPushed;
+    lastPushed = null;
+    if (text === state.rawCsvText) {
+        const top = state.undoStack[state.undoStack.length - 1];
+        if (pushed && top === pushed.step && JSON.stringify(top.data) === JSON.stringify(state.data)) {
+            state.undoStack.pop();
+            state.redoStack = pushed.redo;
+            updateButtons();
+        }
+        return;
+    }
     state.rawCsvText = text;
     vscodeApi.postMessage({ type: 'edit', text });
 }

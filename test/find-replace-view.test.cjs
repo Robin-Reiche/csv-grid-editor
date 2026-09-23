@@ -241,4 +241,134 @@ runSuite('find and replace (browser)', [
             t.check(t.lastEdit() === 'k,v\\nc,x\\nb,y\\na,y\\nb,x\\na,x', 'the next Replace takes that row (' + JSON.stringify(t.lastEdit()) + ')');
         `),
     },
+    {
+        // The matches belonged to the rows before the change. The counter
+        // stayed, a cell that no longer matched was marked and Replace sent
+        // the file back unchanged, which marked it unsaved.
+        name: 'an outside change searches again',
+        csv: 'id,name,city\n1,Alice,Berlin\n2,Bob,Hanoi\n3,Carol,Paris',
+        steps: steps(`
+            await t.init(csv);
+            await find(t, 'bob', 'Robert');
+            t.check(count() === '1 / 1', 'Bob is found (' + count() + ')');
+            window.postMessage({ type: 'update', text: 'id,name,city\\n1,Alice,Berlin\\n2,Zed,Hanoi\\n3,Carol,Paris', delimiter: ',' }, '*');
+            await t.wait(400);
+            t.check(count() === '0 matches', 'the counter follows the change (' + count() + ')');
+            t.check(!document.querySelector('#grid-container .cell-find-match'), 'no cell is marked');
+            await press(t, 'replace-one');
+            t.check(t.sent('edit').length === 0, 'Replace writes nothing (' + JSON.stringify(t.lastEdit()) + ')');
+            t.check(document.getElementById('btn-undo').disabled, 'and leaves no undo step');
+        `),
+    },
+    {
+        // The matches were found in the columns before the switch.
+        name: 'a delimiter switch searches again',
+        csv: 'k;v\nb;x\ny;b\n',
+        steps: steps(`
+            await t.init(csv);
+            await find(t, 'b', 'Q');
+            await press(t, 'find-next');
+            t.check(count() === '2 / 2', 'the second match is active (' + count() + ')');
+            document.querySelector('.delim-option[data-delim=";"]').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(400);
+            t.check(!!t.cell(1, 1) && t.cell(1, 1).classList.contains('cell-find-active'),
+                'the active match is the b in the second column (' + count() + ')');
+            await press(t, 'replace-one');
+            t.check(t.lastEdit() === 'k;v\\nb;x\\ny;Q\\n', 'Replace takes that match (' + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
+    {
+        // The host marks the file unsaved for every edit it gets. A replace
+        // that leaves the text as it was is no change. The undo step it took
+        // would undo nothing. The redo step it cleared comes back.
+        name: 'a replace that changes nothing writes nothing',
+        csv: 'k,v\na,Bob\nb,x',
+        steps: steps(`
+            await t.init(csv);
+            await find(t, 'x', 'y');
+            await press(t, 'replace-one');
+            await press(t, 'btn-undo');
+            t.check(t.lastEdit() === csv, 'undo writes the file back (' + JSON.stringify(t.lastEdit()) + ')');
+            const sent = t.sent('edit').length;
+            await find(t, 'Bob', 'Bob');
+            await press(t, 'replace-one');
+            t.check(t.sent('edit').length === sent, 'Replace writes nothing (' + JSON.stringify(t.lastEdit()) + ')');
+            t.check(document.getElementById('btn-undo').disabled, 'no undo step is left behind');
+            t.check(!document.getElementById('btn-redo').disabled, 'the redo step is still there');
+        `),
+    },
+    {
+        // Undo brings back a value the search no longer counted. Kept, the
+        // matches left it unmarked and Next never got there.
+        name: 'undo and redo search again',
+        csv: 'k,v\na,b\nc,b',
+        steps: steps(`
+            await t.init(csv);
+            await find(t, 'b', 'Q');
+            await press(t, 'replace-one');
+            t.check(count() === '1 / 1', 'one match is left after the replace (' + count() + ')');
+            await press(t, 'btn-undo');
+            t.check(count() === '2 / 2' && t.cell(0, 1).classList.contains('cell-find-match'),
+                'undo counts the b it brings back (' + count() + ')');
+            await press(t, 'btn-redo');
+            t.check(count() === '1 / 1' && !t.cell(0, 1).classList.contains('cell-find-match'),
+                'redo takes it out again (' + count() + ')');
+        `),
+    },
+    {
+        // A search moves the view to its match. The search that runs again
+        // after an undo or an outside change took the user away from the row
+        // they had just changed or that had just changed under them.
+        name: 'searching again after undo or an outside change keeps the view',
+        csv: 'k,v\nneedle,0\n' + Array.from({ length: 300 }, (_, i) => 'r' + (i + 1) + ',' + (i + 1)).join('\n') + '\n',
+        steps: steps(`
+            await t.init(csv);
+            await find(t, 'needle', '');
+            t.check(count() === '1 / 1', 'the match in the first row is found (' + count() + ')');
+            const vp = document.querySelector('#grid-container .ag-body-viewport');
+            vp.scrollTop = vp.scrollHeight;
+            // In headless Chrome the grid never heard of a scroll set from a
+            // script and drew no rows down there. The event tells it.
+            vp.dispatchEvent(new Event('scroll'));
+            await t.wait(400);
+            const top = vp.scrollTop;
+            t.check(top > 0 && !!t.cell(290, 1), 'the grid is scrolled down to row 290 (' + top + ')');
+            await t.focusCell(290, 1);
+            await t.pressEnter();
+            const ta = document.querySelector('#grid-container textarea');
+            ta.value = 'X';
+            ta.dispatchEvent(new Event('input', { bubbles: true }));
+            await t.pressEnter();
+            await press(t, 'btn-undo');
+            t.check(vp.scrollTop === top, 'undo leaves the view where it was (' + vp.scrollTop + ', was ' + top + ')');
+            t.check(!!t.cell(290, 1) && t.cell(290, 1).textContent === '290', 'the undone value is on screen');
+            t.check(count() === '1 / 1', 'the counter is still right (' + count() + ')');
+            await press(t, 'btn-redo');
+            t.check(vp.scrollTop === top && !!t.cell(290, 1) && t.cell(290, 1).textContent === 'X',
+                'so does redo (' + vp.scrollTop + ')');
+            window.postMessage({ type: 'update', text: csv.replace('r290,290', 'needle,Y'), delimiter: ',' }, '*');
+            await t.wait(400);
+            t.check(vp.scrollTop === top && !!t.cell(290, 0) && t.cell(290, 0).textContent === 'needle',
+                'so does an outside change (' + vp.scrollTop + ')');
+            t.check(count() === '1 / 2', 'and the counter takes in its match (' + count() + ')');
+        `),
+    },
+    {
+        // The matches of the page before were counted and marked on the next
+        // one.
+        name: 'another page of the paged view searches again',
+        csv: 'k,v\nb,1\nc,2',
+        preview: { mode: 'chunked', total: 7 },
+        steps: steps(`
+            window.postMessage({ type: 'init', text: csv, delimiter: ',' }, '*');
+            window.postMessage({ type: 'pageData', pageNumber: 0, totalPages: 2, text: csv }, '*');
+            await t.wait(900);
+            await find(t, 'b', '');
+            t.check(count() === '1 / 1', 'page 1 has one match (' + count() + ')');
+            window.postMessage({ type: 'pageData', pageNumber: 1, totalPages: 2, text: 'k,v\\nq,b\\nb,b\\nr,3' }, '*');
+            await t.wait(500);
+            t.check(count() === '1 / 3', 'the counter is for page 2 (' + count() + ')');
+            t.check(!!t.cell(0, 1) && t.cell(0, 1).classList.contains('cell-find-active'), 'its first match is the active one');
+        `),
+    },
 ]);
