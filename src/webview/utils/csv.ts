@@ -138,15 +138,13 @@ export function parseCsv(text: string, delimiter: string, trimFields: boolean = 
         } else if (ch === LF || (ch === CR && crRows)) {
             // The CRs right in front of an LF belong to the break. That is
             // CRLF or the CR CR LF Python's csv module writes on Windows. In a
-            // file whose rows end with a lone CR that CR is the break. An LF
-            // straight after it belongs to it. Any other CR is part of the
-            // value. It used to be dropped, which lost a byte from a row
-            // nobody touched and read a whole Mac file as one row.
+            // file whose rows end with a lone CR that CR is the break. Such a
+            // file has no LF outside quotes, see rowsEndWithCr. Any other CR
+            // is part of the value. It used to be dropped, which lost a byte
+            // from a row nobody touched and read a whole Mac file as one row.
             let end = i;
             if (ch === LF) {
                 while (end > start && text.charCodeAt(end - 1) === CR) end--;
-            } else if (text.charCodeAt(i + 1) === LF) {
-                i++;
             }
             row.push(finalize(field + text.slice(start, end)));
             rows.push(row);
@@ -220,11 +218,9 @@ export function detectLineFormat(text: string, delimiter: string, previous?: Lin
             inQuotes = true;
         } else if (ch === delimiter) {
             blank = true;
-        } else if (crRows && (ch === '\r' || ch === '\n')) {
-            // Every break ends a row of a Mac file, a CRLF counted once, the
-            // way parseCsv splits it.
+        } else if (crRows && ch === '\r') {
+            // Every CR outside quotes ends a row of a Mac file.
             cr++;
-            if (ch === '\r' && text[i + 1] === '\n') i++;
             blank = true;
         } else if (ch === '\n') {
             // The CRs right before this break are outside quotes as well. A
