@@ -175,10 +175,14 @@ export function snapshotInHeaderMode(snap: UndoSnapshot, headerless: boolean): U
             data: withVirtualHeader(snap.data, true),
             frozenRowIdx: snap.frozenRowIdx.map(i => i + 1),
             pinnedCols: snap.pinnedCols,
+            delimiter: snap.delimiter,
+            lineFormat: snap.lineFormat,
         }
         : {
             data: fileRows(snap.data, true),
             frozenRowIdx: snap.frozenRowIdx.map(i => i - 1).filter(i => i >= 1),
             pinnedCols: snap.pinnedCols,
+            delimiter: snap.delimiter,
+            lineFormat: snap.lineFormat,
         };
 }

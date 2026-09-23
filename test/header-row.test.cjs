@@ -114,11 +114,18 @@ test('with a header the header row is left alone', () => {
 });
 
 test('an undo step moves to the other mode and back unchanged', () => {
-    const snap = { data: [['h1', 'h2'], ['1', '2']], frozenRowIdx: [1], pinnedCols: [0] };
+    // A step also holds the delimiter and the line format its rows were read
+    // with. The switch leaves both as they are.
+    const snap = {
+        data: [['h1', 'h2'], ['1', '2']], frozenRowIdx: [1], pinnedCols: [0],
+        delimiter: ';', lineFormat: { eol: '\r\n', finalNewline: true },
+    };
     const off = snapshotInHeaderMode(snap, true);
     assert.deepStrictEqual(off.data, [['A', 'B'], ['h1', 'h2'], ['1', '2']]);
     assert.deepStrictEqual(off.frozenRowIdx, [2]);
     assert.deepStrictEqual(off.pinnedCols, [0]);
+    assert.strictEqual(off.delimiter, ';');
+    assert.deepStrictEqual(off.lineFormat, { eol: '\r\n', finalNewline: true });
     assert.deepStrictEqual(snapshotInHeaderMode(off, false), snap);
 });
 

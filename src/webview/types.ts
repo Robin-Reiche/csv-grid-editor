@@ -1,4 +1,5 @@
 import type { HistBin } from './utils/histogram';
+import type { LineFormat } from './utils/csv';
 
 export type CsvRow = string[];
 
@@ -10,6 +11,12 @@ export interface UndoSnapshot {
     data: CsvRow[];
     frozenRowIdx: number[];
     pinnedCols: number[];
+    // The delimiter the rows were split with and the line format read with
+    // it. A step is written back with these, so undo past a delimiter switch
+    // brings the old delimiter back instead of writing rows split on one
+    // delimiter with another (features/undo-redo.ts).
+    delimiter: string;
+    lineFormat: LineFormat;
 }
 
 export type ColType =

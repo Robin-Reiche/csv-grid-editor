@@ -1,9 +1,11 @@
 import { state, fileRows } from '../state';
 import { toCsv } from '../utils/csv';
 import { refreshGrid } from '../grid/refresh';
+import { buildGrid } from '../grid/builder';
 import { recomputeColTypes } from '../grid/column-type';
 import { resetDuplicatesState } from './duplicates';
 import { refreshProfileIfOpen } from './profile';
+import { updateDelimiterBadge } from './delimiter';
 import type { UndoSnapshot } from '../types';
 
 // Captures the undoable view state: a deep clone of the data plus the freeze
@@ -11,20 +13,41 @@ import type { UndoSnapshot } from '../types';
 // indices) so it survives the deep clone — the clone makes new row arrays, so the
 // reference-based state.frozenRowRefs would otherwise go stale after a restore.
 // Captured together with the data so positions and data are always consistent.
+// The delimiter and the line format go along, since the rows are only what the
+// file says when they are written back with the delimiter they were split on.
 export function snapshot(): UndoSnapshot {
     return {
         data: JSON.parse(JSON.stringify(state.data)),
         frozenRowIdx: state.frozenRowRefs.map(r => state.data.indexOf(r)).filter(i => i >= 0),
         pinnedCols: [...state.pinnedCols],
+        delimiter: state.currentDelimiter,
+        lineFormat: { ...state.lineFormat },
     };
 }
 
+// Puts a step back and shows it. A step taken before a delimiter switch brings
+// its delimiter back, since its rows were split on that one. They used to be
+// written with the delimiter on the badge. A value holding the new delimiter
+// got quoted, which turned every line of the file into a single value. Where
+// the rows held the old one, it was swapped for the new one all through the
+// file.
 function restore(snap: UndoSnapshot): void {
+    const resplit = snap.delimiter !== state.currentDelimiter;
     state.data = snap.data;
+    state.currentDelimiter = snap.delimiter;
+    state.lineFormat = snap.lineFormat;
     // Re-anchor frozen rows to the restored (cloned) arrays at their saved
     // positions, and restore the frozen-column set.
     state.frozenRowRefs = snap.frozenRowIdx.map(i => state.data[i]).filter(Boolean) as string[][];
     state.pinnedCols = new Set(snap.pinnedCols);
+    if (!resplit) { refreshGrid(); return; }
+    // Other columns, so the grid is built for them the way a switch builds it
+    // (features/delimiter.ts).
+    updateDelimiterBadge(state.currentDelimiter);
+    state.hiddenCols.clear();
+    state.autoFitCache = null;
+    state.colTypes = [];
+    buildGrid();
 }
 
 export function pushUndo(): void {
@@ -58,7 +81,6 @@ export function undo(): void {
     if (state.undoStack.length === 0) return;
     state.redoStack.push(snapshot());
     restore(state.undoStack.pop()!);
-    refreshGrid();
     notifyChange();
     updateButtons();
     recomputeColTypes();
@@ -70,7 +92,6 @@ export function redo(): void {
     if (state.redoStack.length === 0) return;
     state.undoStack.push(snapshot());
     restore(state.redoStack.pop()!);
-    refreshGrid();
     notifyChange();
     updateButtons();
     recomputeColTypes();
