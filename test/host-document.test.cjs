@@ -35,6 +35,8 @@ const BOM = Buffer.from([0xEF, 0xBB, 0xBF]);
 const watchers = [];
 const warnings = [];
 let quickPickChoice = null;
+// What the last size question offered.
+let offered = null;
 // Lets a test pretend a small file is a large one, so the preview modes can be
 // reached without writing 50 MB to disk.
 let fakeSize = null;
@@ -50,7 +52,14 @@ class EventEmitter {
     dispose() {}
 }
 
-const uriFile = p => ({ fsPath: p, toString: () => 'file://' + p });
+const uriFile = p => ({ scheme: 'file', fsPath: p, toString: () => 'file://' + p });
+// The HEAD side of a Source Control diff: the git extension keeps the working
+// file's path and puts the ref in the query, so its fsPath is the working file.
+// VS Code reads it through the git extension, which serves the committed text
+// kept here.
+const gitBlobs = new Map();
+const uriGit = p => ({ scheme: 'git', fsPath: p, toString: () => 'git:' + p + '?%7B%22ref%22%3A%22~%22%7D' });
+const readUri = uri => uri.scheme === 'git' ? gitBlobs.get(uri.fsPath) : fs.readFileSync(uri.fsPath);
 
 const vscodeStub = {
     EventEmitter,
@@ -62,8 +71,8 @@ const vscodeStub = {
     RelativePattern: class { constructor(base, pattern) { this.base = base; this.pattern = pattern; } },
     workspace: {
         fs: {
-            stat: async uri => ({ size: fakeSize ?? fs.statSync(uri.fsPath).size }),
-            readFile: async uri => new Uint8Array(fs.readFileSync(uri.fsPath)),
+            stat: async uri => ({ size: fakeSize ?? readUri(uri).length }),
+            readFile: async uri => new Uint8Array(readUri(uri)),
             writeFile: async (uri, bytes) => {
                 if (duringNextWrite) {
                     const during = duringNextWrite;
@@ -90,7 +99,10 @@ const vscodeStub = {
         },
     },
     window: {
-        showQuickPick: async items => items.find(i => i.id === quickPickChoice),
+        showQuickPick: async items => {
+            offered = items.map(i => i.id);
+            return items.find(i => i.id === quickPickChoice);
+        },
         showWarningMessage: (msg, ...actions) => {
             const w = { msg, actions, pick: null };
             warnings.push(w);
@@ -202,10 +214,9 @@ async function attach(provider, doc) {
 }
 
 // Opens a file in the provider and hands back what a test needs to drive it.
-async function open(filePath, openContext = {}) {
+async function open(filePath, openContext = {}, uri = uriFile(filePath)) {
     const context = { extensionUri: uriFile('/ext'), globalState: { get: (_k, d) => d, update() {} } };
     const provider = new CsvEditorProvider(context);
-    const uri = uriFile(filePath);
     const doc = await provider.openCustomDocument(uri, openContext, {});
     const tab = {
         input: new TabInputCustom(uri, 'csvViewer.grid'), group, isActive: true, isDirty: false,
@@ -1067,6 +1078,26 @@ async function main() {
             assert.ok(!shown.includes('\uFFFD'), 'the preview holds U+FFFD');
         });
     }
+
+    // The HEAD side of the Source Control diff of a large file. Head, tail,
+    // the paged view and plain text read the file's path with Node's fs,
+    // which is the working copy, so both sides of the diff showed it.
+    await test('the HEAD side of a large file\'s diff shows the committed rows', async () => {
+        const rows = value => 'id,v\n' + Array.from({ length: 1500 }, (_, i) => `${i},${value}`).join('\n') + '\n';
+        const p = file('diff-head.csv', rows('WORKING COPY'));
+        gitBlobs.set(p, Buffer.from(rows('COMMITTED')));
+        fakeSize = 60 * 1024 * 1024;
+        for (const mode of ['plaintext', 'full']) {
+            quickPickChoice = mode;
+            const t = await open(p, {}, uriGit(p));
+            assert.deepStrictEqual(offered, ['full', 'plaintext'], 'the ways offered to open it');
+            await t.ready();
+            assert.strictEqual(t.posted.find(m => m.type === 'init').text, rows('COMMITTED'), mode + ' showed another text');
+        }
+        quickPickChoice = 'head';
+        await open(p);
+        assert.deepStrictEqual(offered, ['full', 'chunked', 'head', 'tail', 'plaintext'], 'the working file lost a way to open it');
+    });
 
     // A classic Mac file ends its rows with a lone CR. Detection counted the
     // separators of the first line up to an LF, which is the whole file there.

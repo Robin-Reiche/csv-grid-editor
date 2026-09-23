@@ -1,5 +1,4 @@
 import * as vscode from 'vscode';
-import * as fs from 'fs';
 import * as path from 'path';
 import { createHash } from 'crypto';
 import { getWebviewContent } from './webview';
@@ -329,7 +328,15 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
                 });
             }
 
-            const choice = await vscode.window.showQuickPick(quickPickItems, {
+            // Head, tail and the paged view read the file with Node's fs, which
+            // knows nothing but the path. The HEAD side of a Source Control
+            // diff is a git: URI with the working file's path, so they showed
+            // the working copy on both sides of the diff. A file that is not
+            // on disk is read through VS Code, which gives only all of it.
+            const offered = uri.scheme === 'file'
+                ? quickPickItems
+                : quickPickItems.filter(item => item.id === 'full' || item.id === 'plaintext');
+            const choice = await vscode.window.showQuickPick(offered, {
                 placeHolder: `This file is large (${sizeMB} MB). How would you like to open it?`,
                 ignoreFocusOut: true
             });
@@ -370,7 +377,7 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             }
 
             if (previewMode === 'plaintext') {
-                content = decodeFile(await fs.promises.readFile(filePath)).text;
+                content = decodeFile(await vscode.workspace.fs.readFile(uri)).text;
                 isPreview = true;
             } else if (previewMode === 'head') {
                 content = await readFirstRecords(filePath, PREVIEW_ROW_COUNT + 1, scanDelimiter, previewEncoding);
