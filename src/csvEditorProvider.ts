@@ -329,8 +329,11 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
                     // hold is the echo of our own save, not an external edit. Reloading
                     // on it would re-parse the CSV into fresh arrays and wipe in-memory
                     // view state (frozen rows, in particular). Only genuinely external
-                    // changes differ from document.content.
-                    if (text === document.content) return false;
+                    // changes differ from document.content. The byte order mark
+                    // counts too: the grid never sees it, so a program that only
+                    // adds or removes it leaves the text as it was, but the next
+                    // save has to write the file the way it is now.
+                    if (text === document.content && hasBom === document.hasBom) return false;
                     // The same echo, arriving late. The watcher reports a save only
                     // after the write, and with auto-save on the next edit can land
                     // in between: the editor has moved on, the disk still holds the
@@ -340,16 +343,18 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
                     // of blank names like ",,,,". A disk that holds what we last knew
                     // it holds has nothing new to say. Only the watcher waits like
                     // this: Reload from Disk is the explicit request for the disk.
-                    if (fromWatcher && text === document.diskText) return false;
+                    if (fromWatcher && text === document.diskText && hasBom === document.hasBom) return false;
                     // Another program changed the file while the grid holds
                     // unsaved edits. Loading it silently replaced those edits and
                     // left the tab dirty, so the next save made the loss final.
                     // Like VS Code's own text editors, keep the edits and let the
                     // user choose. Recording the new disk text makes a second
                     // event for the same write stay quiet. A later save still
-                    // resets it to what we wrote.
+                    // resets it to what we wrote. The mark is recorded as well,
+                    // so that save keeps the file's new mark or lack of one.
                     if (fromWatcher && document.content !== document.diskText) {
                         document.diskText = text;
+                        document.hasBom = hasBom;
                         void vscode.window.showWarningMessage(
                             `${fileName} changed on disk. Your unsaved edits in the grid were kept.`,
                             'Reload from Disk'
@@ -358,14 +363,19 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
                         });
                         return false;
                     }
+                    // When only the mark changed, the grid already shows this
+                    // text. Loading it again would cost the view state for nothing.
+                    const textChanged = text !== document.content;
                     document.content = text;
                     document.diskText = text;
                     document.hasBom = hasBom;
-                    webviewPanel.webview.postMessage({
-                        type: 'update',
-                        text: document.content,
-                        delimiter: document.delimiter
-                    });
+                    if (textChanged) {
+                        webviewPanel.webview.postMessage({
+                            type: 'update',
+                            text: document.content,
+                            delimiter: document.delimiter
+                        });
+                    }
                     return true;
                 } catch {
                     return false;
@@ -498,6 +508,13 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
     }
 
     async revertCustomDocument(document: CsvDocument, _cancellation: vscode.CancellationToken): Promise<void> {
+        // A preview cannot be edited, so there is nothing to revert. Reading the
+        // file here would load all of it, which is what the preview was picked
+        // to avoid on a file this large. The grid would also get rows the
+        // preview does not show. Re-reading the preview instead would turn
+        // revert into a reload, which a preview does not offer either (no
+        // watcher, no Reload from Disk). So the preview stays as it is.
+        if (document.isPreview) return;
         const raw = await vscode.workspace.fs.readFile(document.uri);
         ({ text: document.content, hasBom: document.hasBom } = decodeFile(raw));
         document.diskText = document.content;

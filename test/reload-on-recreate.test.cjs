@@ -47,7 +47,11 @@ test('both listeners run the same reload path', () => {
 });
 
 test('reload still ignores the echo of our own save', () => {
-    assert.ok(/if \(text === document\.content\) return false;/.test(src),
+    // The guard compares the byte order mark as well. Text alone would take a
+    // program that only adds or removes the mark for our own echo. The
+    // document would keep the mark as it was. The next save would then write
+    // that back.
+    assert.ok(/if \(text === document\.content && hasBom === document\.hasBom\) return false;/.test(src),
         'the identical-content guard is gone — saving would wipe frozen rows');
 });
 

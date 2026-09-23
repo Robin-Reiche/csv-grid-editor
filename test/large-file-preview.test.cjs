@@ -223,6 +223,48 @@ async function main() {
         assert.deepStrictEqual(parseCsv(await readFirstRecords(spaced, 2, ','), ','), want.slice(0, 2));
     });
 
+    // ── a byte order mark ───────────────────────────────────────────────────
+
+    // Excel writes UTF-8 CSV with a byte order mark. Open Full File leaves it
+    // out of the text (TextDecoder does), so the previews have to leave it out
+    // too. Otherwise the first header name starts with U+FEFF. These checks
+    // parse the way the grid does (messaging.ts), which keeps a U+FEFF where
+    // the default parse would trim it off. The mark also sits in front of a
+    // quote that opens the first field. The grid reads that quote as opening
+    // it, so the scanner has to as well.
+    const gridParse = text => parseCsv(text, ',', false, true);
+
+    await test('the previews leave a byte order mark out of the text', async () => {
+        const text = 'id,name\n1,a\n2,b\n3,c\n';
+        const bom = fixture('bom.csv', '\ufeff' + text);
+        const want = gridParse(text);
+        const head = await readFirstRecords(bom, 2, ',');
+        assert.deepStrictEqual(gridParse(head), want.slice(0, 2), 'head: ' + JSON.stringify(head));
+        const { content } = await readTailRecords(bom, 1, ',');
+        assert.deepStrictEqual(gridParse(content), [want[0], want[3]], 'tail: ' + JSON.stringify(content));
+        const index = await buildPageIndex(bom, 2, ',');
+        const page = await readPage(bom, index, 1);
+        assert.deepStrictEqual(gridParse(page), [want[0], want[3]], 'page: ' + JSON.stringify(page));
+        const single = fixture('bom-one-line.csv', '\ufeffid,name');
+        const whole = (await readTailRecords(single, 1, ',')).content;
+        assert.strictEqual(whole, 'id,name', 'tail of a file without a line break: ' + JSON.stringify(whole));
+    });
+
+    await test('a quote after the byte order mark opens the first field', async () => {
+        const text = '"first\nheader",b\n1,2\n3,4\n';
+        const bom = fixture('bom-quoted.csv', '\ufeff' + text);
+        const want = gridParse(text);
+        assert.strictEqual(want.length, 3, 'the fixture no longer parses to three records');
+        assert.strictEqual(await countRecords(bom, ','), want.length);
+        assert.deepStrictEqual(gridParse(await readFirstRecords(bom, 2, ',')), want.slice(0, 2));
+        const { content, totalRecordCount } = await readTailRecords(bom, 1, ',');
+        assert.strictEqual(totalRecordCount, want.length);
+        assert.deepStrictEqual(gridParse(content), [want[0], want[2]]);
+        const index = await buildPageIndex(bom, 1, ',');
+        assert.strictEqual(index.totalRows, want.length - 1);
+        assert.deepStrictEqual(gridParse(await readPage(bom, index, 0)), want.slice(0, 2));
+    });
+
     await test('the provider detects the delimiter before it scans', async () => {
         const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'csvEditorProvider.ts'), 'utf8');
         assert.ok(/scanDelimiter = this\.detectDelimiter\(filePath, await readFirstLine\(filePath\)\)/.test(src),

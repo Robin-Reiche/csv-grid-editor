@@ -182,4 +182,63 @@ runSuite('find and replace (browser)', [
             t.check(t.lastEdit() === 'a,b,c\\nfoo,1,x\\nfoo,2,y\\nbar,3,z', 'Replace takes that match (' + JSON.stringify(t.lastEdit()) + ')');
         `),
     },
+    {
+        // Replace is pressed before the search has caught up with the find
+        // box. The matches on hand still belong to the old text. An empty
+        // search text matches the empty string at the front of every cell.
+        name: 'replace right after emptying the find box',
+        csv: 'k,v\nx,abc\ny,abc',
+        steps: steps(`
+            await t.init(csv);
+            await find(t, 'b', 'Z');
+            t.check(count() === '1 / 2', 'two matches before the box is emptied (' + count() + ')');
+            const fi = document.getElementById('find-input');
+            fi.value = '';
+            fi.dispatchEvent(new Event('input', { bubbles: true }));
+            await press(t, 'replace-one');
+            t.check(t.sent('edit').length === 0, 'Replace writes nothing (' + JSON.stringify(t.lastEdit()) + ')');
+            t.check(col(t, 1, 2) === 'abc,abc', 'the grid keeps its values (' + col(t, 1, 2) + ')');
+            t.check(count() === '', 'the counter is cleared (' + JSON.stringify(count()) + ')');
+        `),
+    },
+    {
+        name: 'replace right after changing the find text',
+        csv: 'k,v\nx,abc\ny,xyz',
+        steps: steps(`
+            await t.init(csv);
+            await find(t, 'b', 'Z');
+            const fi = document.getElementById('find-input');
+            fi.value = 'y';
+            fi.dispatchEvent(new Event('input', { bubbles: true }));
+            await press(t, 'replace-one');
+            t.check(t.sent('edit').length === 0, 'the first press only searches (' + JSON.stringify(t.lastEdit()) + ')');
+            t.check(count() === '1 / 2', 'the counter shows the new text (' + count() + ')');
+            await press(t, 'replace-one');
+            t.check(t.lastEdit() === 'k,v\\nx,abc\\nZ,xyz', 'the second press replaces the match it showed (' + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
+    {
+        // "Show only duplicates" sorts the rows by group. The replace ends
+        // that view, which puts them back in file order. The counter has to
+        // move on from where the replaced row is now, not from the place it
+        // had in the duplicates view.
+        name: 'replace in the duplicates view',
+        csv: 'k,v\nc,x\nb,x\na,x\nb,x\na,x',
+        steps: steps(`
+            await t.init(csv);
+            await press(t, 'btn-duplicates');
+            await press(t, 'dup-only-toggle');
+            t.check(col(t, 0, 4) === 'a,a,b,b', 'the duplicates view groups the rows (' + col(t, 0, 4) + ')');
+            await find(t, 'x', 'y');
+            await press(t, 'find-next');
+            await press(t, 'find-next');
+            t.check(count() === '3 / 4', 'Next moved to the first b row (' + count() + ')');
+            await press(t, 'replace-one');
+            t.check(t.lastEdit() === 'k,v\\nc,x\\nb,y\\na,x\\nb,x\\na,x', 'Replace takes that row (' + JSON.stringify(t.lastEdit()) + ')');
+            t.check(col(t, 0, 5) === 'c,b,a,b,a', 'the replace ends the view (' + col(t, 0, 5) + ')');
+            t.check(count() === '2 / 4', 'the counter moves on to the row after it in file order (' + count() + ')');
+            await press(t, 'replace-one');
+            t.check(t.lastEdit() === 'k,v\\nc,x\\nb,y\\na,y\\nb,x\\na,x', 'the next Replace takes that row (' + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
 ]);

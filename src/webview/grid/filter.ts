@@ -105,20 +105,39 @@ export function createCombinedFilter(colType: ColType): any {
             }
         }
 
-        // Switching "Hide spaces around values" changes what a value is keyed
-        // under, so the list and the ticks made under the old setting are
-        // carried over to the new keys: a new key stays ticked when any row
-        // behind it was ticked before. Everything that reads the keys calls
-        // this first, so the filter never compares keys of two kinds.
-        _syncKeys() {
-            if (this._keyedTrimmed === state.settings.trimDisplay) return;
+        // Brings the list and the ticks up to date with the rows. The list is
+        // made from the rows, so an edit, a paste or an outside change that
+        // brings in a value or takes the last one away leaves it stale. Opening
+        // the panel passes `force` for that reason. Switching "Hide spaces
+        // around values" changes what a value is keyed under, so everything
+        // that reads the keys calls this first. The filter then never compares
+        // keys of two kinds.
+        //
+        // The ticks carry over row by row: a new key is ticked when any row
+        // behind it was ticked under the old key. A value the old list did not
+        // have follows Select all. It is ticked when every value was, so a
+        // filter that let everything through still does. Otherwise it is
+        // unticked, which is how the filter already treated it. While the
+        // keys stay the same, the ticks of values no row holds right now are
+        // kept, so an undo that brings a ticked value back finds it still
+        // ticked.
+        _syncKeys(force = false) {
+            const rekey = this._keyedTrimmed !== state.settings.trimDisplay;
+            if (!rekey && !force) return;
             const field = this.params.column.getColId();
-            const checked = new Set<string>();
+            const known = new Set(this.allValues);
+            const allTicked = this.allValues.every(v => this.checkedValues.has(v))
+                && (!this.hasBlank || this.checkedValues.has('__blank__'));
+            const wasTicked = (oldKey: string) =>
+                oldKey === '' ? (this.hasBlank ? this.checkedValues.has('__blank__') : allTicked)
+                    : known.has(oldKey) ? this.checkedValues.has(oldKey) : allTicked;
+            const checked = rekey ? new Set<string>() : new Set(this.checkedValues);
             if (this.checkedValues.has('__blank__')) checked.add('__blank__');
             this.params.api.forEachNode((n: any) => {
                 const v = n.data[field];
+                if (!wasTicked(filterKey(v, this._keyedTrimmed))) return;
                 const newKey = filterKey(v, state.settings.trimDisplay);
-                if (newKey !== '' && this.checkedValues.has(filterKey(v, this._keyedTrimmed))) checked.add(newKey);
+                checked.add(newKey === '' ? '__blank__' : newKey);
             });
             this._buildValueList();
             this.checkedValues = checked;
@@ -439,6 +458,10 @@ export function createCombinedFilter(colType: ColType): any {
         }
 
         getGui() { return this.eGui; }
+
+        // AG Grid calls this each time the panel opens, which is when a stale
+        // list would show.
+        afterGuiAttached() { this._syncKeys(true); }
 
         isFilterActive() {
             this._syncKeys();
