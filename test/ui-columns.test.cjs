@@ -147,6 +147,16 @@ runSuite('columns (browser)', [
         `),
     },
     {
+        // No row means no column type to work out, so nothing else on the way
+        // renames the headers.
+        name: 'an outside change renames the headers of a table with no rows',
+        csv: 'a,b',
+        steps: steps(`
+            await t.update('x,y');
+            t.check(t.names() === 'x|y|-|-', 'the headers read the new names (' + t.names() + ')');
+        `),
+    },
+    {
         name: 'an outside change adds a column while a cell is being edited',
         csv: 'a,b\n1,2\n3,4',
         steps: steps(`
