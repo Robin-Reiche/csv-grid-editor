@@ -295,6 +295,13 @@ export function buildGrid(): void {
             editable: !IS_PREVIEW,
             sortable: true, resizable: true,
             cellClassRules,
+            // Every value in this grid is text. The column types the headers
+            // show come from column-type.ts. Left to itself, AG Grid guesses a
+            // type of its own from the first row and then refuses a typed
+            // value that does not fit it. A yyyy-mm-dd date there made the
+            // column take such dates only. Anything else typed in, an emptied
+            // cell too, was thrown away.
+            cellDataType: false,
         },
         // External filter for "show only duplicates" mode — kept independent of
         // user column filters so toggling dup-only doesn't clobber them.
