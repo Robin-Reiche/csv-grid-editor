@@ -277,6 +277,64 @@ runSuite('settings menu (browser)', [
         }`,
     },
     {
+        name: 'Escape gives the keys back to the grid',
+        csv: ['n,v'].concat(Array.from({ length: 12 }, (_, i) => i + ',' + i)).join('\n'),
+        // A real click focuses what it lands on and a real key goes to the
+        // focused element. The clicks and keys here are sent by hand, so the
+        // focus is moved the same way first.
+        steps: async (t, csv) => {
+            await t.init(csv);
+            const onCell = () => {
+                const a = document.activeElement;
+                const cell = a && a.closest && a.closest('#grid-container .ag-cell');
+                return cell ? cell.closest('.ag-row').getAttribute('row-index') + '/' + cell.getAttribute('col-id') : String(a && a.tagName);
+            };
+            const press = async (key) => {
+                document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+                await t.wait(250);
+            };
+            const clickOn = async (el) => {
+                el.focus();
+                el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+                await t.wait(200);
+            };
+            t.cell(6, 1).focus();
+            await t.focusCell(6, 1);
+            t.check(onCell() === '6/col_1', 'the clicked cell has the keyboard (' + onCell() + ')');
+
+            await clickOn(document.getElementById('btn-settings'));
+            const box = t.settingBox('markEmpty');
+            await clickOn(box);
+            await clickOn(box);
+            await press('Escape');
+            t.check(document.getElementById('settings-popover').classList.contains('hidden'), 'Escape closes the settings menu');
+            t.check(onCell() === '6/col_1', 'and the cell has the keyboard again (' + onCell() + ')');
+            await press('ArrowUp');
+            t.check(t.focusedRow() === 5, 'so the arrow keys move again (row ' + t.focusedRow() + ')');
+
+            await clickOn(document.getElementById('btn-columns'));
+            t.check(!document.getElementById('col-chooser-popover').classList.contains('hidden'), 'the column chooser is open');
+            await press('Escape');
+            t.check(onCell() === '5/col_1', 'Escape in the column chooser gives the cell back too (' + onCell() + ')');
+
+            await clickOn(document.getElementById('btn-export'));
+            await press('Escape');
+            t.check(onCell() === '5/col_1', 'and in the Export menu (' + onCell() + ')');
+
+            // A menu opened on a cell leaves the focus where it was, on that cell.
+            const c = t.cell(3, 0);
+            const r = c.getBoundingClientRect();
+            c.focus();
+            c.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 2, clientX: r.left + 5, clientY: r.top + 5 }));
+            c.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 5, clientY: r.top + 5 }));
+            await t.wait(200);
+            const where = onCell();
+            await press('Escape');
+            t.check(document.getElementById('row-context-menu').classList.contains('hidden') && onCell() === where,
+                'the row menu closes and the focus stays on its cell (' + where + ' then ' + onCell() + ')');
+        },
+    },
+    {
         name: 'remembered settings',
         csv: CITIES,
         settings: { colorMode: true, typeBadges: false, alignNumbers: true },

@@ -1,4 +1,5 @@
 import { state } from '../state';
+import { focusCell } from '../grid/refresh';
 
 // ── Central popup coordinator (issue #15) ─────────────────────────────────────
 // The grid has several transient popups: the column and row context menus, the
@@ -62,7 +63,18 @@ export function setupPopups(): void {
         }
 
         if (!isAnyPopupOpen()) return;
+        // Read before closing: hiding a popover takes the focus off whatever
+        // inside it had it.
+        const active = document.activeElement;
         closeAllPopups();
         e.preventDefault();
+        // The popover or the toolbar button that opened it had the keyboard.
+        // Once it is gone the keys go nowhere until a cell is clicked, so the
+        // cell gets them back, the way closing Find and Go to row does it. A
+        // menu opened on a cell or a header left the focus in the grid. There
+        // it stays.
+        if (!active || !document.getElementById('grid-container')?.contains(active)) {
+            focusCell(state.focusedCellRowIndex, state.focusedCellColId);
+        }
     }, true);
 }
