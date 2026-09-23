@@ -14,9 +14,12 @@ node_modules/**
 .vscode-test/**
 *.vsix
 *.ts
-!out/**
+!out/**/*.js
 tsconfig.json
 feature_ideen.txt
 test.csv
 .gitignore
 package-lock.json
+# Source maps only help while developing. Nothing in the installed extension
+# loads them.
+**/*.map
