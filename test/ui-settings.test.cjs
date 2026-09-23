@@ -17,6 +17,54 @@ const CITIES = [
     'Paris,true,1500,',
 ].join('\n');
 
+// Padding in a header, before a value, after a value and in front of a value
+// with a line break in it. The last header has a line break of its own.
+const PADDED = [
+    '    city,n,"  top\nbottom"',
+    '     Berlin,1,a',
+    'Berlin,2,b',
+    'Berlin     ,3,c',
+    '"  Ber\nlin",4,d',
+].join('\n');
+
+// Where the browser draws text, which is what the spaces switch is about. A
+// value can hold its spaces while the browser draws them zero wide, so reading
+// textContent alone proves nothing. Runs in the page.
+const DRAWN = `
+    // x of the first "letter" inside el, from el's left edge. null if absent.
+    t.xOf = (el, letter) => {
+        const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+        for (let n = w.nextNode(); n; n = w.nextNode()) {
+            const i = n.data.indexOf(letter);
+            if (i < 0) continue;
+            const r = document.createRange();
+            r.setStart(n, i);
+            r.setEnd(n, i + 1);
+            return r.getBoundingClientRect().left - el.getBoundingClientRect().left;
+        }
+        return null;
+    };
+    // y of the first "letter" inside el, from el's top edge.
+    t.yOf = (el, letter) => {
+        const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+        for (let n = w.nextNode(); n; n = w.nextNode()) {
+            const i = n.data.indexOf(letter);
+            if (i < 0) continue;
+            const r = document.createRange();
+            r.setStart(n, i);
+            r.setEnd(n, i + 1);
+            return r.getBoundingClientRect().top - el.getBoundingClientRect().top;
+        }
+        return null;
+    };
+    // How wide the text inside el is drawn, spaces included where they show.
+    t.drawnWidth = el => {
+        const r = document.createRange();
+        r.selectNodeContents(el);
+        return r.getBoundingClientRect().width;
+    };
+`;
+
 const BOOLEANS = [
     'name,active,sub,flag,tf,sw,num,note',
     'a,true,Yes,Y,T,ON,1,alpha',
@@ -129,6 +177,104 @@ runSuite('settings menu (browser)', [
             t.check(t.sent('edit').length === 0, 'no switch wrote anything to the file ('
                 + t.sent('edit').length + ' edits)');
         },
+    },
+    {
+        name: 'spaces shown are drawn',
+        csv: PADDED,
+        settings: { trimDisplay: false },
+        // Wrap cell text stays off, its default. A line that does not wrap
+        // drops the spaces at its start and end, so the cells held their
+        // padding and drew it zero wide.
+        steps: `async (t, csv) => {
+            ${DRAWN}
+            await t.init(csv);
+            const padded = t.xOf(t.cell(0, 0), 'B'), plain = t.xOf(t.cell(1, 0), 'B');
+            t.check(padded - plain > 10, 'five spaces push the word to the right (B at ' + padded + ' against ' + plain + ')');
+            const trailing = t.drawnWidth(t.cell(2, 0)), bare = t.drawnWidth(t.cell(1, 0));
+            t.check(trailing - bare > 10, 'spaces after a value take room too (' + trailing + ' against ' + bare + ')');
+
+            const head = t.header(0).querySelector('.ag-header-cell-text');
+            t.check(t.xOf(head, 'c') > 8, 'the header draws its spaces (c at ' + t.xOf(head, 'c') + ')');
+            const multi = t.header(2).querySelector('.ag-header-cell-text');
+            const size = parseFloat(getComputedStyle(multi).fontSize);
+            t.check(multi.getBoundingClientRect().height < size * 1.8 && t.xOf(multi, 't') > 4,
+                'a header with a line break keeps to one line and shows its spaces ('
+                + multi.getBoundingClientRect().height + 'px high, t at ' + t.xOf(multi, 't') + ')');
+
+            const cell = t.cell(3, 0);
+            t.check(Math.abs(t.yOf(cell, 'l') - t.yOf(cell, 'B')) < 2 && t.xOf(cell, 'B') - plain > 4,
+                'a value with a line break stays on one line with its spaces (B at y ' + t.yOf(cell, 'B')
+                + ', l at y ' + t.yOf(cell, 'l') + ')');
+            document.getElementById('btn-wraptext').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(400);
+            const wrapped = t.cell(3, 0);
+            t.check(t.yOf(wrapped, 'l') - t.yOf(wrapped, 'B') > 5, 'with Wrap cell text on the break is a real one ('
+                + t.yOf(wrapped, 'B') + ' and ' + t.yOf(wrapped, 'l') + ')');
+            document.getElementById('btn-wraptext').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(400);
+            t.check(Math.abs(t.yOf(t.cell(3, 0), 'l') - t.yOf(t.cell(3, 0), 'B')) < 2, 'and off again it is back on one line');
+
+            t.click(t.header(0).querySelector('.ag-header-cell-filter-button, .ag-header-cell-menu-button'));
+            await t.wait(300);
+            const labels = [...document.querySelectorAll('.csv-filter-value-label')];
+            const lab = text => labels.find(l => l.textContent === text);
+            t.check(!!lab('     Berlin') && !!lab('Berlin'), 'the value filter lists the padded value apart');
+            if (lab('     Berlin') && lab('Berlin')) {
+                t.check(t.drawnWidth(lab('     Berlin')) - t.drawnWidth(lab('Berlin')) > 10,
+                    'and draws it with its spaces, so the two do not look the same');
+            }
+            // A value with a line break shows its first line and an ellipsis.
+            // A label only as wide as that line had no room for the ellipsis.
+            // The browser dropped the word to make some.
+            const two = lab('  Ber\\nlin');
+            if (two) {
+                const r = document.createRange();
+                r.setStart(two.firstChild, 0);
+                r.setEnd(two.firstChild, 5);
+                const line = r.getBoundingClientRect().width;
+                t.check(two.clientWidth > line + 10 && t.yOf(two, 'B') < 4, 'a listed value with a line break keeps its first line in view ('
+                    + two.clientWidth + ' wide for a ' + line + ' line)');
+            } else {
+                t.check(false, 'the value filter lists the value with a line break');
+            }
+            document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+            await t.wait(200);
+
+            document.getElementById('btn-columns').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(200);
+            const name = [...document.querySelectorAll('.col-chooser-label')].find(l => l.textContent === '    city');
+            t.check(!!name && t.xOf(name, 'c') > 8, 'the column chooser draws the spaces of a name ('
+                + (name && t.xOf(name, 'c')) + ')');
+            document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+            await t.wait(100);
+
+            await t.setSetting('trimDisplay', true);
+            t.check(Math.abs(t.xOf(t.cell(0, 0), 'B') - t.xOf(t.cell(1, 0), 'B')) < 1, 'switched back on, the spaces are gone');
+            t.check(t.xOf(t.header(0).querySelector('.ag-header-cell-text'), 'c') < 2, 'from the header too');
+        }`,
+    },
+    {
+        name: 'auto-fit makes room for the spaces shown',
+        // The padded value sits far below the first screen, where the check
+        // auto-fit runs on the drawn cells cannot see it, so the measurement
+        // alone has to get it right.
+        csv: ['city,n'].concat(Array.from({ length: 80 }, (_, i) =>
+            (i === 70 ? ' '.repeat(40) + 'Berlin' : 'Paris') + ',' + i)).join('\n'),
+        settings: { trimDisplay: false },
+        steps: `async (t, csv) => {
+            ${DRAWN}
+            await t.init(csv);
+            document.getElementById('btn-autofit').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(1500);
+            const viewport = document.querySelector('#grid-container .ag-body-viewport');
+            viewport.scrollTop = 100000;
+            viewport.dispatchEvent(new Event('scroll'));
+            await t.wait(500);
+            const cell = t.cell(70, 0);
+            t.check(!!cell && t.xOf(cell, 'B') > 60, 'the spaces are drawn (B at ' + (cell && t.xOf(cell, 'B')) + ')');
+            t.check(!!cell && cell.scrollWidth <= cell.clientWidth, 'and the column is wide enough for them ('
+                + (cell && cell.scrollWidth) + ' in ' + (cell && cell.clientWidth) + ')');
+        }`,
     },
     {
         name: 'remembered settings',

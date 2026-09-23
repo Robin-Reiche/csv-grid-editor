@@ -55,8 +55,11 @@ export function paint(host: HTMLElement, value: string): void {
         // break itself has to go back in behind it. Without it the wrap mode has
         // nothing to break on (white-space: pre-wrap needs a real newline in the
         // text) and the value would run on to the column edge instead. With
-        // wrapping off the cell is nowrap, where this collapses to one space.
-        if (seg.newline) host.appendChild(document.createTextNode('\n'));
+        // wrapping off the row is one line high and the break is drawn as a
+        // space. That is what nowrap made of a newline. A newline would be a
+        // real break under the pre that shows the spaces around a value
+        // (media/webview.css).
+        if (seg.newline) host.appendChild(document.createTextNode(state.wrapText ? '\n' : ' '));
     }
 }
 
@@ -66,9 +69,10 @@ export class ControlCharCellRenderer {
     private eGui!: HTMLSpanElement;
     private params: any = null;
     // What is currently drawn: the value plus how it is drawn. A cell in a
-    // true/false column can be drawn as a box or as its text (issue #41), and
-    // switching the mode changes the second half of this key without the value
-    // moving, so a repaint is needed for a value that did not change.
+    // true/false column can be drawn as a box or as its text (issue #41). A
+    // line break is drawn differently with wrapping on and off (paint).
+    // Switching either mode changes this key without the value moving, so a
+    // repaint is needed for a value that did not change.
     private painted: string | null = null;
 
     init(params: any): void {
@@ -92,7 +96,7 @@ export class ControlCharCellRenderer {
         const value   = valueOf(params);
         const checked = boolCellState(params);
         const shown   = shownValue(value);
-        const key     = (checked === null ? 't' : checked ? '1' : '0') + '\u0000' + shown;
+        const key     = (checked === null ? 't' : checked ? '1' : '0') + (state.wrapText ? 'w' : '') + '\u0000' + shown;
         // Unchanged → leave the DOM alone, for the same reason.
         if (key === this.painted) return;
         this.painted = key;

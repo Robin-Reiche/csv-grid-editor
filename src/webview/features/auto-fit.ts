@@ -153,7 +153,12 @@ export function measureTextWidths(): { colId: string; width: number }[] {
     probe.style.opacity       = '0';
     probe.style.pointerEvents = 'none';
     probe.style.zIndex        = '-9999';
-    probe.style.whiteSpace    = 'nowrap';
+    // The spaces count the way the grid draws them. Under nowrap the ones at
+    // the start and end of a value take no room, which is right while "Hide
+    // spaces around values" is on. Switched off, the grid draws them with pre
+    // (media/webview.css). A probe that dropped them would size a padded
+    // value's column too narrow for it.
+    probe.style.whiteSpace    = state.settings.trimDisplay ? 'nowrap' : 'pre';
     probe.style.fontFamily    = fontFamily;
     probe.style.fontSize      = fontSize + 'px';
     if (letterSpacing !== 0) probe.style.letterSpacing = letterSpacing + 'px';
@@ -197,7 +202,10 @@ export function measureTextWidths(): { colId: string; width: number }[] {
             const rangeW = range.getBoundingClientRect().width;
             if (rangeW < 10) return;
             probe.style.fontWeight = getComputedStyle(textEl).fontWeight || '400';
-            probe.textContent = text;
+            // The node as it stands, not the trimmed text: the Range above
+            // covers the spaces the cell draws, so the probe has to hold them
+            // too. Where the cell drops them the probe drops them as well.
+            probe.textContent = textNode.data;
             const probeW = probe.offsetWidth;
             if (probeW < 10) return;
             samples.push(rangeW / probeW);

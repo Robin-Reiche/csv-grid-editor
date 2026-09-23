@@ -805,6 +805,40 @@ body.vscode-high-contrast #grid-container.cm-on {
     padding-bottom: 3px;
 }
 
+/* "Hide spaces around values" switched off (features/settings-menu.ts puts
+   the class on the body). The cells, the header names and the lists of names
+   and values then hold the padding, but a line that does not wrap drops the
+   spaces at its start and end, so the padding was drawn zero wide and
+   '     Berlin' looked exactly like 'Berlin'. pre draws every space and still
+   keeps the text on one line, so the ellipsis stays. A wrapped cell draws its
+   spaces already (pre-wrap above). In a cell a line break is drawn as a chip
+   and a space while wrapping is off (grid/control-char-cell.ts), so pre finds
+   no break to follow there. */
+body.spaces-shown :is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-cell:not(.ag-cell-wrap-text) {
+    white-space: pre;
+}
+/* A name or a listed value can hold a line break of its own, which pre turns
+   into a second line. The header is one line high, so a name keeps to its
+   first line there. */
+body.spaces-shown :is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-header-cell-text {
+    white-space: pre !important;
+    line-height: 1.3 !important;
+    max-height: 1.3em;
+}
+/* In the name and value lists the first line ends in an ellipsis, so '  Ber'
+   and a value going on after it on a second line do not look alike. A clamped
+   line is only as wide as the text, which leaves the ellipsis no room and
+   drops the last word for it, so the label takes the rest of its row. */
+body.spaces-shown .csv-filter-value-label,
+body.spaces-shown .col-chooser-label {
+    white-space: pre;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 1;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
 /* The multi-line cell editor (grid/multiline-cell-editor.ts): a popup laid over
    the cell, so it is free to grow past the row height while typing. Its height
    is set inline by the editor as the content grows. */

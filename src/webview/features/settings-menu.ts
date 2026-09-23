@@ -85,7 +85,13 @@ const ITEMS: SettingItem[] = [
         key: 'trimDisplay', group: 'View',
         label: 'Hide spaces around values',
         hint: 'Leaves leading and trailing spaces off the screen. The file keeps them.',
-        apply: () => { redrawCells(); syncColumnHeaders(); dropAutoFit(); reapplySortAndFilter(); },
+        apply: () => {
+            // Without the class the browser drops the spaces at the start and
+            // end of a line that does not wrap. The values would keep their
+            // padding without showing it (media/webview.css).
+            document.body.classList.toggle('spaces-shown', !state.settings.trimDisplay);
+            redrawCells(); syncColumnHeaders(); dropAutoFit(); reapplySortAndFilter();
+        },
     },
     {
         key: 'enterMovesDown', group: 'Editing',
