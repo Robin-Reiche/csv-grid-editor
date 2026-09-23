@@ -40,10 +40,12 @@ test('both listeners run the same reload path', () => {
     const change = src.match(/watcher\.onDidChange\(([^\n]*)\)/);
     const create = src.match(/watcher\.onDidCreate\(([^\n]*)\)/);
     assert.ok(change && create, 'could not read both listener bodies');
-    // reload(true): the watcher's variant, which also ignores a late echo of our
-    // own save (test/autosave-echo.test.cjs). Both events have to use it.
-    assert.ok(/reload\(true\)/.test(change[1]), 'onDidChange does not call reload(true)');
-    assert.ok(/reload\(true\)/.test(create[1]), 'onDidCreate does not call reload(true)');
+    // reload(document, true): the watcher's variant, which also ignores a late
+    // echo of our own save (test/autosave-echo.test.cjs). Both events have to
+    // use it. The reload takes the document first because there is one per
+    // document, shared by every editor that shows it.
+    assert.ok(/reload\(document, true\)/.test(change[1]), 'onDidChange does not call reload(document, true)');
+    assert.ok(/reload\(document, true\)/.test(create[1]), 'onDidCreate does not call reload(document, true)');
 });
 
 test('reload still ignores the echo of our own save', () => {

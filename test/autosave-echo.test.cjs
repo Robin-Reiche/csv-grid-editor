@@ -149,8 +149,7 @@ async function main() {
         // shares the reload path, so it must not inherit the watcher's patience.
         const t = await open('/data/manual.csv', 'a\n1\n');
         await t.edit('a\n1\n2');
-        const reload = t.provider._reloaders.get(t.uri.toString());
-        const changed = await reload();
+        const changed = await t.provider.reload(t.doc);
         assert.strictEqual(changed, true, 'the command reported "already up to date" with unsaved edits on screen');
         assert.strictEqual(t.doc.content, 'a\n1\n');
     });

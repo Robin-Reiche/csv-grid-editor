@@ -69,7 +69,11 @@ const vscodeStub = {
             delete: async uri => fs.rmSync(uri.fsPath, { force: true }),
         },
         createFileSystemWatcher: () => {
-            const w = { change: [], create: [], onDidChange(f) { this.change.push(f); }, onDidCreate(f) { this.create.push(f); }, dispose() {} };
+            const w = {
+                change: [], create: [], disposed: false,
+                onDidChange(f) { this.change.push(f); }, onDidCreate(f) { this.create.push(f); },
+                dispose() { this.disposed = true; },
+            };
             watchers.push(w);
             return w;
         },
@@ -87,6 +91,13 @@ const vscodeStub = {
     Disposable: { from() {} },
 };
 
+// VS Code's tabs, as far as the provider looks at them: one editor group with
+// a tab for each file open() opens.
+class TabInputCustom { constructor(uri, viewType) { this.uri = uri; this.viewType = viewType; } }
+const group = { tabs: [], activeTab: null, viewColumn: 1, isActive: true };
+vscodeStub.TabInputCustom = TabInputCustom;
+vscodeStub.window.tabGroups = { all: [group], activeTabGroup: group };
+
 const load = Module._load;
 Module._load = function (request, ...rest) {
     if (request === 'vscode') return vscodeStub;
@@ -101,6 +112,8 @@ async function test(name, fn) {
     fakeSize = null;
     quickPickChoice = null;
     failNextWrite = false;
+    group.tabs.length = 0;
+    group.activeTab = null;
     try { await fn(); console.log('  ✓ ' + name); }
     catch (e) { failures++; console.error('  ✗ ' + name + '\n      ' + e.message); }
 }
@@ -111,14 +124,11 @@ function file(name, content) {
     return p;
 }
 
-// Opens a file in the provider and hands back what a test needs to drive it.
-async function open(filePath, openContext = {}) {
-    watchers.length = 0;
-    const context = { extensionUri: uriFile('/ext'), globalState: { get: (_k, d) => d, update() {} } };
-    const provider = new CsvEditorProvider(context);
-    const uri = uriFile(filePath);
-    const doc = await provider.openCustomDocument(uri, openContext, {});
+// Shows `doc` in one more editor panel and hands back what a test needs to
+// drive that panel.
+async function attach(provider, doc) {
     const posted = [];
+    const disposeListeners = [];
     let onMessage = null;
     const panel = {
         webview: {
@@ -127,20 +137,42 @@ async function open(filePath, openContext = {}) {
             postMessage: m => { posted.push(m); return Promise.resolve(true); },
             onDidReceiveMessage: f => { onMessage = f; },
         },
-        onDidDispose() {},
+        onDidDispose(f) { disposeListeners.push(f); },
     };
     await provider.resolveCustomEditor(doc, panel, {});
-    const watcher = watchers[watchers.length - 1];
     return {
-        provider, doc, posted, uri,
+        posted,
         ready: () => onMessage({ type: 'ready' }),
         edit: text => onMessage({ type: 'edit', text }),
+        updates: () => posted.filter(m => m.type === 'update'),
+        close: () => { for (const f of disposeListeners) f(); },
+    };
+}
+
+// Opens a file in the provider and hands back what a test needs to drive it.
+async function open(filePath, openContext = {}) {
+    watchers.length = 0;
+    const context = { extensionUri: uriFile('/ext'), globalState: { get: (_k, d) => d, update() {} } };
+    const provider = new CsvEditorProvider(context);
+    const uri = uriFile(filePath);
+    const doc = await provider.openCustomDocument(uri, openContext, {});
+    const tab = { input: new TabInputCustom(uri, 'csvViewer.grid'), group, isActive: true };
+    group.tabs.push(tab);
+    group.activeTab = tab;
+    const editor = await attach(provider, doc);
+    return {
+        ...editor, provider, doc, uri,
         save: () => provider.saveCustomDocument(doc, {}),
         saveAs: dest => provider.saveCustomDocumentAs(doc, uriFile(dest), {}),
         backup: dest => provider.backupCustomDocument(doc, { destination: uriFile(dest) }, {}),
-        // The watcher's listeners fire and forget, so give the read a moment.
-        fireWatcher: async () => { for (const f of watcher.change) f(); await new Promise(r => setTimeout(r, 20)); },
-        updates: () => posted.filter(m => m.type === 'update'),
+        // A second editor on the same document, which VS Code opens for the
+        // modified side of a Source Control diff while the grid tab is open.
+        openSecondEditor: () => attach(provider, doc),
+        // The watchers' listeners fire and forget, so give the read a moment.
+        fireWatcher: async () => {
+            for (const w of watchers) if (!w.disposed) for (const f of w.change) f();
+            await new Promise(r => setTimeout(r, 20));
+        },
     };
 }
 
@@ -171,8 +203,7 @@ async function main() {
         await before.edit('h\nedited\n');
         const backup = await before.backup(path.join(tmpDir, 'hot2.backup'));
         const after = await open(p, { backupId: backup.id });
-        const reload = after.provider._reloaders.get(after.uri.toString());
-        assert.strictEqual(await reload(), true, 'Reload from Disk thought the restored edits were the file');
+        assert.strictEqual(await after.provider.reload(after.doc), true, 'Reload from Disk thought the restored edits were the file');
         assert.strictEqual(after.doc.content, 'h\nold\n');
     });
 
@@ -296,6 +327,68 @@ async function main() {
         assert.strictEqual(t.updates().length, 0);
     });
 
+    // A Source Control diff of the file opens a second editor on the same
+    // document next to the grid tab. Each editor used to keep its own watcher
+    // and the provider kept only the last editor per file.
+    await test('an outside change reaches every editor of the file', async () => {
+        const p = file('two-editors.csv', 'a\n1\n');
+        const t = await open(p);
+        const diff = await t.openSecondEditor();
+        fs.writeFileSync(p, 'a\n2\n');
+        await t.fireWatcher();
+        assert.deepStrictEqual(t.updates().map(m => m.text), ['a\n2\n'], 'the grid tab kept the old text');
+        assert.deepStrictEqual(diff.updates().map(m => m.text), ['a\n2\n'], 'the diff kept the old text');
+    });
+
+    await test('Revert File reaches every editor of the file', async () => {
+        const p = file('two-editors-revert.csv', 'a\n1\n');
+        const t = await open(p);
+        const diff = await t.openSecondEditor();
+        await t.edit('a\nEDIT\n');
+        await t.provider.revertCustomDocument(t.doc, {});
+        const last = editor => (editor.updates().slice(-1)[0] || {}).text;
+        assert.strictEqual(last(t), 'a\n1\n', 'the grid tab still shows the reverted edit');
+        assert.strictEqual(last(diff), 'a\n1\n', 'the diff still shows the reverted edit');
+    });
+
+    await test('closing one editor leaves the other one working', async () => {
+        const p = file('two-editors-close.csv', 'a\n1\n');
+        const t = await open(p);
+        const diff = await t.openSecondEditor();
+        diff.close();
+        await t.edit('a\nEDIT\n');
+        await t.provider.revertCustomDocument(t.doc, {});
+        assert.deepStrictEqual(t.updates().map(m => m.text), ['a\n1\n'], 'Revert File no longer reached the grid tab');
+        fs.writeFileSync(p, 'a\n2\n');
+        await t.fireWatcher();
+        assert.deepStrictEqual(t.updates().map(m => m.text), ['a\n1\n', 'a\n2\n'], 'an outside change no longer reached the grid tab');
+        fs.writeFileSync(p, 'a\n3\n');
+        await t.provider.reloadActiveFromDisk();
+        assert.deepStrictEqual(warnings.map(w => w.msg), [], 'Reload from Disk refused an editable grid');
+        assert.strictEqual(t.doc.content, 'a\n3\n', 'Reload from Disk did not load the file');
+    });
+
+    await test('closing the last editor stops watching the file', async () => {
+        const p = file('two-editors-gone.csv', 'a\n1\n');
+        const t = await open(p);
+        const diff = await t.openSecondEditor();
+        diff.close();
+        assert.ok(watchers.some(w => !w.disposed), 'closing one of two editors stopped the watcher');
+        t.close();
+        assert.ok(watchers.every(w => w.disposed), 'the file is still watched with no editor open');
+    });
+
+    await test('an edit in one editor reaches the other', async () => {
+        // Each editor sends the whole text with every edit. An editor that
+        // missed the other's edit would write its own old text back over it.
+        const p = file('two-editors-edit.csv', 'a\n1\n');
+        const t = await open(p);
+        const diff = await t.openSecondEditor();
+        await diff.edit('a\nFROM THE DIFF\n');
+        assert.deepStrictEqual(t.updates().map(m => m.text), ['a\nFROM THE DIFF\n'], 'the grid tab missed the edit');
+        assert.strictEqual(diff.updates().length, 0, 'the editor that made the edit was sent it back');
+    });
+
     await test('an unchanged document still reloads silently', async () => {
         const p = file('clean.csv', 'h\n1\n');
         const t = await open(p);
@@ -389,8 +482,7 @@ async function main() {
         const p = file('bom-reload.csv', 'a\n1\n');
         const t = await open(p);
         fs.writeFileSync(p, Buffer.concat([BOM, Buffer.from('a\n1\n')]));
-        const reload = t.provider._reloaders.get(t.uri.toString());
-        assert.strictEqual(await reload(), true, 'Reload from Disk said the file was already up to date');
+        assert.strictEqual(await t.provider.reload(t.doc), true, 'Reload from Disk said the file was already up to date');
         assert.strictEqual(t.doc.hasBom, true);
     });
 
