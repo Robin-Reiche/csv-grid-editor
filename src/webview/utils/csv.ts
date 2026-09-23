@@ -264,36 +264,29 @@ function readsAsBlankLine(row: CsvRow, onlyRow: boolean): boolean {
 }
 
 // Without a line format the rows are joined with LF and nothing follows the
-// last one. The clipboard wants exactly that. It also gets every value with a
-// CR in quotes, since other programs read a lone CR as a line break. The grid
-// writes the file with the format it was read with (state.lineFormat). The
-// file is read back by parseCsv, which keeps a CR inside an unquoted value.
-// So a value with a CR is quoted there only where parseCsv would read the CR
-// as part of a row break. Quoting it anywhere else changed a row nobody had
-// touched on the first edit.
+// last one. The clipboard wants exactly that. The grid writes the file with
+// the format it was read with (state.lineFormat).
+//
+// A value with a CR is always quoted. Other programs read a lone CR as a line
+// break and would split the row there. So does parseCsv in a file whose rows
+// end with one. A value that has a CR in quotes in the file keeps them, so a
+// row nobody touched keeps its bytes. parseCsv keeps a stray CR outside quotes
+// in its value, so such a value gains quotes on the first edit and loses
+// nothing.
 export function toCsv(rows: CsvRow[], delimiter: string, format?: LineFormat): string {
     const eol = format ? format.eol : '\n';
     // An empty table stays empty. A lone break would read back as a blank row.
     const finalNewline = !!format && format.finalNewline && rows.length > 0;
     const last = rows.length - 1;
-    // The clipboard quotes every CR. So does a Mac file, which ends a row at
-    // every CR outside quotes. Text with no LF between or after its rows is
-    // read as a Mac file as soon as it holds a CR.
-    const quoteEveryCr = !format || eol === '\r' || (last < 1 && !finalNewline);
     // Spaces in the last row of a file are kept in quotes when nothing follows
     // it and the row would otherwise be read as a trailing blank line. That row
     // can only hold them because they were quoted in the file or typed in.
     // Written bare, the next read after an edit dropped the row.
     const quoteLastSpaces = !!format && !finalNewline && last >= 0 && readsAsBlankLine(rows[last], last === 0);
     const text = rows.map((row, r) =>
-        row.map((cell, c) => {
+        row.map(cell => {
             const s = String(cell);
-            let quote = s.includes(delimiter) || s.includes('"') || s.includes('\n');
-            // A CR at the end of the row's last value would sit right in front
-            // of the break and be read as part of it.
-            if (!quote && s.includes('\r')) {
-                quote = quoteEveryCr || (s.endsWith('\r') && c === row.length - 1 && (r < last || finalNewline));
-            }
+            let quote = s.includes(delimiter) || s.includes('"') || s.includes('\n') || s.includes('\r');
             if (!quote && quoteLastSpaces && r === last) quote = s !== '';
             return quote ? '"' + s.replace(/"/g, '""') + '"' : s;
         }).join(delimiter)

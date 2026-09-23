@@ -136,19 +136,33 @@ runSuite('line endings (browser)', [
         `),
     },
     {
+        // The CR stays in its value. Written back bare, other programs would
+        // read it as a line break and split the row, so it gains quotes.
         name: 'a CR inside an unquoted value',
         csv: 'a,b\n1,x\ry\n3,4\n',
         steps: steps(`
             await t.edit(1, 1, 'X');
-            t.same(csv.replace('3,4', '3,X'), 'the CR stays in the row nobody touched');
+            t.same(csv.replace('3,4', '3,X').replace('x', '"x').replace('y', 'y"'),
+                'the CR stays in the row nobody touched');
         `),
     },
     {
+        // Kept for the same reason in quotes.
         name: 'a CR at the end of the file',
         csv: 'a,b\n1,2\n3,4\r',
         steps: steps(`
             await t.edit(0, 1, 'X');
-            t.same(csv.replace('1,2', '1,X'), 'the CR at the end stays');
+            t.same(csv.replace('1,2', '1,X').replace('3,4', '3,"4') + '"', 'the CR at the end stays');
+        `),
+    },
+    {
+        // Python's csv module writes a value with a lone CR in quotes. The
+        // first edit in another row wrote it back bare.
+        name: 'a quoted value with a lone CR',
+        csv: 'a,b\n"x\ry",2\n3,4\n',
+        steps: steps(`
+            await t.edit(1, 1, 'X');
+            t.same(csv.replace('3,4', '3,X'), 'the value keeps its quotes');
         `),
     },
     {

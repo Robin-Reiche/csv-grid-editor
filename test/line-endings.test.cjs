@@ -104,9 +104,9 @@ test('a file read and written unchanged comes back byte for byte', () => {
         'a,b\r1,2',
         'a,b\r"x\ny",2\r',
         'a,b\r\r\n1,2\r\r\n',
-        'a,b\n1,x\ry\n3,4\n',
-        'a,b\n1,2\n3,4\r',
-        'a\n\r',
+        'a,b\n"x\ry",2\n',
+        'a,b\r\n1,"x\r"\r\n',
+        'a\n"\r"',
     ];
     for (const text of texts) {
         const rows = parseCsv(text, ',', false, true);
@@ -143,12 +143,29 @@ test('a CR inside an unquoted value is part of the value', () => {
     assert.deepStrictEqual(parseCsv('a,b\n1,2\n3,4\r', ',', false, true), [['a', 'b'], ['1', '2'], ['3', '4\r']]);
 });
 
+test('a CR outside quotes is written back in quotes and read back the same', () => {
+    // Written back bare, other programs read the CR as a line break and split
+    // the row there. So the value gains quotes on the first edit. From
+    // then on the file keeps its bytes.
+    const cases = [
+        ['a,b\n1,x\ry\n3,4\n', 'a,b\n1,"x\ry"\n3,4\n'],
+        ['a,b\r\n1,x\ry\r\n3,4\r\n', 'a,b\r\n1,"x\ry"\r\n3,4\r\n'],
+        ['a,b\n1,2\n3,4\r', 'a,b\n1,2\n3,"4\r"'],
+        ['a\n\r', 'a\n"\r"'],
+    ];
+    for (const [text, want] of cases) {
+        const rows = parseCsv(text, ',', false, true);
+        const written = toCsv(rows, ',', detectLineFormat(text, ','));
+        assert.strictEqual(written, want, JSON.stringify(text));
+        assert.deepStrictEqual(parseCsv(written, ',', false, true), rows, JSON.stringify(written));
+        assert.deepStrictEqual(detectLineFormat(written, ','), detectLineFormat(text, ','), JSON.stringify(written));
+    }
+});
+
 test('an edit changes only the edited cell whatever ends the rows', () => {
     const cases = [
         ['a,b\r1,2\r3,4\r', 'a,b\r1,2\r3,X\r'],
         ['a,b\r\r\n1,2\r\r\n3,4\r\r\n', 'a,b\r\r\n1,2\r\r\n3,X\r\r\n'],
-        ['a,b\n1,x\ry\n3,4\n', 'a,b\n1,x\ry\n3,X\n'],
-        ['a,b\r\n1,x\ry\r\n3,4\r\n', 'a,b\r\n1,x\ry\r\n3,X\r\n'],
         ['a,b\r"x\ny",2\r3,4\r', 'a,b\r"x\ny",2\r3,X\r'],
     ];
     for (const [text, want] of cases) {
@@ -156,9 +173,42 @@ test('an edit changes only the edited cell whatever ends the rows', () => {
         rows[2][1] = 'X';
         assert.strictEqual(toCsv(rows, ',', detectLineFormat(text, ',')), want, JSON.stringify(text));
     }
+    // A stray CR outside quotes is the one thing an edit elsewhere changes:
+    // left bare, other programs split its row there. It gains quotes and
+    // keeps every byte of the value.
+    const stray = [
+        ['a,b\n1,x\ry\n3,4\n', 'a,b\n1,"x\ry"\n3,X\n'],
+        ['a,b\r\n1,x\ry\r\n3,4\r\n', 'a,b\r\n1,"x\ry"\r\n3,X\r\n'],
+    ];
+    for (const [text, want] of stray) {
+        const rows = parseCsv(text, ',', false, true);
+        rows[2][1] = 'X';
+        assert.strictEqual(toCsv(rows, ',', detectLineFormat(text, ',')), want, JSON.stringify(text));
+    }
     const tail = parseCsv('a,b\n1,2\n3,4\r', ',', false, true);
     tail[1][1] = 'X';
-    assert.strictEqual(toCsv(tail, ',', detectLineFormat('a,b\n1,2\n3,4\r', ',')), 'a,b\n1,X\n3,4\r');
+    assert.strictEqual(toCsv(tail, ',', detectLineFormat('a,b\n1,2\n3,4\r', ',')), 'a,b\n1,X\n3,"4\r"');
+});
+
+test('a quoted value with a lone CR keeps its quotes through an edit elsewhere', () => {
+    // Python's csv module and every RFC 4180 writer put such a value in
+    // quotes. Written back bare, a row nobody touched changed on the first
+    // edit. Other readers then split it into two rows.
+    const cases = [
+        ['a,b\n"x\ry",2\n3,4\n', 'a,b\n"x\ry",2\n3,X\n'],
+        ['a,b\r\n"x\ry",2\r\n3,4\r\n', 'a,b\r\n"x\ry",2\r\n3,X\r\n'],
+        ['a,b\n1,"x\r"\n3,4\n', 'a,b\n1,"x\r"\n3,X\n'],
+        ['a,b\n"x\r",2\n3,4', 'a,b\n"x\r",2\n3,X'],
+    ];
+    for (const [text, want] of cases) {
+        const rows = parseCsv(text, ',', false, true);
+        rows[2][1] = 'X';
+        assert.strictEqual(toCsv(rows, ',', detectLineFormat(text, ',')), want, JSON.stringify(text));
+    }
+    const note = 'id,note\n1,"line1\rline2"';
+    const rows = parseCsv(note, ',', false, true);
+    rows[0][0] = 'ID';
+    assert.strictEqual(toCsv(rows, ',', detectLineFormat(note, ',')), 'ID,note\n1,"line1\rline2"');
 });
 
 test('a CR that would be read as part of a row break is quoted', () => {
