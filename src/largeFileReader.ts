@@ -1,13 +1,15 @@
 import * as fs from 'fs';
-import { decodeWindows1252, startsAsUtf8 } from './encoding';
+import { decodeUtf8KeepingStrays, decodeWindows1252, startsAsUtf8 } from './encoding';
 
-// The encodings a preview reads, see readPreviewEncoding.
-export type PreviewEncoding = 'utf8' | 'windows1252';
+// The encodings a preview reads, see readPreviewEncoding. utf8bom is UTF-8
+// behind a byte order mark, whose stray bytes read as Windows-1252.
+export type PreviewEncoding = 'utf8' | 'utf8bom' | 'windows1252';
 
 export interface RowPageIndex {
     offsets: number[];   // byte offset of the first byte of each page's first data record
     totalRows: number;
-    headerLine: string;
+    headerLine: string;  // the header record without its line break
+    headerBreak: string; // that line break, which readPage puts back in front of a page
     encoding: PreviewEncoding;   // what readPage decodes the pages as
 }
 
@@ -29,18 +31,22 @@ function bomLength(buf: Buffer): number {
 // file can hold the mark.
 function decode(buf: Buffer, start: number, encoding: PreviewEncoding): string {
     if (encoding === 'windows1252') return decodeWindows1252(buf);
-    return buf.toString('utf8', start === 0 ? bomLength(buf) : 0);
+    const body = start === 0 ? buf.subarray(bomLength(buf)) : buf;
+    return encoding === 'utf8bom' ? decodeUtf8KeepingStrays(body) : body.toString('utf8');
 }
 
 // Open Full File reads a file that is not valid UTF-8 as Windows-1252, the way
 // Excel writes plain "CSV" (see encoding.ts). A preview reads only part of the
 // file, so it goes by the first 64 KB: UTF-8 unless they are not valid UTF-8.
 // A file whose first invalid byte comes later still shows U+FFFD there. A
-// preview cannot be saved, so that costs no data. A UTF-16 file cannot be
-// previewed readably at all: the scanners below look for the line break and
-// the quote as single bytes, which UTF-16 does not have.
+// preview cannot be saved, so that costs no data. A file that starts with the
+// UTF-8 byte order mark is UTF-8 with only its stray bytes read as
+// Windows-1252, the way Open Full File reads it, wherever those bytes are. A
+// UTF-16 file cannot be previewed readably at all: the scanners below look for
+// the line break and the quote as single bytes, which UTF-16 does not have.
 export async function readPreviewEncoding(filePath: string): Promise<PreviewEncoding> {
     const start = await readRange(filePath, 0, 64 * 1024 - 1);
+    if (bomLength(start)) return 'utf8bom';
     return startsAsUtf8(start) ? 'utf8' : 'windows1252';
 }
 
@@ -52,7 +58,8 @@ export async function readPreviewEncoding(filePath: string): Promise<PreviewEnco
 // It tracks quote state exactly the way the grid's parser does (see
 // webview/utils/csv.ts): a " opens a quoted section only at the start of a
 // field, spaces and tabs before it aside. Inside one "" is a literal quote and
-// a single " closes it. Only \n ends a record. A " further into a field is
+// a single " closes it. \n ends a record. So does \r in a file whose rows end
+// with a lone CR (see rowsEndWithCr below). A " further into a field is
 // part of the value, as in 5" disk. Telling the two apart takes the delimiter,
 // which is why every reader below asks for it. Scanning bytes rather than
 // characters is safe because ", \n, \r and the delimiters the provider detects
@@ -65,7 +72,7 @@ class RecordScanner {
     private fieldHasContent = false;
     private readonly delimiter: number;
 
-    constructor(delimiter: string) {
+    constructor(delimiter: string, private readonly crRows: boolean) {
         this.delimiter = delimiter.charCodeAt(0);
     }
     // A " seen inside quotes whose meaning depends on the next byte, which can
@@ -85,7 +92,7 @@ class RecordScanner {
     // in a real file.
     public remainderHasContent = false;
 
-    // Offsets, relative to `buf`, of the byte just past each record-ending \n.
+    // Offsets, relative to `buf`, of the byte just past each record's line break.
     public ends(buf: Buffer): number[] {
         const out: number[] = [];
         // The mark is not part of the first field. A quote right behind it
@@ -115,14 +122,15 @@ class RecordScanner {
                 else if (b !== SPACE && b !== TAB) this.fieldHasContent = true;
             } else if (b === this.delimiter) {
                 this.fieldHasContent = false;
-            } else if (b === LF) {
+            } else if (b === LF || (b === CR && this.crRows)) {
                 out.push(i + 1);
                 this.remainderHasContent = false;
                 this.fieldHasContent = false;
             } else if (b === QUOTE && !this.fieldHasContent) {
                 this.inQuotes = true;
             } else if (b !== SPACE && b !== TAB && b !== CR) {
-                // The parser skips \r outside quotes, so it does not count.
+                // Any other \r outside quotes is padding to the parser, the
+                // way spaces are, so it does not decide how a quote reads.
                 this.fieldHasContent = true;
             }
         }
@@ -141,19 +149,72 @@ async function readRange(filePath: string, start: number, end?: number): Promise
     return Buffer.concat(chunks);
 }
 
+// Whether the rows of the file end with a lone CR, the way a classic Mac file
+// ends them. The grid decides that with rowsEndWithCr (webview/utils/csv.ts)
+// and this has to stay in step with it: no LF outside a quoted value and a CR
+// there. The quotes are tracked the way that function tracks them. It looks at
+// the whole text. A preview must not read a file this large whole to find
+// out, so the first 64 KB decide, the same bytes that decide its encoding. Any
+// file whose rows end with LF shows one there, unless its first line is longer
+// than that. When the start is cut short it can end in the middle of a line
+// break, a CR whose LF comes right after it, so those last CRs do not count.
+async function rowsEndWithCr(filePath: string, delimiter: string): Promise<boolean> {
+    const size = 64 * 1024;
+    const read = await readRange(filePath, 0, size);
+    let end = Math.min(read.length, size);
+    if (read.length > size) while (end > 0 && read[end - 1] === CR) end--;
+    const buf = read.subarray(0, end);
+    if (buf.indexOf(LF) < 0) return buf.indexOf(CR) >= 0;
+    const delim = delimiter.charCodeAt(0);
+    let inQuotes = false;
+    let padOnly = true;
+    let cr = false;
+    for (let i = bomLength(buf); i < buf.length; i++) {
+        const b = buf[i];
+        if (inQuotes) {
+            if (b === QUOTE) {
+                if (buf[i + 1] === QUOTE) { padOnly = false; i++; }
+                else inQuotes = false;
+            } else if (b !== SPACE && b !== TAB) {
+                padOnly = false;
+            }
+        } else if (b === QUOTE && padOnly) {
+            inQuotes = true;
+        } else if (b === delim) {
+            padOnly = true;
+        } else if (b === LF) {
+            return false;
+        } else if (b === CR) {
+            cr = true;
+            padOnly = true;
+        } else if (b !== SPACE && b !== TAB) {
+            padOnly = false;
+        }
+    }
+    return cr;
+}
+
+async function scannerFor(filePath: string, delimiter: string): Promise<RecordScanner> {
+    return new RecordScanner(delimiter, await rowsEndWithCr(filePath, delimiter));
+}
+
 // The file's first line, which is all the provider's delimiter detection looks
 // at. The scanners need the delimiter before they start, so it is read on its
 // own. Capped at 1 MB so a file without a single line break is not pulled into
 // memory whole: a header that long still shows its delimiter well before that.
+// The line ends at the first CR as well as at the first LF. A classic Mac file
+// has no LF, so its separators were counted up to that cap.
 export async function readFirstLine(filePath: string): Promise<string> {
     const chunks: Buffer[] = [];
     let size = 0;
     for await (const chunk of fs.createReadStream(filePath, { highWaterMark: 64 * 1024 })) {
         const buf = chunk as Buffer;
         const lf = buf.indexOf(LF);
-        chunks.push(lf < 0 ? buf : buf.subarray(0, lf));
+        const cr = buf.indexOf(CR);
+        const end = cr >= 0 && (lf < 0 || cr < lf) ? cr : lf;
+        chunks.push(end < 0 ? buf : buf.subarray(0, end));
         size += buf.length;
-        if (lf >= 0 || size >= 1024 * 1024) break;
+        if (end >= 0 || size >= 1024 * 1024) break;
     }
     return Buffer.concat(chunks).toString('utf8');
 }
@@ -165,7 +226,7 @@ export async function readFirstRecords(
     delimiter: string,
     encoding: PreviewEncoding = 'utf8'
 ): Promise<string> {
-    const scanner = new RecordScanner(delimiter);
+    const scanner = await scannerFor(filePath, delimiter);
     const chunks: Buffer[] = [];
     let found = 0;
 
@@ -186,7 +247,7 @@ export async function readFirstRecords(
 // Total records in the file, header included — the number the preview banner
 // compares against, and the same number Open Full File would put in the grid.
 export async function countRecords(filePath: string, delimiter: string): Promise<number> {
-    const scanner = new RecordScanner(delimiter);
+    const scanner = await scannerFor(filePath, delimiter);
     let count = 0;
     for await (const chunk of fs.createReadStream(filePath, { highWaterMark: 64 * 1024 })) {
         count += scanner.ends(chunk as Buffer).length;
@@ -203,7 +264,7 @@ export async function readTailRecords(
     delimiter: string,
     encoding: PreviewEncoding = 'utf8'
 ): Promise<{ content: string; totalRecordCount: number }> {
-    const scanner = new RecordScanner(delimiter);
+    const scanner = await scannerFor(filePath, delimiter);
     // Start offsets of the records after the header. One slot more than asked
     // for: the last record end starts a record that may never materialise, and
     // that speculative entry must not overwrite one still needed.
@@ -255,7 +316,7 @@ export async function buildPageIndex(
     delimiter: string,
     encoding: PreviewEncoding = 'utf8'
 ): Promise<RowPageIndex> {
-    const scanner = new RecordScanner(delimiter);
+    const scanner = await scannerFor(filePath, delimiter);
     const offsets: number[] = [];
     let base = 0;
     let prevEnd = 0;        // start of the record the next end terminates
@@ -289,16 +350,20 @@ export async function buildPageIndex(
 
     if (offsets.length === 0) offsets.push(headerEnd < 0 ? 0 : headerEnd);
 
-    const headerLine = headerEnd < 0
-        ? ''
-        : decode(await readRange(filePath, 0, headerEnd - 1), 0, encoding).replace(/\r?\n$/, '');
+    // The header's line break is an LF with the CRs in front of it or the
+    // lone CR of a Mac file. A page goes behind the header with that very
+    // break. Joined with an LF, a page of a Mac file read as a file whose
+    // rows end with LF. The grid put every row of it into the header.
+    const header = headerEnd < 0 ? '' : decode(await readRange(filePath, 0, headerEnd - 1), 0, encoding);
+    const headerBreak = /\r*\n$|\r+$/.exec(header)?.[0] ?? '';
+    const headerLine = header.slice(0, header.length - headerBreak.length);
 
-    return { offsets, totalRows: dataRows, headerLine, encoding };
+    return { offsets, totalRows: dataRows, headerLine, headerBreak, encoding };
 }
 
 export async function readPage(filePath: string, index: RowPageIndex, pageNum: number): Promise<string> {
     const startOffset = index.offsets[pageNum];
     const endOffset   = index.offsets[pageNum + 1]; // undefined = read to EOF
     const buf = await readRange(filePath, startOffset, endOffset === undefined ? undefined : endOffset - 1);
-    return index.headerLine + '\n' + decode(buf, startOffset, index.encoding);
+    return index.headerLine + index.headerBreak + decode(buf, startOffset, index.encoding);
 }

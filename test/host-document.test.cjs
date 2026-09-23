@@ -35,6 +35,8 @@ const BOM = Buffer.from([0xEF, 0xBB, 0xBF]);
 const watchers = [];
 const warnings = [];
 let quickPickChoice = null;
+// What the last size question offered.
+let offered = null;
 // Lets a test pretend a small file is a large one, so the preview modes can be
 // reached without writing 50 MB to disk.
 let fakeSize = null;
@@ -50,7 +52,14 @@ class EventEmitter {
     dispose() {}
 }
 
-const uriFile = p => ({ fsPath: p, toString: () => 'file://' + p });
+const uriFile = p => ({ scheme: 'file', fsPath: p, toString: () => 'file://' + p });
+// The HEAD side of a Source Control diff: the git extension keeps the working
+// file's path and puts the ref in the query, so its fsPath is the working file.
+// VS Code reads it through the git extension, which serves the committed text
+// kept here.
+const gitBlobs = new Map();
+const uriGit = p => ({ scheme: 'git', fsPath: p, toString: () => 'git:' + p + '?%7B%22ref%22%3A%22~%22%7D' });
+const readUri = uri => uri.scheme === 'git' ? gitBlobs.get(uri.fsPath) : fs.readFileSync(uri.fsPath);
 
 const vscodeStub = {
     EventEmitter,
@@ -62,8 +71,8 @@ const vscodeStub = {
     RelativePattern: class { constructor(base, pattern) { this.base = base; this.pattern = pattern; } },
     workspace: {
         fs: {
-            stat: async uri => ({ size: fakeSize ?? fs.statSync(uri.fsPath).size }),
-            readFile: async uri => new Uint8Array(fs.readFileSync(uri.fsPath)),
+            stat: async uri => ({ size: fakeSize ?? readUri(uri).length }),
+            readFile: async uri => new Uint8Array(readUri(uri)),
             writeFile: async (uri, bytes) => {
                 if (duringNextWrite) {
                     const during = duringNextWrite;
@@ -90,7 +99,10 @@ const vscodeStub = {
         },
     },
     window: {
-        showQuickPick: async items => items.find(i => i.id === quickPickChoice),
+        showQuickPick: async items => {
+            offered = items.map(i => i.id);
+            return items.find(i => i.id === quickPickChoice);
+        },
         showWarningMessage: (msg, ...actions) => {
             const w = { msg, actions, pick: null };
             warnings.push(w);
@@ -109,13 +121,31 @@ const vscodeStub = {
 class TabInputCustom { constructor(uri, viewType) { this.uri = uri; this.viewType = viewType; } }
 const group = { tabs: [], activeTab: null, viewColumn: 1, isActive: true };
 vscodeStub.TabInputCustom = TabInputCustom;
-vscodeStub.window.tabGroups = { all: [group], activeTabGroup: group };
+vscodeStub.window.tabGroups = {
+    all: [group], activeTabGroup: group,
+    close: async tab => {
+        group.tabs.splice(group.tabs.indexOf(tab), 1);
+        if (group.activeTab === tab) group.activeTab = group.tabs[group.tabs.length - 1] || null;
+        return true;
+    },
+};
 // Lets a test pretend VS Code could not bring a tab to the front.
 let openWithFails = false;
 vscodeStub.commands.executeCommand = async (id, ...args) => {
     if (id === 'vscode.openWith') {
         const [uri, viewType] = args;
-        const tab = group.tabs.find(t => t.input.uri.toString() === uri.toString() && t.input.viewType === viewType);
+        let tab = group.tabs.find(t => t.input && t.input.uri.toString() === uri.toString() && t.input.viewType === viewType);
+        // A document that only a Source Control diff shows opens in a tab of
+        // its own. The two tabs share the document, so its unsaved mark and
+        // its revert.
+        const diff = group.tabs.find(t => !t.input && t.uri.toString() === uri.toString());
+        if (!tab && diff && !openWithFails) {
+            tab = {
+                input: new TabInputCustom(uri, viewType), group, isActive: true, revert: diff.revert,
+                get isDirty() { return diff.isDirty; }, set isDirty(v) { diff.isDirty = v; },
+            };
+            group.tabs.push(tab);
+        }
         if (tab && !openWithFails) group.activeTab = tab;
     } else if (id === 'workbench.action.files.revert') {
         // File > Revert File reverts the active editor if it has unsaved
@@ -170,6 +200,8 @@ async function attach(provider, doc) {
             onDidReceiveMessage: f => { onMessage = f; },
         },
         onDidDispose(f) { disposeListeners.push(f); },
+        // In the one editor group, in front.
+        visible: true, viewColumn: 1,
     };
     await provider.resolveCustomEditor(doc, panel, {});
     return {
@@ -182,10 +214,9 @@ async function attach(provider, doc) {
 }
 
 // Opens a file in the provider and hands back what a test needs to drive it.
-async function open(filePath, openContext = {}) {
+async function open(filePath, openContext = {}, uri = uriFile(filePath)) {
     const context = { extensionUri: uriFile('/ext'), globalState: { get: (_k, d) => d, update() {} } };
     const provider = new CsvEditorProvider(context);
-    const uri = uriFile(filePath);
     const doc = await provider.openCustomDocument(uri, openContext, {});
     const tab = {
         input: new TabInputCustom(uri, 'csvViewer.grid'), group, isActive: true, isDirty: false,
@@ -251,6 +282,86 @@ async function main() {
         const after = await open(p, { backupId: backup.id });
         assert.strictEqual(await after.provider.reload(after.doc), true, 'Reload from Disk thought the restored edits were the file');
         assert.strictEqual(after.doc.content, 'h\nold\n');
+    });
+
+    // A program that changes the file while VS Code is closed (a git pull, an
+    // export run overnight) changes what the restored edits were made on.
+    // The restore took the new file for the one the edits knew, so nothing
+    // warned and the next save wrote over the change without a word.
+    await test('a file changed while VS Code was closed is reported on restore', async () => {
+        const p = file('hot-changed.csv', 'id,val\n1,a\n2,b\n');
+        const before = await open(p);
+        await before.edit('id,val\n1,MY EDIT\n2,b\n');
+        const backup = await before.backup(path.join(tmpDir, 'hot-changed.backup'));
+        before.close();
+        group.tabs.splice(group.tabs.indexOf(before.tab), 1);   // VS Code quits
+        fs.writeFileSync(p, 'id,val\n1,a\n2,b\n3,TEAMMATE ROW\n');
+        const after = await open(p, { backupId: backup.id });
+        assert.strictEqual(after.doc.content, 'id,val\n1,MY EDIT\n2,b\n', 'the restore lost the unsaved edits');
+        assert.deepStrictEqual(warnings.map(w => w.msg),
+            ['hot-changed.csv changed on disk. Your unsaved edits in the grid were kept.'], 'the change was not reported');
+        assert.ok(warnings[0].actions.includes('Reload from Disk'), 'the warning offers no way to load the disk');
+        await after.fireWatcher();                      // a late event for the same change
+        assert.strictEqual(warnings.length, 1, 'the same change was reported twice');
+        after.tab.isDirty = true;                       // VS Code marks a restored backup unsaved
+        warnings[0].pick('Reload from Disk');
+        await tick();
+        assert.strictEqual(after.doc.content, 'id,val\n1,a\n2,b\n3,TEAMMATE ROW\n', 'the action did not load the disk');
+        assert.strictEqual(after.tab.isDirty, false, 'the tab is still marked unsaved');
+    });
+
+    await test('a restore of a file nobody changed says nothing', async () => {
+        const p = file('hot-same.csv', 'id,val\n1,a\n');
+        const before = await open(p);
+        await before.edit('id,val\n1,MINE\n');
+        const backup = await before.backup(path.join(tmpDir, 'hot-same.backup'));
+        before.close();
+        const after = await open(p, { backupId: backup.id });
+        assert.deepStrictEqual(warnings.map(w => w.msg), []);
+        await after.save();
+        assert.strictEqual(fs.readFileSync(p, 'utf8'), 'id,val\n1,MINE\n');
+    });
+
+    await test('a restore says nothing when the file changed to the very edits', async () => {
+        const p = file('hot-same-edit.csv', 'id,val\n1,a\n');
+        const before = await open(p);
+        await before.edit('id,val\n1,SAME\n');
+        const backup = await before.backup(path.join(tmpDir, 'hot-same-edit.backup'));
+        before.close();
+        fs.writeFileSync(p, 'id,val\n1,SAME\n');      // a teammate made the same edit
+        await open(p, { backupId: backup.id });
+        assert.deepStrictEqual(warnings.map(w => w.msg), [], 'the file holds the edits, nothing of them was kept');
+    });
+
+    // The disk the edits were made on is the one the document last knew:
+    // the file as it was opened or an outside change it has since heard of.
+    await test('a restore compares with the outside change the document already knew', async () => {
+        const p = file('hot-known.csv', 'h\n1\n');
+        const before = await open(p);
+        await before.edit('h\nmine\n');
+        fs.writeFileSync(p, 'h\ntheirs\n');
+        await before.fireWatcher();
+        assert.strictEqual(warnings.length, 1, 'the test did not reach the warning');
+        const backup = await before.backup(path.join(tmpDir, 'hot-known.backup'));
+        before.close();
+        warnings.length = 0;
+        const after = await open(p, { backupId: backup.id });
+        assert.deepStrictEqual(warnings.map(w => w.msg), [], 'a change already reported was reported again');
+        assert.strictEqual(after.doc.content, 'h\nmine\n');
+    });
+
+    // UTF-16 can hold a lone surrogate and a save keeps it. The backup was
+    // written as UTF-8, which turns it into U+FFFD.
+    await test('a hot exit backup of a UTF-16 file keeps a lone surrogate', async () => {
+        const p = file('hot-utf16.csv', Buffer.from([0xFF, 0xFE, 0x68, 0x00, 0x0A, 0x00, 0x00, 0xD8, 0x0A, 0x00]));
+        const before = await open(p);
+        assert.strictEqual(before.doc.content, 'h\n\uD800\n');
+        await before.edit('h\n\uD800\nX\n');
+        const backup = await before.backup(path.join(tmpDir, 'hot-utf16.backup'));
+        const after = await open(p, { backupId: backup.id });
+        assert.strictEqual(after.doc.content, 'h\n\uD800\nX\n', 'restored ' + JSON.stringify(after.doc.content));
+        await after.save();
+        assert.strictEqual(fs.readFileSync(p).toString('hex'), 'fffe68000a0000d80a0058000a00');
     });
 
     await test('hot exit of a large file skips the size question', async () => {
@@ -398,6 +509,56 @@ async function main() {
         assert.strictEqual(front.doc.content, 'x\nFRONT UNSAVED\n', 'the tab in front lost its unsaved edits');
         assert.strictEqual(front.tab.isDirty, true);
         assert.strictEqual(t.doc.content, 'h\ntheirs\n', 'the action did not load the disk');
+    });
+
+    // Only the Source Control diff shows the file, no grid tab of its own.
+    // VS Code tells an extension nothing about such a tab: its input is
+    // unknown. Reload from Disk loaded the file but left the diff marked
+    // unsaved. The command refused to work there at all.
+    const diffOnly = async name => {
+        const p = file(name, 'h\n1\n');
+        const t = await open(p);
+        t.tab.input = undefined;
+        t.tab.uri = t.uri;
+        await t.edit('h\nmine\n');
+        assert.strictEqual(t.tab.isDirty, true, 'the test did not reach a diff with unsaved edits');
+        fs.writeFileSync(p, 'h\ntheirs\n');
+        return t;
+    };
+
+    await test('Reload from Disk on the warning takes the unsaved mark off a diff with no grid tab', async () => {
+        const t = await diffOnly('diff-only.csv');
+        await t.fireWatcher();
+        warnings[0].pick('Reload from Disk');
+        await tick();
+        assert.strictEqual(t.doc.content, 'h\ntheirs\n', 'the action did not load the disk');
+        assert.deepStrictEqual(t.updates().map(m => m.text), ['h\ntheirs\n']);
+        assert.strictEqual(t.tab.isDirty, false, 'the diff is still marked unsaved');
+        assert.deepStrictEqual(group.tabs, [t.tab], 'the tab opened for the revert is still open');
+        assert.strictEqual(group.activeTab, t.tab, 'the diff is not in front again');
+    });
+
+    await test('the Reload from Disk command works on a diff with no grid tab', async () => {
+        const t = await diffOnly('diff-only-command.csv');
+        await t.provider.reloadActiveFromDisk();
+        await tick();
+        assert.deepStrictEqual(warnings.map(w => w.msg), [], 'the command refused the diff');
+        assert.strictEqual(t.doc.content, 'h\ntheirs\n', 'the command did not load the disk');
+        assert.strictEqual(t.tab.isDirty, false, 'the diff is still marked unsaved');
+        assert.deepStrictEqual(group.tabs, [t.tab], 'the tab opened for the revert is still open');
+    });
+
+    // File > Revert File does nothing on a tab not marked unsaved. Reload
+    // from Disk went on to report the file loaded and the grid kept the edits.
+    await test('Reload from Disk on a diff not marked unsaved still loads the file', async () => {
+        const t = await diffOnly('diff-only-clean.csv');
+        await t.fireWatcher();
+        t.tab.isDirty = false;
+        warnings[0].pick('Reload from Disk');
+        await tick();
+        assert.strictEqual(t.doc.content, 'h\ntheirs\n', 'the action did not load the disk');
+        assert.deepStrictEqual(t.updates().map(m => m.text), ['h\ntheirs\n']);
+        assert.deepStrictEqual(group.tabs, [t.tab], 'the tab opened for the revert is still open');
     });
 
     await test('saving after the warning keeps the edits', async () => {
@@ -750,6 +911,41 @@ async function main() {
         assert.ok(fs.readFileSync(dest).equals(ANSI), 'Save As wrote ' + hex(dest));
     });
 
+    // Save As onto the file itself (Ctrl+Shift+S, keep the name, confirm the
+    // overwrite) is a save. VS Code keeps the same document open and marks
+    // the tab clean. The document went on believing the disk held the text
+    // from before, so an outside change was ignored or reported as clashing
+    // with unsaved edits the tab did not have.
+    await test('Save As onto the file itself counts as a save', async () => {
+        const p = file('saveas-self.csv', 'h\nOLD\n');
+        const t = await open(p);
+        await t.edit('h\nNEW\n');
+        await t.saveAs(p);
+        t.tab.isDirty = false;
+        await t.fireWatcher();                          // the echo of that write
+        assert.strictEqual(t.updates().length, 0, 'the echo of the Save As was taken for an outside change');
+        fs.writeFileSync(p, 'h\nOLD\n');               // a git checkout
+        await t.fireWatcher();
+        assert.deepStrictEqual(warnings.map(w => w.msg), [], 'a clean tab was told its unsaved edits were kept');
+        assert.deepStrictEqual(t.updates().map(m => m.text), ['h\nOLD\n'], 'the grid kept the text the checkout replaced');
+    });
+
+    await test('Save As onto a Windows-1252 file itself that needs UTF-8 says so once', async () => {
+        const p = file('saveas-self-ansi.csv', ANSI);
+        const t = await open(p);
+        const text = 'Name;Stadt\r\nAnna;Łódź\r\n';
+        await t.edit(text);
+        await t.saveAs(p);
+        t.tab.isDirty = false;
+        await t.fireWatcher();                          // the echo of that write
+        assert.ok(fs.readFileSync(p).equals(Buffer.concat([BOM, Buffer.from(text, 'utf8')])), 'saved ' + hex(p));
+        assert.strictEqual(warnings.length, 1, 'warnings: ' + JSON.stringify(warnings.map(w => w.msg)));
+        assert.match(warnings[0].msg, /UTF-8/);
+        await t.edit(text + 'Eva;Graz\r\n');
+        await t.save();
+        assert.strictEqual(warnings.length, 1, 'the next save warned again');
+    });
+
     await test('a hot exit backup of a Windows-1252 file restores and saves the same bytes', async () => {
         const p = file('ansi-backup.csv', ANSI);
         const before = await open(p);
@@ -772,6 +968,98 @@ async function main() {
         await after.edit('Name;Stadt\r\nAnna;Gräz\r\n');
         await after.save();
         assert.ok(fs.readFileSync(p).equals(ansi('Name;Stadt\r\nAnna;Gräz\r\n')), 'saved ' + hex(p));
+    });
+
+    // The restore reads the file the way the document knew it. Plain ASCII
+    // reads as UTF-8 on its own, so a Windows-1252 file whose last umlaut was
+    // saved away looked changed and turned into UTF-8, which Excel reads as
+    // ANSI. The next umlaut came out garbled.
+    await test('a restore of a Windows-1252 file that is plain ASCII now says nothing and keeps Windows-1252', async () => {
+        const p = file('hot-ansi-ascii.csv', ansi('h\nä\n'));
+        const before = await open(p);
+        await before.edit('h\na\n');
+        await before.save();
+        await before.edit('h\nb\n');
+        const backup = await before.backup(path.join(tmpDir, 'hot-ansi-ascii.backup'));
+        before.close();
+        const after = await open(p, { backupId: backup.id });
+        assert.deepStrictEqual(warnings.map(w => w.msg), [], 'the unchanged file was reported as changed');
+        assert.strictEqual(after.doc.encoding, 'windows1252');
+        await after.edit('h\nö\n');
+        await after.save();
+        assert.strictEqual(hex(p), ansi('h\nö\n').toString('hex'));
+    });
+
+    await test('a restore of a Windows-1252 file changed to other plain ASCII keeps Windows-1252', async () => {
+        const p = file('hot-ansi-changed.csv', ansi('h\nä\n'));
+        const before = await open(p);
+        await before.edit('h\nmine\n');
+        const backup = await before.backup(path.join(tmpDir, 'hot-ansi-changed.backup'));
+        before.close();
+        fs.writeFileSync(p, 'h\ntheirs\n');
+        const after = await open(p, { backupId: backup.id });
+        assert.strictEqual(warnings.length, 1, 'the change was not reported');
+        await after.edit('h\nö\n');
+        await after.save();
+        assert.strictEqual(hex(p), ansi('h\nö\n').toString('hex'), 'the file turned into UTF-8');
+    });
+
+    // A save writes the file the way it is now, so a byte order mark another
+    // program added while VS Code was closed stays.
+    await test('a restore takes the encoding the file was given while VS Code was closed', async () => {
+        const p = file('hot-new-bom.csv', 'h\n1\n');
+        const before = await open(p);
+        await before.edit('h\nmine\n');
+        const backup = await before.backup(path.join(tmpDir, 'hot-new-bom.backup'));
+        before.close();
+        fs.writeFileSync(p, Buffer.concat([BOM, Buffer.from('h\n1\n')]));
+        const after = await open(p, { backupId: backup.id });
+        await after.save();
+        assert.strictEqual(hex(p), Buffer.concat([BOM, Buffer.from('h\nmine\n')]).toString('hex'));
+    });
+
+    // A U+FEFF typed in front of the first header name of a UTF-8 file. A
+    // save writes it as the bytes of a byte order mark and the file reads back
+    // as UTF-8 with the mark, without that character. The restore took that
+    // for a change nobody made and for the file's new encoding, so the next
+    // save wrote the mark twice.
+    await test('a restore of a UTF-8 file whose text starts with U+FEFF says nothing', async () => {
+        const p = file('hot-feff.csv', 'h,v\n1,a\n');
+        const before = await open(p);
+        await before.edit('﻿h,v\n1,a\n');
+        await before.save();
+        await before.edit('﻿h,v\n1,b\n');
+        const backup = await before.backup(path.join(tmpDir, 'hot-feff.backup'));
+        before.close();
+        const after = await open(p, { backupId: backup.id });
+        assert.deepStrictEqual(warnings.map(w => w.msg), [], 'the unchanged file was reported as changed');
+        await after.save();
+        assert.strictEqual(hex(p), Buffer.concat([BOM, Buffer.from('h,v\n1,b\n')]).toString('hex'));
+    });
+
+    // The fingerprint of the file for the hot exit backup was kept together
+    // with the text it was taken of. After a save that was the only copy of
+    // what the file held before. It stayed in memory until the next edit: as
+    // much again as a large file takes.
+    await test('a save keeps no copy of the text the file held before', async () => {
+        const p = file('hot-print.csv', 'h\nOLD\n');
+        const t = await open(p);
+        await t.edit('h\nNEW\n');
+        await t.backup(path.join(tmpDir, 'hot-print-1.backup'));
+        await t.save();
+        const held = [];
+        const walk = value => {
+            if (typeof value === 'string') held.push(value);
+            else if (value && typeof value === 'object') Object.values(value).forEach(walk);
+        };
+        for (const [key, value] of Object.entries(t.doc)) if (key !== 'panels' && key !== 'watcher') walk(value);
+        assert.ok(!held.includes('h\nOLD\n'), 'the document still holds the text from before the save');
+        // The fingerprint is taken again, of the saved file.
+        await t.edit('h\nNEWER\n');
+        const backup = await t.backup(path.join(tmpDir, 'hot-print-2.backup'));
+        t.close();
+        await open(p, { backupId: backup.id });
+        assert.deepStrictEqual(warnings.map(w => w.msg), [], 'the saved file was taken for an outside change');
     });
 
     const UTF16_TEXT = 'name,city\r\nJürgen,Köln\r\n';
@@ -845,6 +1133,51 @@ async function main() {
         assert.strictEqual(fs.readFileSync(p, 'utf8'), 'Name;Stadt\r\nJörg;Köln\r\nAnna;Graz\r\n');
     });
 
+    // A UTF-8 export with a byte order mark that a legacy tool later added a
+    // Windows-1252 line to. It was read whole as Windows-1252: the first
+    // header name started with "ï»¿", every umlaut was mojibake and a save
+    // that needed UTF-8 wrote all of that into the file.
+    const STRAY = Buffer.concat([BOM, Buffer.from('name;city\nMüller;Köln\nSch'), Buffer.from([0xF6]), Buffer.from('n;x\n')]);
+    const STRAY_TEXT = 'name;city\nMüller;Köln\nSchön;x\n';
+
+    await test('a stray byte in a UTF-8 file with a byte order mark leaves the rest UTF-8', async () => {
+        const p = file('stray.csv', STRAY);
+        const t = await open(p);
+        assert.strictEqual(t.doc.content, STRAY_TEXT);
+        await t.edit('name;city\nMüller;Köln\nSch✓n;x\n');
+        await t.save();
+        assert.ok(fs.readFileSync(p).equals(Buffer.concat([BOM, Buffer.from('name;city\nMüller;Köln\nSch✓n;x\n')])), 'saved ' + hex(p));
+        assert.deepStrictEqual(warnings.map(w => w.msg), [], 'a file that was UTF-8 already was reported as turned into UTF-8');
+    });
+
+    await test('a change event on a file with a stray byte that did not change keeps quiet', async () => {
+        const p = file('stray-event.csv', STRAY);
+        const t = await open(p);
+        await t.edit(STRAY_TEXT + 'Eva;Graz\n');
+        await t.fireWatcher();                          // nothing was written
+        await t.fireWatcher();
+        assert.deepStrictEqual(warnings.map(w => w.msg), [], 'the unchanged file was taken for an outside change');
+        assert.strictEqual(t.doc.content, STRAY_TEXT + 'Eva;Graz\n');
+        await t.provider.revertCustomDocument(t.doc, {});
+        assert.strictEqual(await t.provider.reload(t.doc), false, 'Reload from Disk found a change in the unchanged file');
+    });
+
+    for (const mode of ['head', 'tail', 'chunked', 'plaintext']) {
+        await test(`a stray byte in a UTF-8 file with a byte order mark reads the same in ${mode}`, async () => {
+            const rows = Array.from({ length: 1500 }, (_, i) => `${i};Köln ${i}`).join('\n') + '\n';
+            const p = file(`stray-${mode}.csv`, Buffer.concat([STRAY, Buffer.from(rows)]));
+            fakeSize = 60 * 1024 * 1024;
+            quickPickChoice = mode;
+            const t = await open(p);
+            assert.strictEqual(t.doc.isPreview, true, 'the test did not reach the preview');
+            await t.ready();
+            const shown = t.posted.find(m => m.type === 'init').text;
+            assert.ok(shown.startsWith('name;city\n'), 'the preview starts ' + JSON.stringify(shown.slice(0, 20)));
+            assert.ok(shown.includes(';Köln ') && !/Ã|�/.test(shown), 'the umlauts of the UTF-8 rows');
+            if (mode !== 'tail') assert.ok(shown.includes('Müller;Köln\nSchön;x\n'), 'the rows around the stray byte');
+        });
+    }
+
     // A preview reads only part of the file, so it decides the encoding by
     // the start of it. Plain text reads all of it.
     for (const mode of ['head', 'tail', 'chunked', 'plaintext']) {
@@ -859,6 +1192,65 @@ async function main() {
             const shown = t.posted.find(m => m.type === 'init').text;
             assert.ok(shown.includes('Köln'), 'the preview shows ' + JSON.stringify(shown.slice(0, 40)));
             assert.ok(!shown.includes('\uFFFD'), 'the preview holds U+FFFD');
+        });
+    }
+
+    // The HEAD side of the Source Control diff of a large file. Head, tail,
+    // the paged view and plain text read the file's path with Node's fs,
+    // which is the working copy, so both sides of the diff showed it.
+    await test('the HEAD side of a large file\'s diff shows the committed rows', async () => {
+        const rows = value => 'id,v\n' + Array.from({ length: 1500 }, (_, i) => `${i},${value}`).join('\n') + '\n';
+        const p = file('diff-head.csv', rows('WORKING COPY'));
+        gitBlobs.set(p, Buffer.from(rows('COMMITTED')));
+        fakeSize = 60 * 1024 * 1024;
+        for (const mode of ['plaintext', 'full']) {
+            quickPickChoice = mode;
+            const t = await open(p, {}, uriGit(p));
+            assert.deepStrictEqual(offered, ['full', 'plaintext'], 'the ways offered to open it');
+            await t.ready();
+            assert.strictEqual(t.posted.find(m => m.type === 'init').text, rows('COMMITTED'), mode + ' showed another text');
+        }
+        quickPickChoice = 'head';
+        await open(p);
+        assert.deepStrictEqual(offered, ['full', 'chunked', 'head', 'tail', 'plaintext'], 'the working file lost a way to open it');
+    });
+
+    // A classic Mac file ends its rows with a lone CR. Detection counted the
+    // separators of the first line up to an LF, which is the whole file there.
+    for (const [eol, name] of [['\n', 'LF'], ['\r\n', 'CRLF'], ['\r\r\n', 'CR CR LF'], ['\r', 'CR']]) {
+        await test(`the delimiter is detected from the first line of a ${name} file`, async () => {
+            const tags = ['id,tags', '1,"red;green;blue;black"', '2,"red;blue;white"', '3,"green;black;white"'];
+            const t = await open(file(`delim-${name.replace(/ /g, '')}.csv`, tags.join(eol) + eol));
+            assert.strictEqual(t.doc.delimiter, ',', 'the tags file');
+            const prices = ['Preis;Menge', '1,50;2,5', '2,20;1,5', '0,80;3,0'];
+            const u = await open(file(`delim-eu-${name.replace(/ /g, '')}.csv`, prices.join(eol) + eol));
+            assert.strictEqual(u.doc.delimiter, ';', 'the file with decimal commas');
+        });
+    }
+
+    // The previews of a large Mac file read it as one record: all of it went
+    // to the grid, the banner said "of 0 rows" and the paged view put every
+    // row into the header.
+    const MAC_TEXT = 'id;name;amount\r' + Array.from({ length: 2500 }, (_, i) => `${i};name ${i};${i * 3}`).join('\r') + '\r';
+    for (const mode of ['head', 'tail', 'chunked']) {
+        await test(`a Mac file shows its rows in ${mode}`, async () => {
+            const p = file(`mac-${mode}.csv`, MAC_TEXT);
+            fakeSize = 60 * 1024 * 1024;
+            quickPickChoice = mode;
+            const t = await open(p);
+            assert.strictEqual(t.doc.isPreview, true, 'the test did not reach the preview');
+            assert.strictEqual(t.doc.delimiter, ';');
+            assert.strictEqual(t.doc.totalLineCount, 2501, 'the rows the banner counts');
+            await t.ready();
+            const shown = t.posted.find(m => m.type === 'init').text;
+            const rows = shown.split('\r').filter(Boolean);
+            assert.strictEqual(rows[0], 'id;name;amount');
+            assert.strictEqual(rows.length, mode === 'chunked' ? 501 : 1001, 'rows sent to the grid');
+            assert.ok(!shown.includes('\n'), 'the text sent has an LF, the grid would glue the rows together');
+            if (mode === 'tail') assert.strictEqual(rows[1], '1500;name 1500;4500');
+            if (mode === 'chunked') {
+                assert.strictEqual(t.posted.find(m => m.type === 'pageData').totalPages, 5);
+            }
         });
     }
 

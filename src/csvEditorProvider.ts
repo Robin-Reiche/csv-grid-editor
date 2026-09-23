@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
-import * as fs from 'fs';
 import * as path from 'path';
+import { createHash } from 'crypto';
 import { getWebviewContent } from './webview';
 import { SETTING_DEFAULTS, isSettingKey, type Settings, type SettingKey } from './webview/settings';
 import {
@@ -14,7 +14,7 @@ import {
     readPreviewEncoding,
     readPage
 } from './largeFileReader';
-import { FileEncoding, decodeFile, encodeFile, isFileEncoding } from './encoding';
+import { FileEncoding, decodeExactly, decodeFile, encodeFile, isFileEncoding } from './encoding';
 
 const LARGE_FILE_THRESHOLD   = 10  * 1024 * 1024; // 10 MB
 const CHUNKED_THRESHOLD      = 50  * 1024 * 1024; // 50 MB
@@ -23,17 +23,40 @@ const PAGE_SIZE              = 500;
 const CANCELLED_PREVIEW_MODE = '__cancelled__';
 
 // A hot exit backup is written as UTF-8, which holds any edit whatever the
-// file's encoding. Its id carries that encoding back to the restore. An id
-// from before is the bare URI of a backup written the way a save wrote the
-// file then: UTF-8, behind the byte order mark if the file had one.
-function backupId(destination: vscode.Uri, encoding: FileEncoding): string {
-    return JSON.stringify({ backup: destination.toString(), encoding });
+// file's encoding, but for one thing: a lone surrogate, which it turns into
+// U+FFFD. Only UTF-16 can hold one and a save of such a file keeps it, so a
+// UTF-16 file is backed up as UTF-16 LE. The id carries the file's encoding
+// back to the restore, whether the backup is UTF-16 and the fingerprint of the
+// file the edits were made on (see restoreBackup). An id from before is the
+// bare URI of a backup written the way a save wrote the file then: UTF-8,
+// behind the byte order mark if the file had one.
+interface Backup {
+    uri: vscode.Uri;
+    encoding?: FileEncoding;
+    utf16?: boolean;
+    disk?: string;
 }
 
-function parseBackupId(id: string): { uri: vscode.Uri; encoding?: FileEncoding } {
+function backupId(destination: vscode.Uri, encoding: FileEncoding, utf16: boolean, disk: string): string {
+    return JSON.stringify({ backup: destination.toString(), encoding, ...(utf16 ? { text: 'utf16le' } : {}), disk });
+}
+
+function parseBackupId(id: string): Backup {
     if (!id.startsWith('{')) return { uri: vscode.Uri.parse(id) };
-    const { backup, encoding } = JSON.parse(id) as { backup: string; encoding: unknown };
-    return { uri: vscode.Uri.parse(backup), encoding: isFileEncoding(encoding) ? encoding : undefined };
+    const { backup, encoding, text, disk } = JSON.parse(id) as { backup: string; encoding: unknown; text?: unknown; disk?: unknown };
+    return {
+        uri: vscode.Uri.parse(backup),
+        encoding: isFileEncoding(encoding) ? encoding : undefined,
+        utf16: text === 'utf16le',
+        disk: typeof disk === 'string' ? disk : undefined
+    };
+}
+
+// Tells whether a file still holds the text and encoding a backup's edits
+// were made on without keeping that text in the id. The text goes in as
+// UTF-16, the one form in which no two strings look the same.
+function fingerprint(text: string, encoding: FileEncoding): string {
+    return createHash('sha256').update(encoding + '\0').update(text, 'utf16le').digest('hex');
 }
 
 // Told after a save that could not keep the file in Windows-1252, see
@@ -113,7 +136,14 @@ class CsvDocument implements vscode.CustomDocument {
     // The text we know the file on disk holds: what was read on open, what we
     // last saved, or the outside change we last loaded. The watcher compares
     // against this, not only against content, see reload() below.
-    public diskText: string;
+    public get diskText(): string {
+        return this._diskText;
+    }
+    public set diskText(text: string) {
+        this._diskText = text;
+        this.diskPrint = undefined;
+    }
+    private _diskText: string;
     // The file's encoding, byte order mark included (see encoding.ts). The
     // grid never sees either, so the document remembers them and every write
     // puts them back. Excel reads UTF-8 without the mark as ANSI, so a save
@@ -131,6 +161,12 @@ class CsvDocument implements vscode.CustomDocument {
     // The one watcher on the file while any editor is open, see
     // resolveCustomEditor. A preview has none.
     public watcher: vscode.FileSystemWatcher | undefined;
+    // The fingerprint of diskText in this encoding for the hot exit backup. A
+    // backup follows every edit, so hashing a large file each time would add
+    // a pause to each of them. A new diskText drops it. Kept together with the
+    // text it was taken of, it held on to what the file had before a save
+    // until the next edit: as much memory again as a large file takes.
+    public diskPrint: { encoding: FileEncoding; print: string } | undefined;
 
     constructor(
         public readonly uri: vscode.Uri,
@@ -142,7 +178,7 @@ class CsvDocument implements vscode.CustomDocument {
         public readonly isChunked: boolean = false
     ) {
         this.content = content;
-        this.diskText = content;
+        this._diskText = content;
     }
 
     dispose(): void {}
@@ -223,22 +259,36 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
     // unless the document has unsaved changes, so on a file only changed on disk
     // it does nothing at all (issue #25).
     private async reloadActiveFromDisk(): Promise<void> {
-        const tab = vscode.window.tabGroups.activeTabGroup.activeTab;
-        const input = tab?.input;
-        if (!(input instanceof vscode.TabInputCustom) || input.viewType !== CsvEditorProvider.viewType) {
-            vscode.window.showWarningMessage('Reload from Disk works on an open CSV Grid Editor tab.');
-            return;
+        const group = vscode.window.tabGroups.activeTabGroup;
+        const input = group.activeTab?.input;
+        let documents: CsvDocument[];
+        if (input instanceof vscode.TabInputCustom && input.viewType === CsvEditorProvider.viewType) {
+            const document = this._documents.get(input.uri.toString());
+            documents = document ? [document] : [];
+        } else {
+            // A Source Control diff whose sides are grids. VS Code tells an
+            // extension nothing about the tab of such a diff, not even its
+            // files. Its grids are the ones in front in the group, though.
+            documents = [...this._documents.values()].filter(document =>
+                [...document.panels].some(panel => panel.visible && panel.viewColumn === group.viewColumn));
+            if (!documents.length) {
+                vscode.window.showWarningMessage('Reload from Disk works on an open CSV Grid Editor tab.');
+                return;
+            }
         }
 
-        const document = this._documents.get(input.uri.toString());
-        if (!document || document.isPreview) {
+        documents = documents.filter(document => !document.isPreview);
+        if (!documents.length) {
             vscode.window.showWarningMessage('This grid cannot be reloaded (preview mode).');
             return;
         }
 
         // Without this the command looks broken whenever the file is already in
         // sync, which is exactly the confusion that made #25 hard to report.
-        const changed = await this.reloadFromDisk(document);
+        let changed = false;
+        for (const document of documents) {
+            if (await this.reloadFromDisk(document)) changed = true;
+        }
         if (!changed) {
             vscode.window.setStatusBarMessage('CSV Grid: already up to date', 3000);
         }
@@ -291,7 +341,15 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
                 });
             }
 
-            const choice = await vscode.window.showQuickPick(quickPickItems, {
+            // Head, tail and the paged view read the file with Node's fs, which
+            // knows nothing but the path. The HEAD side of a Source Control
+            // diff is a git: URI with the working file's path, so they showed
+            // the working copy on both sides of the diff. A file that is not
+            // on disk is read through VS Code, which gives only all of it.
+            const offered = uri.scheme === 'file'
+                ? quickPickItems
+                : quickPickItems.filter(item => item.id === 'full' || item.id === 'plaintext');
+            const choice = await vscode.window.showQuickPick(offered, {
                 placeHolder: `This file is large (${sizeMB} MB). How would you like to open it?`,
                 ignoreFocusOut: true
             });
@@ -332,7 +390,7 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             }
 
             if (previewMode === 'plaintext') {
-                content = decodeFile(await fs.promises.readFile(filePath)).text;
+                content = decodeFile(await vscode.workspace.fs.readFile(uri)).text;
                 isPreview = true;
             } else if (previewMode === 'head') {
                 content = await readFirstRecords(filePath, PREVIEW_ROW_COUNT + 1, scanDelimiter, previewEncoding);
@@ -379,13 +437,13 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
     // Only an editable document gets backed up (a preview never turns dirty),
     // so a restore always opens in full mode and skips the size question.
     private async restoreBackup(uri: vscode.Uri, id: string): Promise<CsvDocument> {
-        const { uri: backupUri, encoding } = parseBackupId(id);
+        const { uri: backupUri, encoding, utf16, disk } = parseBackupId(id);
         const raw = await vscode.workspace.fs.readFile(backupUri);
         // The encoding comes with the id: nothing in plain ASCII text tells
         // Windows-1252 from UTF-8. Every character of the text is the edits',
         // a U+FEFF at its start included.
         const backup = encoding
-            ? { text: new TextDecoder('utf-8', { ignoreBOM: true }).decode(raw), encoding }
+            ? { text: utf16 ? Buffer.from(raw).toString('utf16le') : new TextDecoder('utf-8', { ignoreBOM: true }).decode(raw), encoding }
             : decodeFile(raw);
         const doc = new CsvDocument(uri, backup.text, this.detectDelimiter(uri.fsPath, backup.text), false, 'full', 0, false);
         doc.encoding = backup.encoding;
@@ -393,7 +451,29 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         // against the restored edits. A file deleted since the backup holds
         // nothing. Failing the restore over that would lose the edits too.
         try {
-            doc.diskText = decodeFile(await vscode.workspace.fs.readFile(uri)).text;
+            const raw = await vscode.workspace.fs.readFile(uri);
+            const onDisk = decodeFile(raw, backup.encoding);
+            doc.diskText = onDisk.text;
+            // Another program changed the file while VS Code was closed, a
+            // git pull for one. Nothing watched it then. Taking the new file
+            // for the one the edits were made on let the next save write
+            // over the change without a word. The edits are kept and the
+            // user is told, the way the watcher does it. A file that now
+            // holds the very edits has nothing to tell.
+            if (disk !== undefined && fingerprint(onDisk.text, onDisk.encoding) !== disk) {
+                // Read by its bytes, a file can give another text than the
+                // one the document saved into it: a U+FEFF at the start of a
+                // UTF-8 text reads back as the byte order mark. Such a file
+                // did not change. Taken for changed, it also took the mark
+                // for its encoding and the next save wrote the mark twice.
+                const saved = decodeExactly(raw, backup.encoding);
+                if (saved !== undefined && fingerprint(saved, backup.encoding) === disk) {
+                    doc.diskText = saved;
+                } else {
+                    doc.encoding = onDisk.encoding;
+                    if (onDisk.text !== doc.content) this.warnChangedOnDisk(doc);
+                }
+            }
         } catch {
             doc.diskText = '';
         }
@@ -621,6 +701,12 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             // this: Reload from Disk is the explicit request for the disk.
             if (fromWatcher && holds(document.diskText)) return false;
             const { text, encoding } = decodeFile(raw, document.encoding);
+            // The same two checks for a file with stray bytes behind a UTF-8
+            // byte order mark (see encoding.ts). A save writes those bytes as
+            // UTF-8, so its bytes never match the file's, but the text read
+            // from it tells whether anything changed.
+            if (encoding === document.encoding
+                && (text === document.content || (fromWatcher && text === document.diskText))) return false;
             // Another program changed the file while the grid holds
             // unsaved edits. Loading it silently replaced those edits and
             // left the tab dirty, so the next save made the loss final.
@@ -632,12 +718,7 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             if (fromWatcher && document.content !== document.diskText) {
                 document.diskText = text;
                 document.encoding = encoding;
-                void vscode.window.showWarningMessage(
-                    `${path.basename(document.uri.fsPath)} changed on disk. Your unsaved edits in the grid were kept.`,
-                    'Reload from Disk'
-                ).then(choice => {
-                    if (choice === 'Reload from Disk') void this.reloadFromDisk(document);
-                });
+                this.warnChangedOnDisk(document);
                 return false;
             }
             // When only the encoding changed, the grid already shows this
@@ -659,6 +740,17 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         }
     }
 
+    // The file changed on disk while the grid holds unsaved edits, which were
+    // kept. The user chooses whether to load the file instead.
+    private warnChangedOnDisk(document: CsvDocument): void {
+        void vscode.window.showWarningMessage(
+            `${path.basename(document.uri.fsPath)} changed on disk. Your unsaved edits in the grid were kept.`,
+            'Reload from Disk'
+        ).then(choice => {
+            if (choice === 'Reload from Disk') void this.reloadFromDisk(document);
+        });
+    }
+
     // Reload from Disk, the command and the button on the warning above. A
     // reload under unsaved edits left the tab marked unsaved although the grid
     // showed exactly the file, so closing it asked to save. Only a save or a
@@ -671,7 +763,27 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             tab?.input instanceof vscode.TabInputCustom
             && tab.input.viewType === CsvEditorProvider.viewType
             && tab.input.uri.toString() === document.uri.toString();
-        const tab = vscode.window.tabGroups.all.flatMap(group => group.tabs).find(isOwnTab);
+        const ownTab = () => vscode.window.tabGroups.all.flatMap(group => group.tabs).find(isOwnTab);
+        const tab = ownTab();
+        // A document that only a Source Control diff shows has no tab of its
+        // own. The unsaved mark sits on the diff's tab, which VS Code tells an
+        // extension nothing about. So the document is opened in a tab of its
+        // own for the revert, which takes the mark off the diff as well. That
+        // tab is closed again afterwards, so the editor that was in front
+        // comes back. A tab not marked unsaved drops the revert (issue #25),
+        // so the file is then loaded below the way it is for such a tab.
+        if (!tab && document.panels.size > 0 && document.content !== document.diskText) {
+            await vscode.commands.executeCommand('vscode.openWith', document.uri, CsvEditorProvider.viewType,
+                { viewColumn: vscode.window.tabGroups.activeTabGroup.viewColumn, preserveFocus: false, preview: false });
+            const front = vscode.window.tabGroups.activeTabGroup.activeTab;
+            if (isOwnTab(front)) {
+                const reverted = front.isDirty;
+                if (reverted) await vscode.commands.executeCommand('workbench.action.files.revert');
+                const opened = ownTab();
+                if (opened && !opened.isDirty) await vscode.window.tabGroups.close(opened);
+                if (reverted) return true;
+            }
+        }
         if (tab?.isDirty) {
             // The revert command works on the editor in front, so the tab
             // comes to the front first. This also takes the focus from the
@@ -717,7 +829,7 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         if (encoding !== before) warnSavedAsUtf8(document.uri);
     }
 
-    async saveCustomDocumentAs(document: CsvDocument, destination: vscode.Uri, _cancellation: vscode.CancellationToken): Promise<void> {
+    async saveCustomDocumentAs(document: CsvDocument, destination: vscode.Uri, cancellation: vscode.CancellationToken): Promise<void> {
         // A preview holds only part of the file (Paged View holds none of it)
         // and writing that produced a truncated or empty copy. A preview cannot
         // be edited, so the file on disk is exactly what Save As should give.
@@ -727,6 +839,14 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
                 this.copyHeaderRow(document.uri, destination);
             }
             return;
+        }
+        // Save As onto the file itself is a save. VS Code keeps this document
+        // open for the tab and marks it saved. Written like a copy, the
+        // document went on taking the text from before for the disk's: an
+        // outside change after it was ignored or reported as clashing with
+        // unsaved edits the tab did not have.
+        if (destination.toString() === document.uri.toString()) {
+            return this.saveCustomDocument(document, cancellation);
         }
         const { bytes, encoding } = document.encode();
         await vscode.workspace.fs.writeFile(destination, bytes);
@@ -754,9 +874,16 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
     }
 
     async backupCustomDocument(document: CsvDocument, context: vscode.CustomDocumentBackupContext, _cancellation: vscode.CancellationToken): Promise<vscode.CustomDocumentBackup> {
-        await vscode.workspace.fs.writeFile(context.destination, new TextEncoder().encode(document.content));
+        const utf16 = document.encoding === 'utf16le' || document.encoding === 'utf16be';
+        const bytes = utf16 ? Buffer.from(document.content, 'utf16le') : new TextEncoder().encode(document.content);
+        await vscode.workspace.fs.writeFile(context.destination, bytes);
+        let known = document.diskPrint;
+        if (!known || known.encoding !== document.encoding) {
+            known = { encoding: document.encoding, print: fingerprint(document.diskText, document.encoding) };
+            document.diskPrint = known;
+        }
         return {
-            id: backupId(context.destination, document.encoding),
+            id: backupId(context.destination, document.encoding, utf16, known.print),
             delete: async () => {
                 try { await vscode.workspace.fs.delete(context.destination); } catch {}
             }
@@ -767,7 +894,9 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
 
     private detectDelimiter(fileName: string, content: string): string {
         if (fileName.endsWith('.tsv')) return '\t';
-        const firstLine = content.split('\n')[0] || '';
+        // The first line ends at a CR as well. A classic Mac file has no LF,
+        // so the separators of the whole file were counted.
+        const firstLine = content.slice(0, content.search(/[\r\n]|$/));
         const semicolons = (firstLine.match(/;/g) || []).length;
         const commas     = (firstLine.match(/,/g) || []).length;
         const tabs       = (firstLine.match(/\t/g) || []).length;

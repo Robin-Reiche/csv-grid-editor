@@ -67,6 +67,72 @@ function encodeWindows1252(text: string): Uint8Array | null {
     return encodable ? Buffer.from(latin1, 'latin1') : null;
 }
 
+// Whether the bytes from `lo` to `hi` include the byte at `i` of `b`.
+function inRange(b: Uint8Array, i: number, lo: number, hi: number): boolean {
+    return i < b.length && b[i] >= lo && b[i] <= hi;
+}
+
+// How many bytes the UTF-8 character at `i` takes, 0 when no valid one starts
+// there. Valid is what TextDecoder accepts: no overlong forms, no surrogates,
+// nothing past U+10FFFF.
+function utf8Length(b: Uint8Array, i: number): number {
+    const c = b[i];
+    if (c < 0x80) return 1;
+    if (c >= 0xC2 && c <= 0xDF) return inRange(b, i + 1, 0x80, 0xBF) ? 2 : 0;
+    if (c >= 0xE0 && c <= 0xEF) {
+        const ok = inRange(b, i + 1, c === 0xE0 ? 0xA0 : 0x80, c === 0xED ? 0x9F : 0xBF)
+            && inRange(b, i + 2, 0x80, 0xBF);
+        return ok ? 3 : 0;
+    }
+    if (c >= 0xF0 && c <= 0xF4) {
+        const ok = inRange(b, i + 1, c === 0xF0 ? 0x90 : 0x80, c === 0xF4 ? 0x8F : 0xBF)
+            && inRange(b, i + 2, 0x80, 0xBF) && inRange(b, i + 3, 0x80, 0xBF);
+        return ok ? 4 : 0;
+    }
+    return 0;
+}
+
+// The UTF-8 bytes of each byte's Windows-1252 character.
+const WINDOWS_1252_AS_UTF8 = Array.from({ length: 256 }, (_, byte) =>
+    Buffer.from(decodeWindows1252(Uint8Array.of(byte)), 'utf8'));
+
+// UTF-8, but a byte that is not part of a valid UTF-8 character is read as
+// its Windows-1252 character, the way a line a legacy tool added to a UTF-8
+// file was written. No byte turns into U+FFFD. Written back as UTF-8, every
+// other byte comes out as it was.
+//
+// Each stray byte is swapped for the UTF-8 of its character and the result is
+// read as UTF-8 in one go. Decoding each stray byte on its own took seconds on
+// a large file whose rows are mostly Windows-1252.
+export function decodeUtf8KeepingStrays(bytes: Uint8Array): string {
+    const buf = asBuffer(bytes);
+    let out = Buffer.alloc(0);
+    let length = 0;
+    let from = 0;
+    for (let i = 0; i < buf.length;) {
+        const n = utf8Length(buf, i);
+        if (n) {
+            i += n;
+            continue;
+        }
+        const char = WINDOWS_1252_AS_UTF8[buf[i]];
+        // Room for the rest of the file as well, so only a stray byte ever
+        // has to make more. Its character takes up to three bytes.
+        const needed = length + (i - from) + char.length + (buf.length - i - 1);
+        if (needed > out.length) {
+            const more = Buffer.allocUnsafe(Math.max(needed, Math.floor(out.length * 1.5)));
+            out.copy(more, 0, 0, length);
+            out = more;
+        }
+        length += buf.copy(out, length, from, i);
+        length += char.copy(out, length);
+        from = ++i;
+    }
+    if (from === 0) return buf.toString('utf8');
+    length += buf.copy(out, length, from);
+    return out.toString('utf8', 0, length);
+}
+
 // Whether these bytes, the start of a longer file, can begin UTF-8 text. A
 // character cut in two at the end of them does not count against it.
 export function startsAsUtf8(bytes: Uint8Array): boolean {
@@ -79,8 +145,13 @@ export function startsAsUtf8(bytes: Uint8Array): boolean {
 }
 
 // A file with a UTF-16 byte order mark is UTF-16. Anything else is UTF-8 when
-// it is valid UTF-8. When it is not, it is Windows-1252. The grid never sees a
-// byte order mark: kept, it would sit in front of the first header name.
+// it is valid UTF-8. When it is not, it is Windows-1252, unless it starts with
+// the UTF-8 byte order mark. The mark says the file is UTF-8. A byte that is
+// not is most likely part of a line some legacy tool added later, so only such
+// bytes are read as Windows-1252 then. Read whole that way, the mark showed as
+// "ï»¿" in front of the first header name and every umlaut was mojibake, which
+// a save wrote into the file for good. The grid never sees a byte order mark:
+// kept, it would sit in front of the first header name.
 //
 // `current` is the encoding of the document that reads its file again. Plain
 // ASCII is valid UTF-8 and Windows-1252 alike. Taken for UTF-8, a Windows-1252
@@ -112,7 +183,34 @@ function detectEncoding(raw: Uint8Array): { text: string; encoding: FileEncoding
         const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
         return { text, encoding: startsWith(bytes, UTF8_BOM) ? 'utf8bom' : 'utf8' };
     } catch {
+        if (startsWith(bytes, UTF8_BOM)) {
+            return { text: decodeUtf8KeepingStrays(bytes.subarray(UTF8_BOM.length)), encoding: 'utf8bom' };
+        }
         return { text: decodeWindows1252(bytes), encoding: 'windows1252' };
+    }
+}
+
+// The text whose save in this encoding writes exactly these bytes, undefined
+// when there is none. decodeFile reads a file by what its bytes look like.
+// This reads it the way a document in this encoding wrote it: a U+FEFF at the
+// start of the text of a UTF-8 file is written as the bytes of the byte order
+// mark, which decodeFile then drops.
+export function decodeExactly(raw: Uint8Array, encoding: FileEncoding): string | undefined {
+    const bytes = asBuffer(raw);
+    const utf8 = (body: Uint8Array): string | undefined => {
+        try {
+            return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(body);
+        } catch {
+            return undefined;
+        }
+    };
+    const utf16 = bytes.length % 2 === 0;
+    switch (encoding) {
+        case 'utf8':        return utf8(bytes);
+        case 'utf8bom':     return startsWith(bytes, UTF8_BOM) ? utf8(bytes.subarray(UTF8_BOM.length)) : undefined;
+        case 'utf16le':     return utf16 && startsWith(bytes, UTF16LE_BOM) ? bytes.toString('utf16le', 2) : undefined;
+        case 'utf16be':     return utf16 && startsWith(bytes, UTF16BE_BOM) ? Buffer.from(bytes.subarray(2)).swap16().toString('utf16le') : undefined;
+        case 'windows1252': return decodeWindows1252(bytes);
     }
 }
 
