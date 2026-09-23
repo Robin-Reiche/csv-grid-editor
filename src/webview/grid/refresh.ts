@@ -182,7 +182,11 @@ export function refreshGrid(): void {
     // (partitionFrozenRows). Frozen and hidden columns keep every place that
     // still exists. The focus goes back to its cell. Widths, sort and filters
     // start over, as they do when a column is inserted or deleted: they belong
-    // to a position, which may now hold other data.
+    // to a position, which may now hold other data. Deleting the only row that
+    // is wider than the header takes its unnamed column along, so that delete
+    // starts them over too. Such a row is most often a broken line, which is
+    // why it gets deleted. From here that case looks the same as a change that
+    // moved the columns.
     if (gridDataColCount() !== numCols) {
         for (const set of [state.hiddenCols, state.pinnedCols]) {
             for (const c of [...set]) if (c >= numCols) set.delete(c);
