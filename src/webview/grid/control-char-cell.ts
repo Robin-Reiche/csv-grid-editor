@@ -72,7 +72,11 @@ export class ControlCharCellRenderer {
     // true/false column can be drawn as a box or as its text (issue #41). A
     // line break is drawn differently with wrapping on and off (paint).
     // Switching either mode changes this key without the value moving, so a
-    // repaint is needed for a value that did not change.
+    // repaint is needed for a value that did not change. Today the wrap toggle
+    // hands the grid new column settings, which draws the cells from scratch
+    // anyway. The wrap state is in the key so the forced refresh the toggle
+    // sends after that (features/wrap-text.ts) still repaints if it ever
+    // reaches a cell that was kept.
     private painted: string | null = null;
 
     init(params: any): void {
