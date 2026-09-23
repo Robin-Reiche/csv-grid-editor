@@ -4,6 +4,7 @@ import { readText } from '../messaging';
 import { frozenRowPositions, reanchorFrozenRows } from './freeze-rows';
 import { closeAllPopups } from './popups';
 import { resetDuplicatesState } from './duplicates';
+import { refreshFindIfOpen } from './find-replace';
 
 export function updateDelimiterBadge(delimiter: string): void {
     const badge = document.getElementById('delim-badge');
@@ -48,6 +49,10 @@ export function setupDelimiterBadge(): void {
             // nothing, so notifyChange, which ends the view after every edit,
             // never runs here.
             resetDuplicatesState();
+            // The find matches were found in the columns as they were split
+            // before. Replace on one of them changed nothing and still sent
+            // the file.
+            refreshFindIfOpen();
         });
     });
 

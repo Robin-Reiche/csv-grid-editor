@@ -6,6 +6,7 @@ import { recomputeColTypes } from '../grid/column-type';
 import { resetDuplicatesState } from './duplicates';
 import { refreshProfileIfOpen } from './profile';
 import { updateDelimiterBadge } from './delimiter';
+import { refreshFindIfOpen } from './find-replace';
 import type { UndoSnapshot } from '../types';
 
 // Captures the undoable view state: a deep clone of the data plus the freeze
@@ -50,8 +51,15 @@ function restore(snap: UndoSnapshot): void {
     buildGrid();
 }
 
+// The step the last pushUndo took and the redo steps it cleared. Every change
+// that takes a step ends in notifyChange, which drops the step again when the
+// change left the table as it was (see there).
+let lastPushed: { step: UndoSnapshot; redo: UndoSnapshot[] } | null = null;
+
 export function pushUndo(): void {
-    state.undoStack.push(snapshot());
+    const step = snapshot();
+    lastPushed = { step, redo: state.redoStack };
+    state.undoStack.push(step);
     state.redoStack = [];
     state.autoFitCache = null;
     updateButtons();
@@ -84,6 +92,8 @@ export function undo(): void {
     notifyChange();
     updateButtons();
     recomputeColTypes();
+    // The rows are replaced, so the find matches point at the rows before.
+    refreshFindIfOpen();
 }
 
 export function redo(): void {
@@ -95,6 +105,7 @@ export function redo(): void {
     notifyChange();
     updateButtons();
     recomputeColTypes();
+    refreshFindIfOpen();
 }
 
 export function updateButtons(): void {
@@ -125,6 +136,23 @@ export function notifyChange(): void {
     // A file without a header row gets its rows only, never the column
     // letters the grid shows in its place (state.firstRowIsHeader).
     const text = toCsv(fileRows(state.data, !state.firstRowIsHeader), state.currentDelimiter, state.lineFormat);
+    // The file already holds this text when it is the one last sent or
+    // received. The extension marks the file unsaved for every edit it gets,
+    // so a Replace on a cell that no longer held the search text made the tab
+    // dirty with nothing changed. Such a change is not sent. The undo step it
+    // took is dropped as well when the table is still the one in that step,
+    // since it would undo nothing. The redo steps the step cleared come back.
+    const pushed = lastPushed;
+    lastPushed = null;
+    if (text === state.rawCsvText) {
+        const top = state.undoStack[state.undoStack.length - 1];
+        if (pushed && top === pushed.step && JSON.stringify(top.data) === JSON.stringify(state.data)) {
+            state.undoStack.pop();
+            state.redoStack = pushed.redo;
+            updateButtons();
+        }
+        return;
+    }
     state.rawCsvText = text;
     vscodeApi.postMessage({ type: 'edit', text });
 }

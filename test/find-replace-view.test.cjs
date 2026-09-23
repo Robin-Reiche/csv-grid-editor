@@ -241,4 +241,60 @@ runSuite('find and replace (browser)', [
             t.check(t.lastEdit() === 'k,v\\nc,x\\nb,y\\na,y\\nb,x\\na,x', 'the next Replace takes that row (' + JSON.stringify(t.lastEdit()) + ')');
         `),
     },
+    {
+        // The matches belonged to the rows before the change. The counter
+        // stayed, a cell that no longer matched was marked and Replace sent
+        // the file back unchanged, which marked it unsaved.
+        name: 'an outside change searches again',
+        csv: 'id,name,city\n1,Alice,Berlin\n2,Bob,Hanoi\n3,Carol,Paris',
+        steps: steps(`
+            await t.init(csv);
+            await find(t, 'bob', 'Robert');
+            t.check(count() === '1 / 1', 'Bob is found (' + count() + ')');
+            window.postMessage({ type: 'update', text: 'id,name,city\\n1,Alice,Berlin\\n2,Zed,Hanoi\\n3,Carol,Paris', delimiter: ',' }, '*');
+            await t.wait(400);
+            t.check(count() === '0 matches', 'the counter follows the change (' + count() + ')');
+            t.check(!document.querySelector('#grid-container .cell-find-match'), 'no cell is marked');
+            await press(t, 'replace-one');
+            t.check(t.sent('edit').length === 0, 'Replace writes nothing (' + JSON.stringify(t.lastEdit()) + ')');
+            t.check(document.getElementById('btn-undo').disabled, 'and leaves no undo step');
+        `),
+    },
+    {
+        // The matches were found in the columns before the switch.
+        name: 'a delimiter switch searches again',
+        csv: 'k;v\nb;x\ny;b\n',
+        steps: steps(`
+            await t.init(csv);
+            await find(t, 'b', 'Q');
+            await press(t, 'find-next');
+            t.check(count() === '2 / 2', 'the second match is active (' + count() + ')');
+            document.querySelector('.delim-option[data-delim=";"]').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(400);
+            t.check(!!t.cell(1, 1) && t.cell(1, 1).classList.contains('cell-find-active'),
+                'the active match is the b in the second column (' + count() + ')');
+            await press(t, 'replace-one');
+            t.check(t.lastEdit() === 'k;v\\nb;x\\ny;Q\\n', 'Replace takes that match (' + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
+    {
+        // The host marks the file unsaved for every edit it gets. A replace
+        // that leaves the text as it was is no change. The undo step it took
+        // would undo nothing. The redo step it cleared comes back.
+        name: 'a replace that changes nothing writes nothing',
+        csv: 'k,v\na,Bob\nb,x',
+        steps: steps(`
+            await t.init(csv);
+            await find(t, 'x', 'y');
+            await press(t, 'replace-one');
+            await press(t, 'btn-undo');
+            t.check(t.lastEdit() === csv, 'undo writes the file back (' + JSON.stringify(t.lastEdit()) + ')');
+            const sent = t.sent('edit').length;
+            await find(t, 'Bob', 'Bob');
+            await press(t, 'replace-one');
+            t.check(t.sent('edit').length === sent, 'Replace writes nothing (' + JSON.stringify(t.lastEdit()) + ')');
+            t.check(document.getElementById('btn-undo').disabled, 'no undo step is left behind');
+            t.check(!document.getElementById('btn-redo').disabled, 'the redo step is still there');
+        `),
+    },
 ]);

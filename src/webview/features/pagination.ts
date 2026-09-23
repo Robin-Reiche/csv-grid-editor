@@ -3,6 +3,7 @@ import { buildGrid } from '../grid/builder';
 import { hideLoader } from '../utils/loader';
 import { readText } from '../messaging';
 import { rowsInFile } from './header-row';
+import { refreshFindIfOpen } from './find-replace';
 
 export function requestPage(pageNum: number): void {
     vscodeApi.postMessage({ type: 'requestPage', pageNumber: pageNum });
@@ -45,6 +46,8 @@ export function handlePageData(msg: { pageNumber: number; totalPages: number; te
     readText(msg.text);
     buildGrid();
     hideLoader();
+    // Another page, so the find matches of the last one are gone.
+    refreshFindIfOpen();
 }
 
 export function setupPagination(): void {

@@ -10,6 +10,7 @@ import { resetDuplicatesState } from './features/duplicates';
 import { frozenRowPositions, reanchorFrozenRows } from './features/freeze-rows';
 import { loadRows, rowsInFile } from './features/header-row';
 import { updateSettingsButton } from './features/settings-menu';
+import { refreshFindIfOpen } from './features/find-replace';
 
 // The preview banner of Show Head and Show Tail: how many of the file's rows
 // are on screen. The paged view has its own (features/pagination.ts).
@@ -87,6 +88,10 @@ export function setupMessaging(): void {
             const rebuilt = state.dupShowOnly;
             resetDuplicatesState();
             if (!rebuilt) refreshGrid();
+            // The find matches belong to the rows before the change. Kept, the
+            // counter went on counting them, a cell that no longer matched was
+            // marked and Replace sent the file back unchanged.
+            refreshFindIfOpen();
         } else if (msg.type === 'pageData') {
             handlePageData(msg);
         }
