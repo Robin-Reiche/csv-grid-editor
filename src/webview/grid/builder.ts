@@ -550,10 +550,17 @@ export function buildGrid(): void {
         // row, under a sort into another row's cell. The grid did not show it.
         // A caller that commits and then moves rows writes the value first
         // (commitOpenEditor). A report on a node that no longer holds the row
-        // the change was made on has nothing left to write.
+        // the change was made on has nothing left to write. Nor has one on a
+        // node the grid has taken out. Such a node keeps its row. That row's
+        // place can name another row by then. An insert under a sort writes
+        // a frozen row on top of the file, so the value went to the frozen
+        // row while the band went on showing the old value. A row a filter
+        // hides is still in the grid and its value still counts.
         onCellValueChanged: (event: any) => {
-            if (event.data !== event.node.data) return;
-            writeCellValue(event.node, event.colDef.field, event.newValue);
+            const node = event.node;
+            const inGrid = node.rowPinned ? node.rowIndex != null : state.gridApi?.getRowNode(node.id) === node;
+            if (event.data !== node.data || !inGrid) return;
+            writeCellValue(node, event.colDef.field, event.newValue);
         },
     };
 

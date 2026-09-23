@@ -39,7 +39,8 @@ function deleteColumn(colId: string): void {
 function deleteColumns(colIndices: number[]): void {
     const indices = colIndices.filter(c => Number.isInteger(c) && c >= 0);
     if (indices.length === 0) return;
-    pushUndo();
+    // Undo puts the find matches back on their columns by what the step notes.
+    pushUndo().columns = { removed: indices, added: [] };
     // map() rebuilds every row array, replacing the frozen rows' references —
     // re-anchor them by position (row count is unchanged) so the freezes survive.
     const frozenIdxs = state.frozenRowRefs.map(r => state.data.indexOf(r)).filter(i => i >= 0);
@@ -266,7 +267,8 @@ function insertColumns(baseIndex: number, position: 'left' | 'right', count: num
     if (count < 1 || isNaN(baseIndex)) return;
     const insertAt = position === 'left' ? baseIndex : baseIndex + 1;
 
-    pushUndo();
+    // Undo puts the find matches back on their columns by what the step notes.
+    pushUndo().columns = { removed: [], added: Array.from({ length: count }, (_, k) => insertAt + k) };
     // map() (inside insertColumnsIntoData) rebuilds every row array — re-anchor the
     // frozen rows by position afterwards so the freezes survive a column insert (row
     // positions are unchanged).

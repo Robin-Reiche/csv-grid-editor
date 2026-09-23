@@ -199,8 +199,8 @@ runSuite('first row is the header (browser)', [
     },
     {
         // The switch builds the grid again. The grid reported a value still
-        // being typed only after that, when nothing listened any more, and
-        // the value never reached the file.
+        // being typed only after that. Nothing listened any more and the
+        // value never reached the file.
         name: 'switching while a value is being typed keeps it',
         csv: 'name,city\nAnna,Berlin\nBen,Oslo\n',
         steps: steps(`

@@ -891,6 +891,37 @@ runSuite('find and replace (browser)', [
         `),
     },
     {
+        // Undo found the columns again by what they held. Two columns that
+        // hold the same could not be told apart, so the active match went to
+        // the one on the left and Replace changed that column. A file with a
+        // column twice over, such as Email,Email, gets there with one Delete
+        // column and one Undo.
+        name: 'undo of a column deleted next to a copy of itself keeps the active match on its column',
+        csv: 'k,k\nx1,x1\nx2,x2\nx3,x3\n',
+        steps: steps(`
+            await t.init(csv);
+            const activeCol = () => [...document.querySelectorAll('#grid-container .ag-center-cols-container .cell-find-active')]
+                .map(el => el.closest('.ag-cell').getAttribute('col-id')).join(',');
+            await find(t, 'x', 'Y');
+            await press(t, 'find-next');
+            await press(t, 'find-next');
+            await press(t, 'find-next');
+            t.check(count() === '4 / 6' && activeAt() === '1:x2' && activeCol() === 'col_1', 'Next moved to x2 on the right (' + count() + ', ' + activeAt() + ' ' + activeCol() + ')');
+            await colMenu(t, 'col_0', 'col-ctx-delete');
+            t.check(t.lastEdit() === 'k\\nx1\\nx2\\nx3\\n', 'the left column is deleted (' + JSON.stringify(t.lastEdit()) + ')');
+            t.check(count() === '2 / 3' && activeAt() === '1:x2', 'x2 keeps the active match after the delete (' + count() + ', ' + activeAt() + ')');
+            await press(t, 'btn-undo');
+            t.check(t.lastEdit() === csv, 'undo brings the column back (' + JSON.stringify(t.lastEdit()) + ')');
+            t.check(count() === '4 / 6' && activeCol() === 'col_1', 'the right column keeps the active match after Undo (' + count() + ', ' + activeCol() + ')');
+            await press(t, 'btn-redo');
+            t.check(count() === '2 / 3' && activeCol() === 'col_0', 'and after Redo (' + count() + ', ' + activeCol() + ')');
+            await press(t, 'btn-undo');
+            t.check(count() === '4 / 6' && activeCol() === 'col_1', 'and after Undo again (' + count() + ', ' + activeCol() + ')');
+            await press(t, 'replace-one');
+            t.check(t.lastEdit() === 'k,k\\nx1,x1\\nx2,Y2\\nx3,x3\\n', 'Replace takes x2 on the right (' + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
+    {
         // The next match after it is where Next would have gone, the same
         // as when the row of the active match is deleted.
         name: 'deleting the column of the active match moves on to the next match',

@@ -33,8 +33,8 @@ const PRESS = `async (t, key, mods) => {
     await t.wait(400);
 }`;
 
-// Runs inside the page: opens a cell and types into it without committing,
-// and reads the rows on screen as name|value pairs.
+// Runs inside the page: opens a cell and types into it without committing.
+// It also reads the rows on screen as name|value pairs.
 const TYPE = `
     t.type = async (row, col, value) => {
         await t.focusCell(row, col);
@@ -312,6 +312,50 @@ runSuite('rows (browser)', [
         }`,
     },
     {
+        // The insert writes the frozen row on top of the file, so Ben takes
+        // the first place, the one Anna had. Anna's old row left the grid.
+        // The grid reported the value on it later all the same. Written
+        // through that row's place, it went to Ben while the frozen band
+        // went on showing Berlin.
+        name: 'Ctrl+Enter while typing under a sort with a frozen row',
+        csv: 'name,city\nAnna,Oslo\nBen,Berlin\nCleo,Paris\nDan,Athens\n',
+        steps: `async (t, csv) => {
+            ${FRAMES}
+            ${TYPE}
+            await t.init(csv);
+            const c = t.cell(1, 0);
+            const r = c.getBoundingClientRect();
+            c.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 5, clientY: r.top + 5 }));
+            await t.wait(200);
+            const item = [...document.querySelectorAll('#row-context-menu .row-ctx-item')].find(i => i.textContent === 'Freeze row');
+            if (!item) { t.check(false, 'the row menu offers Freeze row'); return; }
+            item.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(300);
+            t.header(1).querySelector('.ag-header-cell-label').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(400);
+            t.check(t.rows() === 'Dan|Athens,Anna|Oslo,Cleo|Paris', 'Ben is frozen and the rest sorted by city (' + t.rows() + ')');
+            const ta = await t.type(1, 1, 'X');
+            if (!ta) return;
+            ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true, cancelable: true }));
+            await t.wait(400);
+            t.check(t.lastEdit() === 'name,city\\nBen,Berlin\\nDan,Athens\\nAnna,X\\n,\\nCleo,Paris\\n',
+                'Anna keeps the value and Ben keeps Berlin (' + JSON.stringify(t.lastEdit()) + ')');
+            t.check(t.sent('edit').length === 2, 'the value and the row are written once each (' + t.sent('edit').length + ' edits)');
+            // A value committed in the frozen row still reaches the file.
+            const frozen = document.querySelector('#grid-container .ag-floating-top .ag-cell[col-id="col_1"]');
+            ['mousedown', 'mouseup', 'click'].forEach(ty => frozen.dispatchEvent(new MouseEvent(ty, { bubbles: true, button: 0 })));
+            await t.wait(200);
+            await t.pressEnter();
+            const fta = document.querySelector('#grid-container textarea');
+            if (!fta) { t.check(false, 'Enter opens the editor on the frozen cell'); return; }
+            fta.value = 'Rome';
+            fta.dispatchEvent(new Event('input', { bubbles: true }));
+            await t.pressEnter();
+            t.check(t.lastEdit() === 'name,city\\nBen,Rome\\nDan,Athens\\nAnna,X\\n,\\nCleo,Paris\\n',
+                'Enter in the frozen row writes into Ben (' + JSON.stringify(t.lastEdit()) + ')');
+        }`,
+    },
+    {
         name: 'Ctrl+Enter while typing',
         csv: 'name,city\nAnna,Berlin\nBen,Oslo\nCleo,Paris\n',
         steps: `async (t, csv) => {
@@ -345,8 +389,8 @@ runSuite('rows (browser)', [
         }`,
     },
     {
-        // The new blank row takes the place of the row being typed in, and
-        // its cell is empty just like the one typed into. Only the row itself
+        // The new blank row takes the place of the row being typed in. Its
+        // cell is empty just like the one typed into. Only the row itself
         // tells the two apart.
         name: 'Ctrl+Shift+Enter while typing into an empty cell',
         csv: 'name,note\nAnna,\nBen,\nCleo,\n',

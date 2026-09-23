@@ -6,7 +6,8 @@ import { recomputeColTypes } from '../grid/column-type';
 import { resetDuplicatesState } from './duplicates';
 import { refreshProfileIfOpen } from './profile';
 import { updateDelimiterBadge } from './delimiter';
-import { followRestoredRows, followRestoredColumns } from './find-replace';
+import { followRestoredRows, followMovedColumns } from './find-replace';
+import { indexAfterChange } from '../grid/mutations';
 import type { CsvRow, UndoSnapshot } from '../types';
 
 // Captures the undoable view state: a deep clone of the data plus the freeze
@@ -41,9 +42,12 @@ function restore(snap: UndoSnapshot): void {
     // The grid searches again once it shows these rows and looks for the
     // active match at its old place, so the matches move with their rows
     // first. And with their columns, unless the step splits the rows on
-    // another delimiter, which makes other columns altogether.
+    // another delimiter, which makes other columns altogether. The table on
+    // screen came out of the step's table by the columns the step records,
+    // so the matches go back through them the other way round.
     followRestoredRows(before);
-    if (!resplit) followRestoredColumns(before);
+    const cols = snap.columns;
+    if (!resplit && cols) followMovedColumns(c => indexAfterChange(c, cols.added, cols.removed));
     state.currentDelimiter = snap.delimiter;
     state.lineFormat = snap.lineFormat;
     // Re-anchor frozen rows to the restored (cloned) arrays at their saved
@@ -65,13 +69,24 @@ function restore(snap: UndoSnapshot): void {
 // change left the table as it was (see there).
 let lastPushed: { step: UndoSnapshot; redo: UndoSnapshot[] } | null = null;
 
-export function pushUndo(): void {
+// Returns the step, so an insert or a delete of columns can note on it which
+// columns it changes.
+export function pushUndo(): UndoSnapshot {
     const step = snapshot();
     lastPushed = { step, redo: state.redoStack };
     state.undoStack.push(step);
     state.redoStack = [];
     state.autoFitCache = null;
     updateButtons();
+    return step;
+}
+
+// The step that takes back what putting `step` back does: the table on
+// screen, with the columns `step` records the other way round.
+function counterpart(step: UndoSnapshot): UndoSnapshot {
+    const snap = snapshot();
+    if (step.columns) snap.columns = { removed: step.columns.added, added: step.columns.removed };
+    return snap;
 }
 
 // While a cell is open for editing, undo and redo belong to that cell: they take
@@ -96,8 +111,8 @@ export function undo(): void {
     const editor = openCellEditor();
     if (editor) { editor.undoText(); return; }
     if (state.undoStack.length === 0) return;
-    state.redoStack.push(snapshot());
     const step = state.undoStack.pop()!;
+    state.redoStack.push(counterpart(step));
     restore(step);
     notifyChange(step.text);
     updateButtons();
@@ -108,8 +123,8 @@ export function redo(): void {
     const editor = openCellEditor();
     if (editor) { editor.redoText(); return; }
     if (state.redoStack.length === 0) return;
-    state.undoStack.push(snapshot());
     const step = state.redoStack.pop()!;
+    state.undoStack.push(counterpart(step));
     restore(step);
     notifyChange(step.text);
     updateButtons();
