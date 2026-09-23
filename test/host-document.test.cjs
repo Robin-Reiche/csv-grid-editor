@@ -85,8 +85,35 @@ const vscodeStub = {
                 }
                 fs.writeFileSync(uri.fsPath, bytes);
             },
-            copy: async (from, to) => fs.copyFileSync(from.fsPath, to.fsPath),
+            // VS Code's copy with overwrite deletes the target first. On a disk
+            // that ignores case, big.csv and BIG.csv are one file, so that
+            // deletes the source as well. A hard link stands in for the other
+            // spelling here: every name of the target's file goes.
+            copy: async (from, to, options) => {
+                if (options && options.overwrite && fs.existsSync(to.fsPath)) {
+                    const { ino } = fs.statSync(to.fsPath);
+                    const dir = path.dirname(to.fsPath);
+                    for (const name of fs.readdirSync(dir)) {
+                        if (fs.statSync(path.join(dir, name)).ino === ino) fs.rmSync(path.join(dir, name));
+                    }
+                }
+                fs.copyFileSync(from.fsPath, to.fsPath);
+            },
             delete: async uri => fs.rmSync(uri.fsPath, { force: true }),
+        },
+        // Came with VS Code 1.86: saves the editor of this file the way Ctrl+S
+        // does and gives back its URI, undefined when no editor shows it or
+        // the save failed. A test that restarts VS Code can leave the tab from
+        // before the restart behind, so the newest one is the file's editor.
+        save: async uri => {
+            const tab = group.tabs.findLast(t => t.save && t.input && t.input.uri.toString() === uri.toString());
+            if (!tab) return undefined;
+            try {
+                await tab.save();
+                return uri;
+            } catch {
+                return undefined;
+            }
         },
         createFileSystemWatcher: () => {
             const w = {
@@ -166,8 +193,12 @@ Module._load = function (request, ...rest) {
 
 const { CsvEditorProvider, sameResource } = require('../out/csvEditorProvider.js');
 
+// A test takes it away to act as VS Code before 1.86.
+const workspaceSave = vscodeStub.workspace.save;
+
 let failures = 0;
 async function test(name, fn) {
+    vscodeStub.workspace.save = workspaceSave;
     warnings.length = 0;
     fakeSize = null;
     quickPickChoice = null;
@@ -221,8 +252,29 @@ async function open(filePath, openContext = {}, uri = uriFile(filePath)) {
     const tab = {
         input: new TabInputCustom(uri, 'csvViewer.grid'), group, isActive: true, isDirty: false,
         revert: () => provider.revertCustomDocument(doc, {}),
+        save: async () => {
+            await provider.saveCustomDocument(doc, {});
+            tab.isDirty = false;
+        },
     };
-    provider.onDidChangeCustomDocument(e => { if (e.document === doc) tab.isDirty = true; });
+    // VS Code backs up a document with unsaved edits a moment after each
+    // change of its content. At quit it backs up only a content it has no
+    // backup of yet. A warning that the file changed on disk changes no
+    // content, so VS Code takes no backup for it.
+    let changes = 0;
+    let backedUp = null;
+    provider.onDidChangeCustomDocument(e => {
+        if (e.document !== doc) return;
+        tab.isDirty = true;
+        changes++;
+    });
+    const backUpLikeVsCode = async () => {
+        if (!backedUp || backedUp.changes !== changes) {
+            const destination = uriFile(path.join(tmpDir, `${path.basename(uri.fsPath)}.${changes}.backup`));
+            backedUp = { changes, backup: await provider.backupCustomDocument(doc, { destination }, {}) };
+        }
+        return backedUp.backup;
+    };
     group.tabs.push(tab);
     group.activeTab = tab;
     // The watchers made for this file, see fireWatcher.
@@ -236,12 +288,18 @@ async function open(filePath, openContext = {}, uri = uriFile(filePath)) {
     const editor = await watched(() => attach(provider, doc));
     return {
         ...editor, provider, doc, uri, tab, watchers: own,
-        save: async () => {
-            await provider.saveCustomDocument(doc, {});
-            tab.isDirty = false;
-        },
+        save: tab.save,
         saveAs: dest => provider.saveCustomDocumentAs(doc, uriFile(dest), {}),
         backup: dest => provider.backupCustomDocument(doc, { destination: uriFile(dest) }, {}),
+        // The backup VS Code takes after the last change of the content.
+        backUpLikeVsCode,
+        // VS Code quits and keeps the backup it holds for the next start.
+        quit: async () => {
+            const backup = await backUpLikeVsCode();
+            editor.close();
+            group.tabs.splice(group.tabs.indexOf(tab), 1);
+            return backup;
+        },
         // A second editor on the same document, which VS Code opens for the
         // modified side of a Source Control diff while the grid tab is open.
         openSecondEditor: () => watched(() => attach(provider, doc)),
@@ -333,21 +391,74 @@ async function main() {
         assert.deepStrictEqual(warnings.map(w => w.msg), [], 'the file holds the edits, nothing of them was kept');
     });
 
-    // The disk the edits were made on is the one the document last knew:
-    // the file as it was opened or an outside change it has since heard of.
-    await test('a restore compares with the outside change the document already knew', async () => {
+    // A change on disk the user was warned of and did not decide on before
+    // quitting is still there after the restart. A save would still write
+    // over it, so the warning comes back. VS Code takes no backup for the
+    // warning, so its backup knows the file from before the change.
+    await test('a change on disk left undecided at quit is reported again after the restart', async () => {
         const p = file('hot-known.csv', 'h\n1\n');
         const before = await open(p);
         await before.edit('h\nmine\n');
+        await before.backUpLikeVsCode();
         fs.writeFileSync(p, 'h\ntheirs\n');
         await before.fireWatcher();
         assert.strictEqual(warnings.length, 1, 'the test did not reach the warning');
-        const backup = await before.backup(path.join(tmpDir, 'hot-known.backup'));
-        before.close();
+        const backup = await before.quit();
         warnings.length = 0;
         const after = await open(p, { backupId: backup.id });
-        assert.deepStrictEqual(warnings.map(w => w.msg), [], 'a change already reported was reported again');
+        assert.deepStrictEqual(warnings.map(w => w.msg),
+            ['hot-known.csv changed on disk. Your unsaved edits in the grid were kept.'], 'the undecided change was not reported');
         assert.strictEqual(after.doc.content, 'h\nmine\n');
+        await assert.rejects(after.save(), /changed on disk/, 'the save went through');
+        assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\ntheirs\n', 'the save wrote over the change on disk');
+    });
+
+    // An edit after the warning makes VS Code back up again. That backup
+    // knows the changed file, so only the mark it carries tells the restore
+    // that nobody decided on the change.
+    await test('a change on disk left undecided is reported after the restart when edits followed the warning', async () => {
+        const p = file('hot-known-edited.csv', 'h\n1\n');
+        const before = await open(p);
+        await before.edit('h\nmine\n');
+        await before.backUpLikeVsCode();
+        fs.writeFileSync(p, 'h\ntheirs\n');
+        await before.fireWatcher();
+        assert.strictEqual(warnings.length, 1, 'the test did not reach the warning');
+        await before.edit('h\nmine\nmore\n');
+        const backup = await before.quit();
+        warnings.length = 0;
+        const after = await open(p, { backupId: backup.id });
+        assert.deepStrictEqual(warnings.map(w => w.msg),
+            ['hot-known-edited.csv changed on disk. Your unsaved edits in the grid were kept.'], 'the undecided change was not reported');
+        assert.strictEqual(after.doc.content, 'h\nmine\nmore\n');
+        await assert.rejects(after.save(), /changed on disk/, 'the save went through');
+        assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\ntheirs\n', 'the save wrote over the change on disk');
+        warnings[0].pick('Overwrite');
+        await tick();
+        assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\nmine\nmore\n', 'Overwrite did not write the edits');
+    });
+
+    // 1.22.0 wrote a backup as UTF-8 without the byte order mark and gave it
+    // the bare URI for its id. Restored as plain UTF-8, the next save dropped
+    // the mark and Excel showed the umlauts wrong again.
+    await test('a hot exit backup from 1.22.0 keeps the byte order mark of the file', async () => {
+        const text = 'name,city\nJürgen,Köln\nAnna,Wien\n';
+        const legacy = (name, onDisk) => {
+            const p = file(name, onDisk);
+            const backupPath = path.join(tmpDir, name + '.backup');
+            fs.writeFileSync(backupPath, new TextEncoder().encode(text));
+            return { p, backupId: 'file://' + backupPath };
+        };
+        const bom = legacy('legacy-bom.csv', Buffer.concat([BOM, Buffer.from('name,city\nJürgen,Köln\n')]));
+        const t = await open(bom.p, { backupId: bom.backupId });
+        assert.strictEqual(t.doc.content, text);
+        await t.save();
+        assert.strictEqual(fs.readFileSync(bom.p).toString('hex'), Buffer.concat([BOM, Buffer.from(text)]).toString('hex'),
+            'the save dropped the byte order mark');
+        const plain = legacy('legacy-plain.csv', 'name,city\nJürgen,Köln\n');
+        const u = await open(plain.p, { backupId: plain.backupId });
+        await u.save();
+        assert.strictEqual(fs.readFileSync(plain.p).toString('hex'), Buffer.from(text).toString('hex'), 'a file without the mark gained one');
     });
 
     // UTF-16 can hold a lone surrogate and a save keeps it. The backup was
@@ -392,6 +503,24 @@ async function main() {
             assert.strictEqual(written, text);
         });
     }
+
+    // On a disk that ignores case under Linux (WSL's /mnt/c, a FAT stick, an
+    // SMB share) Save As from a preview onto BIG.csv copied big.csv onto
+    // itself. VS Code deleted the target first, which was big.csv. The copy
+    // then found nothing to copy and the whole file was gone.
+    await test('Save As from a preview onto the file under another name keeps the file', async () => {
+        const text = 'id,name\n' + Array.from({ length: 1500 }, (_, i) => `${i},row ${i}`).join('\n') + '\n';
+        const p = file('big-self.csv', text);
+        const other = path.join(tmpDir, 'BIG-SELF.csv');
+        fs.linkSync(p, other);                          // one file under two names
+        fakeSize = 60 * 1024 * 1024;
+        quickPickChoice = 'head';
+        const t = await open(p);
+        assert.strictEqual(t.doc.isPreview, true, 'the test did not reach the preview');
+        await t.saveAs(other);
+        assert.ok(fs.existsSync(p), 'the file is gone');
+        assert.strictEqual(fs.readFileSync(p, 'utf8'), text);
+    });
 
     // A preview is read-only, so it has nothing to revert. Reading the whole
     // file there and handing it to the grid would be exactly the load the
@@ -561,17 +690,96 @@ async function main() {
         assert.deepStrictEqual(group.tabs, [t.tab], 'the tab opened for the revert is still open');
     });
 
-    await test('saving after the warning keeps the edits', async () => {
+    // With files.autoSave on afterDelay the next save came half a second
+    // after the warning and wrote the edits over the change it had just
+    // reported. Reload from Disk on the warning then had nothing left to
+    // load. VS Code's own text editor refuses such a save.
+    await test('a save after the warning does not write over the change on disk', async () => {
         const p = file('dirty-save.csv', 'h\n1\n');
         const t = await open(p);
         await t.edit('h\nmine\n');
         fs.writeFileSync(p, 'h\ntheirs\n');
         await t.fireWatcher();
-        warnings[0].pick(undefined);                    // dismissed
+        await assert.rejects(t.save(), /changed on disk/, 'the save went through');
+        assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\ntheirs\n', 'the save wrote over the change on disk');
+        assert.strictEqual(t.tab.isDirty, true);
+        assert.strictEqual(t.doc.content, 'h\nmine\n', 'the edits are gone');
+        assert.strictEqual(warnings.length, 1, 'the warning still on screen was shown again');
+        warnings[0].pick('Reload from Disk');
+        await tick();
+        assert.strictEqual(t.doc.content, 'h\ntheirs\n', 'Reload from Disk did not load the change');
+        await t.edit('h\ntheirs\nmore\n');
         await t.save();
+        assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\ntheirs\nmore\n', 'a save after Reload from Disk was refused');
+    });
+
+    await test('a refused save shows the warning again once it was closed', async () => {
+        const p = file('dirty-save-again.csv', 'h\n1\n');
+        const t = await open(p);
+        await t.edit('h\nmine\n');
+        fs.writeFileSync(p, 'h\ntheirs\n');
+        await t.fireWatcher();
+        warnings[0].pick(undefined);                    // closed
+        await tick();
+        await assert.rejects(t.save(), /changed on disk/);
+        assert.strictEqual(warnings.length, 2, 'the refused save did not bring the warning back');
+        assert.deepStrictEqual(warnings[1].actions, ['Reload from Disk', 'Overwrite']);
+        await assert.rejects(t.save(), /changed on disk/);   // auto-save after the next edit
+        assert.strictEqual(warnings.length, 2, 'every refused save stacked another warning');
+    });
+
+    await test('Overwrite on the warning writes the edits over the change on disk', async () => {
+        const p = file('dirty-overwrite.csv', 'h\n1\n');
+        const t = await open(p);
+        await t.edit('h\nmine\n');
+        fs.writeFileSync(p, 'h\ntheirs\n');
+        await t.fireWatcher();
+        warnings[0].pick('Overwrite');
+        await tick();
+        assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\nmine\n', 'the edits were not written');
+        assert.strictEqual(t.tab.isDirty, false, 'the tab is still marked unsaved');
         await t.fireWatcher();                          // the echo of that save
-        assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\nmine\n');
         assert.strictEqual(t.updates().length, 0);
+        assert.strictEqual(warnings.length, 1);
+    });
+
+    await test('Overwrite before VS Code 1.86 lets the next save write', async () => {
+        vscodeStub.workspace.save = undefined;
+        const p = file('dirty-overwrite-old.csv', 'h\n1\n');
+        const t = await open(p);
+        await t.edit('h\nmine\n');
+        fs.writeFileSync(p, 'h\ntheirs\n');
+        await t.fireWatcher();
+        warnings[0].pick('Overwrite');
+        await tick();
+        assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\ntheirs\n');
+        await t.save();
+        assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\nmine\n', 'the save after Overwrite did not write');
+    });
+
+    await test('Save As onto the file itself after the warning is refused, onto another file it is not', async () => {
+        const p = file('dirty-saveas.csv', 'h\n1\n');
+        const t = await open(p);
+        await t.edit('h\nmine\n');
+        fs.writeFileSync(p, 'h\ntheirs\n');
+        await t.fireWatcher();
+        await assert.rejects(t.saveAs(p), /changed on disk/, 'Save As went through');
+        assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\ntheirs\n', 'Save As wrote over the change on disk');
+        const copy = path.join(tmpDir, 'dirty-saveas-copy.csv');
+        await t.saveAs(copy);
+        assert.strictEqual(fs.readFileSync(copy, 'utf8'), 'h\nmine\n');
+    });
+
+    await test('a file that now holds the edits settles the change on disk', async () => {
+        const p = file('dirty-settled.csv', 'h\n1\n');
+        const t = await open(p);
+        await t.edit('h\nmine\n');
+        fs.writeFileSync(p, 'h\ntheirs\n');
+        await t.fireWatcher();
+        fs.writeFileSync(p, 'h\nmine\n');              // the other program writes the same edit
+        await t.fireWatcher();
+        await t.save();
+        assert.strictEqual(warnings.length, 1);
     });
 
     await test('an outside change after a failed save does not replace the edits', async () => {
@@ -805,7 +1013,8 @@ async function main() {
         await t.fireWatcher();                          // a second event for the same write
         assert.strictEqual(warnings.length, 1, 'one outside write raised ' + warnings.length + ' warnings');
         assert.strictEqual(t.doc.content, 'a\nmine\n', 'the unsaved edit was replaced');
-        await t.save();
+        warnings[0].pick('Overwrite');
+        await tick();
         assert.ok(fs.readFileSync(p).equals(Buffer.concat([BOM, Buffer.from('a\nmine\n')])),
             'the save did not keep the byte order mark the file now has');
     });
@@ -1000,7 +1209,8 @@ async function main() {
         const after = await open(p, { backupId: backup.id });
         assert.strictEqual(warnings.length, 1, 'the change was not reported');
         await after.edit('h\nö\n');
-        await after.save();
+        warnings[0].pick('Overwrite');
+        await tick();
         assert.strictEqual(hex(p), ansi('h\nö\n').toString('hex'), 'the file turned into UTF-8');
     });
 
@@ -1013,8 +1223,9 @@ async function main() {
         const backup = await before.backup(path.join(tmpDir, 'hot-new-bom.backup'));
         before.close();
         fs.writeFileSync(p, Buffer.concat([BOM, Buffer.from('h\n1\n')]));
-        const after = await open(p, { backupId: backup.id });
-        await after.save();
+        await open(p, { backupId: backup.id });
+        warnings[0].pick('Overwrite');
+        await tick();
         assert.strictEqual(hex(p), Buffer.concat([BOM, Buffer.from('h\nmine\n')]).toString('hex'));
     });
 

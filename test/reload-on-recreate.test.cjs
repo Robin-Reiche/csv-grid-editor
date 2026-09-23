@@ -56,7 +56,7 @@ test('reload still ignores the echo of our own save', () => {
     // Windows-1252 file without umlauts looked like another program's. The
     // bytes carry the encoding and the byte order mark too, so a program that
     // only changes those is still not taken for our own echo.
-    assert.ok(/if \(holds\(document\.content\)\) return false;/.test(src),
+    assert.ok(/if \(holds\(document\.content\)\) (?:return false;|\{[^}]*return false;\s*\})/.test(src),
         'the identical-content guard is gone — saving would wipe frozen rows');
     assert.ok(/const bytes = encodeFile\(text, document\.encoding\);\s*return !!bytes && Buffer\.compare\(bytes, raw\) === 0;/.test(src),
         'the guard no longer compares what a save writes with the bytes on disk');
