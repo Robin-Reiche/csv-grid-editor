@@ -253,6 +253,75 @@ async function main() {
         assert.strictEqual(after.doc.content, 'h\nold\n');
     });
 
+    // A program that changes the file while VS Code is closed (a git pull, an
+    // export run overnight) changes what the restored edits were made on.
+    // The restore took the new file for the one the edits knew, so nothing
+    // warned and the next save wrote over the change without a word.
+    await test('a file changed while VS Code was closed is reported on restore', async () => {
+        const p = file('hot-changed.csv', 'id,val\n1,a\n2,b\n');
+        const before = await open(p);
+        await before.edit('id,val\n1,MY EDIT\n2,b\n');
+        const backup = await before.backup(path.join(tmpDir, 'hot-changed.backup'));
+        before.close();
+        group.tabs.splice(group.tabs.indexOf(before.tab), 1);   // VS Code quits
+        fs.writeFileSync(p, 'id,val\n1,a\n2,b\n3,TEAMMATE ROW\n');
+        const after = await open(p, { backupId: backup.id });
+        assert.strictEqual(after.doc.content, 'id,val\n1,MY EDIT\n2,b\n', 'the restore lost the unsaved edits');
+        assert.deepStrictEqual(warnings.map(w => w.msg),
+            ['hot-changed.csv changed on disk. Your unsaved edits in the grid were kept.'], 'the change was not reported');
+        assert.ok(warnings[0].actions.includes('Reload from Disk'), 'the warning offers no way to load the disk');
+        await after.fireWatcher();                      // a late event for the same change
+        assert.strictEqual(warnings.length, 1, 'the same change was reported twice');
+        after.tab.isDirty = true;                       // VS Code marks a restored backup unsaved
+        warnings[0].pick('Reload from Disk');
+        await tick();
+        assert.strictEqual(after.doc.content, 'id,val\n1,a\n2,b\n3,TEAMMATE ROW\n', 'the action did not load the disk');
+        assert.strictEqual(after.tab.isDirty, false, 'the tab is still marked unsaved');
+    });
+
+    await test('a restore of a file nobody changed says nothing', async () => {
+        const p = file('hot-same.csv', 'id,val\n1,a\n');
+        const before = await open(p);
+        await before.edit('id,val\n1,MINE\n');
+        const backup = await before.backup(path.join(tmpDir, 'hot-same.backup'));
+        before.close();
+        const after = await open(p, { backupId: backup.id });
+        assert.deepStrictEqual(warnings.map(w => w.msg), []);
+        await after.save();
+        assert.strictEqual(fs.readFileSync(p, 'utf8'), 'id,val\n1,MINE\n');
+    });
+
+    // The disk the edits were made on is the one the document last knew:
+    // the file as it was opened or an outside change it has since heard of.
+    await test('a restore compares with the outside change the document already knew', async () => {
+        const p = file('hot-known.csv', 'h\n1\n');
+        const before = await open(p);
+        await before.edit('h\nmine\n');
+        fs.writeFileSync(p, 'h\ntheirs\n');
+        await before.fireWatcher();
+        assert.strictEqual(warnings.length, 1, 'the test did not reach the warning');
+        const backup = await before.backup(path.join(tmpDir, 'hot-known.backup'));
+        before.close();
+        warnings.length = 0;
+        const after = await open(p, { backupId: backup.id });
+        assert.deepStrictEqual(warnings.map(w => w.msg), [], 'a change already reported was reported again');
+        assert.strictEqual(after.doc.content, 'h\nmine\n');
+    });
+
+    // UTF-16 can hold a lone surrogate and a save keeps it. The backup was
+    // written as UTF-8, which turns it into U+FFFD.
+    await test('a hot exit backup of a UTF-16 file keeps a lone surrogate', async () => {
+        const p = file('hot-utf16.csv', Buffer.from([0xFF, 0xFE, 0x68, 0x00, 0x0A, 0x00, 0x00, 0xD8, 0x0A, 0x00]));
+        const before = await open(p);
+        assert.strictEqual(before.doc.content, 'h\n\uD800\n');
+        await before.edit('h\n\uD800\nX\n');
+        const backup = await before.backup(path.join(tmpDir, 'hot-utf16.backup'));
+        const after = await open(p, { backupId: backup.id });
+        assert.strictEqual(after.doc.content, 'h\n\uD800\nX\n', 'restored ' + JSON.stringify(after.doc.content));
+        await after.save();
+        assert.strictEqual(fs.readFileSync(p).toString('hex'), 'fffe68000a0000d80a0058000a00');
+    });
+
     await test('hot exit of a large file skips the size question', async () => {
         const p = file('hot-large.csv', 'h\nold\n');
         const before = await open(p);

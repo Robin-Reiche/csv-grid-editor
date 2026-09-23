@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import { createHash } from 'crypto';
 import { getWebviewContent } from './webview';
 import { SETTING_DEFAULTS, isSettingKey, type Settings, type SettingKey } from './webview/settings';
 import {
@@ -23,17 +24,40 @@ const PAGE_SIZE              = 500;
 const CANCELLED_PREVIEW_MODE = '__cancelled__';
 
 // A hot exit backup is written as UTF-8, which holds any edit whatever the
-// file's encoding. Its id carries that encoding back to the restore. An id
-// from before is the bare URI of a backup written the way a save wrote the
-// file then: UTF-8, behind the byte order mark if the file had one.
-function backupId(destination: vscode.Uri, encoding: FileEncoding): string {
-    return JSON.stringify({ backup: destination.toString(), encoding });
+// file's encoding, but for one thing: a lone surrogate, which it turns into
+// U+FFFD. Only UTF-16 can hold one and a save of such a file keeps it, so a
+// UTF-16 file is backed up as UTF-16 LE. The id carries the file's encoding
+// back to the restore, whether the backup is UTF-16 and the fingerprint of the
+// file the edits were made on (see restoreBackup). An id from before is the
+// bare URI of a backup written the way a save wrote the file then: UTF-8,
+// behind the byte order mark if the file had one.
+interface Backup {
+    uri: vscode.Uri;
+    encoding?: FileEncoding;
+    utf16?: boolean;
+    disk?: string;
 }
 
-function parseBackupId(id: string): { uri: vscode.Uri; encoding?: FileEncoding } {
+function backupId(destination: vscode.Uri, encoding: FileEncoding, utf16: boolean, disk: string): string {
+    return JSON.stringify({ backup: destination.toString(), encoding, ...(utf16 ? { text: 'utf16le' } : {}), disk });
+}
+
+function parseBackupId(id: string): Backup {
     if (!id.startsWith('{')) return { uri: vscode.Uri.parse(id) };
-    const { backup, encoding } = JSON.parse(id) as { backup: string; encoding: unknown };
-    return { uri: vscode.Uri.parse(backup), encoding: isFileEncoding(encoding) ? encoding : undefined };
+    const { backup, encoding, text, disk } = JSON.parse(id) as { backup: string; encoding: unknown; text?: unknown; disk?: unknown };
+    return {
+        uri: vscode.Uri.parse(backup),
+        encoding: isFileEncoding(encoding) ? encoding : undefined,
+        utf16: text === 'utf16le',
+        disk: typeof disk === 'string' ? disk : undefined
+    };
+}
+
+// Tells whether a file still holds the text and encoding a backup's edits
+// were made on without keeping that text in the id. The text goes in as
+// UTF-16, the one form in which no two strings look the same.
+function fingerprint(text: string, encoding: FileEncoding): string {
+    return createHash('sha256').update(encoding + '\0').update(text, 'utf16le').digest('hex');
 }
 
 // Told after a save that could not keep the file in Windows-1252, see
@@ -379,13 +403,13 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
     // Only an editable document gets backed up (a preview never turns dirty),
     // so a restore always opens in full mode and skips the size question.
     private async restoreBackup(uri: vscode.Uri, id: string): Promise<CsvDocument> {
-        const { uri: backupUri, encoding } = parseBackupId(id);
+        const { uri: backupUri, encoding, utf16, disk } = parseBackupId(id);
         const raw = await vscode.workspace.fs.readFile(backupUri);
         // The encoding comes with the id: nothing in plain ASCII text tells
         // Windows-1252 from UTF-8. Every character of the text is the edits',
         // a U+FEFF at its start included.
         const backup = encoding
-            ? { text: new TextDecoder('utf-8', { ignoreBOM: true }).decode(raw), encoding }
+            ? { text: utf16 ? Buffer.from(raw).toString('utf16le') : new TextDecoder('utf-8', { ignoreBOM: true }).decode(raw), encoding }
             : decodeFile(raw);
         const doc = new CsvDocument(uri, backup.text, this.detectDelimiter(uri.fsPath, backup.text), false, 'full', 0, false);
         doc.encoding = backup.encoding;
@@ -393,7 +417,17 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         // against the restored edits. A file deleted since the backup holds
         // nothing. Failing the restore over that would lose the edits too.
         try {
-            doc.diskText = decodeFile(await vscode.workspace.fs.readFile(uri)).text;
+            const onDisk = decodeFile(await vscode.workspace.fs.readFile(uri), backup.encoding);
+            doc.diskText = onDisk.text;
+            // Another program changed the file while VS Code was closed, a
+            // git pull for one. Nothing watched it then. Taking the new file
+            // for the one the edits were made on let the next save write
+            // over the change without a word. The edits are kept and the
+            // user is told, the way the watcher does it.
+            if (disk !== undefined && fingerprint(onDisk.text, onDisk.encoding) !== disk) {
+                doc.encoding = onDisk.encoding;
+                this.warnChangedOnDisk(doc);
+            }
         } catch {
             doc.diskText = '';
         }
@@ -638,12 +672,7 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             if (fromWatcher && document.content !== document.diskText) {
                 document.diskText = text;
                 document.encoding = encoding;
-                void vscode.window.showWarningMessage(
-                    `${path.basename(document.uri.fsPath)} changed on disk. Your unsaved edits in the grid were kept.`,
-                    'Reload from Disk'
-                ).then(choice => {
-                    if (choice === 'Reload from Disk') void this.reloadFromDisk(document);
-                });
+                this.warnChangedOnDisk(document);
                 return false;
             }
             // When only the encoding changed, the grid already shows this
@@ -663,6 +692,17 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         } catch {
             return false;
         }
+    }
+
+    // The file changed on disk while the grid holds unsaved edits, which were
+    // kept. The user chooses whether to load the file instead.
+    private warnChangedOnDisk(document: CsvDocument): void {
+        void vscode.window.showWarningMessage(
+            `${path.basename(document.uri.fsPath)} changed on disk. Your unsaved edits in the grid were kept.`,
+            'Reload from Disk'
+        ).then(choice => {
+            if (choice === 'Reload from Disk') void this.reloadFromDisk(document);
+        });
     }
 
     // Reload from Disk, the command and the button on the warning above. A
@@ -768,9 +808,11 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
     }
 
     async backupCustomDocument(document: CsvDocument, context: vscode.CustomDocumentBackupContext, _cancellation: vscode.CancellationToken): Promise<vscode.CustomDocumentBackup> {
-        await vscode.workspace.fs.writeFile(context.destination, new TextEncoder().encode(document.content));
+        const utf16 = document.encoding === 'utf16le' || document.encoding === 'utf16be';
+        const bytes = utf16 ? Buffer.from(document.content, 'utf16le') : new TextEncoder().encode(document.content);
+        await vscode.workspace.fs.writeFile(context.destination, bytes);
         return {
-            id: backupId(context.destination, document.encoding),
+            id: backupId(context.destination, document.encoding, utf16, fingerprint(document.diskText, document.encoding)),
             delete: async () => {
                 try { await vscode.workspace.fs.delete(context.destination); } catch {}
             }
