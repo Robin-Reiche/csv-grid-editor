@@ -896,7 +896,7 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         if (fileName.endsWith('.tsv')) return '\t';
         // The first line ends at a CR as well. A classic Mac file has no LF,
         // so the separators of the whole file were counted.
-        const firstLine = content.split(/[\r\n]/)[0] || '';
+        const firstLine = content.slice(0, content.search(/[\r\n]|$/));
         const semicolons = (firstLine.match(/;/g) || []).length;
         const commas     = (firstLine.match(/,/g) || []).length;
         const tabs       = (firstLine.match(/\t/g) || []).length;
