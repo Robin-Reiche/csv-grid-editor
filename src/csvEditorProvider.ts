@@ -59,6 +59,18 @@ export function rememberHeaderRow(stored: unknown, uri: string, firstRowIsHeader
     return map;
 }
 
+// The watcher's pattern for a file of this name. VS Code reads the pattern as
+// a glob. The bare name made data[1].csv match data1.csv and never itself
+// ([1] is a character class), the same with the braces in report{2024}.csv.
+// Such a file never reloaded. Each glob character goes into brackets of its
+// own, which match exactly that character. VS Code also trims the pattern, so
+// spaces at either end of the name are bracketed too.
+function watchPattern(fileName: string): string {
+    return fileName
+        .replace(/[[\]{}*?]/g, '[$&]')
+        .replace(/^\s+|\s+$/g, spaces => spaces.replace(/[\s\S]/g, '[$&]'));
+}
+
 class CsvDocument implements vscode.CustomDocument {
     public content: string;
     public pageIndex: RowPageIndex | null = null;
@@ -369,7 +381,7 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         // editor the first to read a change took it, the others kept the old text.
         if (!document.isPreview && !document.watcher) {
             const watcher = vscode.workspace.createFileSystemWatcher(
-                new vscode.RelativePattern(vscode.Uri.file(path.dirname(document.uri.fsPath)), path.basename(document.uri.fsPath))
+                new vscode.RelativePattern(vscode.Uri.file(path.dirname(document.uri.fsPath)), watchPattern(path.basename(document.uri.fsPath)))
             );
             document.watcher = watcher;
 
