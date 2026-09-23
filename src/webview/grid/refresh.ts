@@ -108,8 +108,29 @@ export function focusCell(rowIndex: number | null, colId: string | null): void {
         if (!document.hasFocus()) return;
         const row = clampRow(rowIndex, state.gridApi.getDisplayedRowCount());
         if (row === null) return; // nothing but the header left
-        try { state.gridApi.setFocusedCell(row, colId); } catch {}
+        const col = shownColNear(colId);
+        if (col === null) return; // every column is hidden
+        try { state.gridApi.setFocusedCell(row, col); } catch {}
     });
+}
+
+// The column a focus restore lands on. One hidden in the column chooser since
+// its cell had the focus cannot take it back. setFocusedCell on it does
+// nothing, so the keys stayed on the checkbox that hid it. The nearest shown
+// column stands in, the one to its right first, since that one moved into its
+// place on screen. A column the grid does not know is passed on unchanged.
+function shownColNear(colId: string): string | null {
+    const api = state.gridApi;
+    const col = api.getColumn(colId);
+    if (!col || col.isVisible()) return colId;
+    const cols = (api.getAllGridColumns() as any[]).filter(c => String(c.getColId()).indexOf('col_') === 0);
+    const at = cols.indexOf(col);
+    for (let d = 1; d < cols.length; d++) {
+        for (const c of [cols[at + d], cols[at - d]]) {
+            if (c && c.isVisible()) return c.getColId();
+        }
+    }
+    return null;
 }
 
 // The row a focus restore actually lands on, given how many rows are left.

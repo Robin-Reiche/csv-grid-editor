@@ -393,6 +393,19 @@ runSuite('settings menu (browser)', [
             await press('Escape');
             t.check(document.getElementById('row-context-menu').classList.contains('hidden') && onCell() === where,
                 'the row menu closes and the focus stays on its cell (' + where + ' then ' + onCell() + ')');
+
+            // The column of the focused cell hidden in the column chooser
+            // cannot take the keys back. A shown column in the same row does.
+            t.cell(2, 1).focus();
+            await t.focusCell(2, 1);
+            await clickOn(document.getElementById('btn-columns'));
+            const hide = document.querySelectorAll('#col-chooser-list .col-chooser-item input')[1];
+            await clickOn(hide);
+            t.check(!hide.checked && !t.cell(2, 1), 'the column of the focused cell is hidden');
+            await press('Escape');
+            t.check(onCell() === '2/col_0', 'Escape gives the keys to the column next to it (' + onCell() + ')');
+            await press('ArrowDown');
+            t.check(t.focusedRow() === 3, 'and the arrow keys move from there (row ' + t.focusedRow() + ')');
         },
     },
     {
