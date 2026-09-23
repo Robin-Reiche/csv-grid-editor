@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs';
 import * as path from 'path';
 import { createHash } from 'crypto';
 import { getWebviewContent } from './webview';
@@ -27,29 +28,32 @@ const CANCELLED_PREVIEW_MODE = '__cancelled__';
 // file's encoding, but for one thing: a lone surrogate, which it turns into
 // U+FFFD. Only UTF-16 can hold one and a save of such a file keeps it, so a
 // UTF-16 file is backed up as UTF-16 LE. The id carries the file's encoding
-// back to the restore, whether the backup is UTF-16 and the fingerprint of the
-// file the edits were made on (see restoreBackup). An id from before is the
-// bare URI of a backup written the way a save wrote the file then: UTF-8,
-// behind the byte order mark if the file had one.
+// back to the restore, whether the backup is UTF-16, the fingerprint of the
+// file the edits were made on and whether a change on disk still waits for
+// Overwrite or Reload from Disk (see restoreBackup). An id from 1.22.0 is the
+// bare URI of a backup in UTF-8 without the byte order mark, even when the
+// file had one.
 interface Backup {
     uri: vscode.Uri;
     encoding?: FileEncoding;
     utf16?: boolean;
     disk?: string;
+    conflict?: boolean;
 }
 
-function backupId(destination: vscode.Uri, encoding: FileEncoding, utf16: boolean, disk: string): string {
-    return JSON.stringify({ backup: destination.toString(), encoding, ...(utf16 ? { text: 'utf16le' } : {}), disk });
+function backupId(destination: vscode.Uri, encoding: FileEncoding, utf16: boolean, disk: string, conflict: boolean): string {
+    return JSON.stringify({ backup: destination.toString(), encoding, ...(utf16 ? { text: 'utf16le' } : {}), disk, ...(conflict ? { conflict } : {}) });
 }
 
 function parseBackupId(id: string): Backup {
     if (!id.startsWith('{')) return { uri: vscode.Uri.parse(id) };
-    const { backup, encoding, text, disk } = JSON.parse(id) as { backup: string; encoding: unknown; text?: unknown; disk?: unknown };
+    const { backup, encoding, text, disk, conflict } = JSON.parse(id) as { backup: string; encoding: unknown; text?: unknown; disk?: unknown; conflict?: unknown };
     return {
         uri: vscode.Uri.parse(backup),
         encoding: isFileEncoding(encoding) ? encoding : undefined,
         utf16: text === 'utf16le',
-        disk: typeof disk === 'string' ? disk : undefined
+        disk: typeof disk === 'string' ? disk : undefined,
+        conflict: conflict === true
     };
 }
 
@@ -140,6 +144,33 @@ export function sameResource(a: vscode.Uri, b: vscode.Uri, platform: string = pr
     return platform === 'linux' ? a.fsPath === b.fsPath : a.fsPath.toLowerCase() === b.fsPath.toLowerCase();
 }
 
+// Whether two file: URIs are two names of one file on disk. A disk that
+// ignores case under Linux (WSL's /mnt/c, a FAT stick, an SMB share) takes
+// big.csv and BIG.csv for one file, which sameResource cannot know. VS Code's
+// copy with overwrite deletes the target first. Here that was the file itself.
+async function sameFileOnDisk(a: vscode.Uri, b: vscode.Uri): Promise<boolean> {
+    if (a.scheme !== 'file' || b.scheme !== 'file') return false;
+    try {
+        const [x, y] = await Promise.all([fs.promises.stat(a.fsPath, { bigint: true }), fs.promises.stat(b.fsPath, { bigint: true })]);
+        if (x.dev === y.dev && x.ino === y.ino) return true;
+        // A mount without stable inode numbers (FUSE without use_ino, cifs
+        // with noserverino) gives each name a number of its own. The file was
+        // still deleted there. Where the two paths differ only in case, a
+        // folder that does not list both spellings found one of them by
+        // ignoring case. Two files are two entries in it.
+        if (a.fsPath.toLowerCase() !== b.fsPath.toLowerCase()) return false;
+        const [aParts, bParts] = [a.fsPath.split(path.sep), b.fsPath.split(path.sep)];
+        for (let i = 0; i < bParts.length; i++) {
+            if (aParts[i] === bParts[i]) continue;
+            const names = await fs.promises.readdir(bParts.slice(0, i).join(path.sep) || path.sep);
+            if (names.includes(aParts[i]) && names.includes(bParts[i])) return false;
+        }
+        return true;
+    } catch {
+        return false;
+    }
+}
+
 class CsvDocument implements vscode.CustomDocument {
     public content: string;
     public pageIndex: RowPageIndex | null = null;
@@ -164,6 +195,12 @@ class CsvDocument implements vscode.CustomDocument {
     // that event is ours. diskText only takes the text once the write has
     // landed, because a write that fails leaves the old file on disk.
     public pendingSave: { text: string; encoding: FileEncoding } | null = null;
+    // Set while another program's change to the file waits for the user to
+    // choose Overwrite or Reload from Disk on the warning about it (see
+    // warnChangedOnDisk). No save is made until then. With auto-save after a
+    // delay the next save wrote the edits over the change half a second after
+    // the warning offered to load it.
+    public conflict = false;
     // Every editor that shows this document. Usually one, but VS Code opens a
     // second editor on the same document for the modified side of a Source
     // Control diff while the grid tab stays open.
@@ -447,7 +484,7 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
     // Only an editable document gets backed up (a preview never turns dirty),
     // so a restore always opens in full mode and skips the size question.
     private async restoreBackup(uri: vscode.Uri, id: string): Promise<CsvDocument> {
-        const { uri: backupUri, encoding, utf16, disk } = parseBackupId(id);
+        const { uri: backupUri, encoding, utf16, disk, conflict } = parseBackupId(id);
         const raw = await vscode.workspace.fs.readFile(backupUri);
         // The encoding comes with the id: nothing in plain ASCII text tells
         // Windows-1252 from UTF-8. Every character of the text is the edits',
@@ -464,12 +501,18 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             const raw = await vscode.workspace.fs.readFile(uri);
             const onDisk = decodeFile(raw, backup.encoding);
             doc.diskText = onDisk.text;
+            // 1.22.0 backed the edits up without the file's byte order mark,
+            // so its backup reads as plain UTF-8 and the next save dropped
+            // the mark. Excel then showed the umlauts wrong again. The file
+            // on disk still has it.
+            if (!encoding && backup.encoding === 'utf8' && onDisk.encoding === 'utf8bom') doc.encoding = 'utf8bom';
             // Another program changed the file while VS Code was closed, a
             // git pull for one. Nothing watched it then. Taking the new file
             // for the one the edits were made on let the next save write
             // over the change without a word. The edits are kept and the
             // user is told, the way the watcher does it. A file that now
             // holds the very edits has nothing to tell.
+            let changed = false;
             if (disk !== undefined && fingerprint(onDisk.text, onDisk.encoding) !== disk) {
                 // Read by its bytes, a file can give another text than the
                 // one the document saved into it: a U+FEFF at the start of a
@@ -481,9 +524,15 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
                     doc.diskText = saved;
                 } else {
                     doc.encoding = onDisk.encoding;
-                    if (onDisk.text !== doc.content) this.warnChangedOnDisk(doc);
+                    changed = true;
                 }
             }
+            // A change on disk the user was warned of before quitting and
+            // did not decide on is still there. A save would still write over
+            // it, so the warning comes back. An edit after the warning
+            // made VS Code take a new backup, whose fingerprint is that of the
+            // changed file. Then only the mark the id carries tells of it.
+            if ((changed || conflict) && doc.diskText !== doc.content) this.warnChangedOnDisk(doc);
         } catch {
             doc.diskText = '';
         }
@@ -690,8 +739,12 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             // another program's. The encoding counts this way too, byte order
             // mark included: the grid never sees it, so a program that only
             // changes it leaves the text as it was, but the next save has to
-            // write the file the way it is now.
-            if (holds(document.content)) return false;
+            // write the file the way it is now. A file that holds the grid's
+            // text also leaves no change on disk for a save to write over.
+            if (holds(document.content)) {
+                document.conflict = false;
+                return false;
+            }
             // The echo of a save that is still being written, which the
             // watcher can report before the write call returns. By then the
             // grid may have moved on to a newer edit.
@@ -716,7 +769,10 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             // UTF-8, so its bytes never match the file's, but the text read
             // from it tells whether anything changed.
             if (encoding === document.encoding
-                && (text === document.content || (fromWatcher && text === document.diskText))) return false;
+                && (text === document.content || (fromWatcher && text === document.diskText))) {
+                if (text === document.content) document.conflict = false;
+                return false;
+            }
             // Another program changed the file while the grid holds
             // unsaved edits. Loading it silently replaced those edits and
             // left the tab dirty, so the next save made the loss final.
@@ -737,6 +793,7 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             document.content = text;
             document.diskText = text;
             document.encoding = encoding;
+            document.conflict = false;
             if (textChanged) {
                 document.post({
                     type: 'update',
@@ -751,14 +808,31 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
     }
 
     // The file changed on disk while the grid holds unsaved edits, which were
-    // kept. The user chooses whether to load the file instead.
+    // kept. The user chooses whether to load the file instead or to write the
+    // edits over it. No save is made until then (see saveCustomDocument).
+    // VS Code shows the same message with the same buttons only once, so a
+    // second warning replaces the one on screen. Named by the base name alone,
+    // the warnings for d1/data.csv and d2/data.csv were one and its buttons
+    // acted on the file that warned last.
     private warnChangedOnDisk(document: CsvDocument): void {
+        document.conflict = true;
         void vscode.window.showWarningMessage(
-            `${path.basename(document.uri.fsPath)} changed on disk. Your unsaved edits in the grid were kept.`,
-            'Reload from Disk'
+            `${vscode.workspace.asRelativePath(document.uri)} changed on disk. Your unsaved edits in the grid were kept.`,
+            'Reload from Disk', 'Overwrite'
         ).then(choice => {
             if (choice === 'Reload from Disk') void this.reloadFromDisk(document);
+            else if (choice === 'Overwrite') void this.overwrite(document);
         });
+    }
+
+    // Overwrite on that warning: the edits go over the change on disk. The
+    // save runs on the grid's own tab the way Ctrl+S does, which also shows
+    // why a save failed. workspace.save saved every editor of the file. A
+    // text editor of it that had loaded the change wrote it back over the
+    // edits. The grid then loaded it as a change on disk.
+    private async overwrite(document: CsvDocument): Promise<void> {
+        document.conflict = false;
+        await this.onOwnTab(document, 'workbench.action.files.save');
     }
 
     // Reload from Disk, the command and the button on the warning above. A
@@ -769,6 +843,13 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
     // which calls revertCustomDocument. VS Code drops that revert for a tab
     // without unsaved edits (issue #25), so such a tab is reloaded here.
     private async reloadFromDisk(document: CsvDocument): Promise<boolean> {
+        return await this.onOwnTab(document, 'workbench.action.files.revert') || this.reload(document);
+    }
+
+    // Runs File > Revert File or File > Save on the document's own grid tab
+    // and tells whether it ran. Both work on the editor in front. A tab
+    // without unsaved edits is left alone.
+    private async onOwnTab(document: CsvDocument, command: string): Promise<boolean> {
         const isOwnTab = (tab: vscode.Tab | undefined): tab is vscode.Tab =>
             tab?.input instanceof vscode.TabInputCustom
             && tab.input.viewType === CsvEditorProvider.viewType
@@ -778,36 +859,37 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         // A document that only a Source Control diff shows has no tab of its
         // own. The unsaved mark sits on the diff's tab, which VS Code tells an
         // extension nothing about. So the document is opened in a tab of its
-        // own for the revert, which takes the mark off the diff as well. That
+        // own for the command, which takes the mark off the diff as well. That
         // tab is closed again afterwards, so the editor that was in front
         // comes back. A tab not marked unsaved drops the revert (issue #25),
-        // so the file is then loaded below the way it is for such a tab.
+        // so Reload from Disk then loads the file the way it does for such a
+        // tab.
         if (!tab && document.panels.size > 0 && document.content !== document.diskText) {
             await vscode.commands.executeCommand('vscode.openWith', document.uri, CsvEditorProvider.viewType,
                 { viewColumn: vscode.window.tabGroups.activeTabGroup.viewColumn, preserveFocus: false, preview: false });
             const front = vscode.window.tabGroups.activeTabGroup.activeTab;
             if (isOwnTab(front)) {
-                const reverted = front.isDirty;
-                if (reverted) await vscode.commands.executeCommand('workbench.action.files.revert');
+                const ran = front.isDirty;
+                if (ran) await vscode.commands.executeCommand(command);
                 const opened = ownTab();
                 if (opened && !opened.isDirty) await vscode.window.tabGroups.close(opened);
-                if (reverted) return true;
+                if (ran) return true;
             }
         }
         if (tab?.isDirty) {
-            // The revert command works on the editor in front, so the tab
-            // comes to the front first. This also takes the focus from the
-            // Open Editors view, where the command would revert the selection
-            // instead. Should another tab still be in front, the command is
-            // not run: it would throw away that tab's unsaved edits.
+            // The tab comes to the front first. This also takes the focus
+            // from the Open Editors view, where the command would act on the
+            // selection instead. Should another tab still be in front, the
+            // command is not run: a revert would throw away that tab's
+            // unsaved edits.
             await vscode.commands.executeCommand('vscode.openWith', document.uri, CsvEditorProvider.viewType,
                 { viewColumn: tab.group.viewColumn, preserveFocus: false });
             if (isOwnTab(vscode.window.tabGroups.activeTabGroup.activeTab)) {
-                await vscode.commands.executeCommand('workbench.action.files.revert');
+                await vscode.commands.executeCommand(command);
                 return true;
             }
         }
-        return this.reload(document);
+        return false;
     }
 
     // ── Save / Revert / Backup ──
@@ -816,6 +898,18 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         if (document.isPreview) {
             vscode.window.showWarningMessage('Cannot save in preview mode. Open the full file to edit.');
             return;
+        }
+        // Another program changed the file under the unsaved edits and the
+        // user has not chosen between the two yet (see warnChangedOnDisk).
+        // Auto-save wrote the edits over that change and Reload from Disk had
+        // nothing left to load. The error keeps the tab marked unsaved, the
+        // way VS Code's own editor refuses to save over a newer file.
+        // The warning comes back with every refused save. Its toast hides
+        // after a few seconds and the warning then waits behind the bell,
+        // where nobody saw it.
+        if (document.conflict) {
+            this.warnChangedOnDisk(document);
+            throw new Error('The file changed on disk and your edits were not saved over it. Choose Overwrite or Reload from Disk on the warning.');
         }
         // The text goes out as a pending save first, so a watcher event that
         // arrives while the write is still running is known as ours (see
@@ -844,7 +938,7 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         // and writing that produced a truncated or empty copy. A preview cannot
         // be edited, so the file on disk is exactly what Save As should give.
         if (document.isPreview) {
-            if (!sameResource(destination, document.uri)) {
+            if (!sameResource(destination, document.uri) && !await sameFileOnDisk(document.uri, destination)) {
                 await vscode.workspace.fs.copy(document.uri, destination, { overwrite: true });
                 this.copyHeaderRow(document.uri, destination);
             }
@@ -858,9 +952,18 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         if (sameResource(destination, document.uri)) {
             return this.saveCustomDocument(document, cancellation);
         }
-        const { bytes, encoding } = document.encode();
-        await vscode.workspace.fs.writeFile(destination, bytes);
-        if (encoding !== document.encoding) warnSavedAsUtf8(destination);
+        // The file itself under another name, SMALL.csv for small.csv on a
+        // disk that ignores case under Linux. Written like a copy, it also
+        // went over a change on disk that still waited for Overwrite or
+        // Reload from Disk. VS Code then shows the file under the other name
+        // as a new document, so the header switch goes along to it.
+        if (await sameFileOnDisk(document.uri, destination)) {
+            await this.saveCustomDocument(document, cancellation);
+        } else {
+            const { bytes, encoding } = document.encode();
+            await vscode.workspace.fs.writeFile(destination, bytes);
+            if (encoding !== document.encoding) warnSavedAsUtf8(destination);
+        }
         this.copyHeaderRow(document.uri, destination);
     }
 
@@ -875,6 +978,7 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         const raw = await vscode.workspace.fs.readFile(document.uri);
         ({ text: document.content, encoding: document.encoding } = decodeFile(raw, document.encoding));
         document.diskText = document.content;
+        document.conflict = false;
 
         document.post({
             type: 'update',
@@ -893,7 +997,7 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             document.diskPrint = known;
         }
         return {
-            id: backupId(context.destination, document.encoding, utf16, known.print),
+            id: backupId(context.destination, document.encoding, utf16, known.print, document.conflict),
             delete: async () => {
                 try { await vscode.workspace.fs.delete(context.destination); } catch {}
             }
