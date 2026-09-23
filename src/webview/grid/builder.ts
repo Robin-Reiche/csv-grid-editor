@@ -117,7 +117,7 @@ function typedComparator(parse: (s: string) => number): (a: string, b: string) =
     };
 }
 
-function makeComparator(colType: string): (a: string, b: string) => number {
+export function makeComparator(colType: string): (a: string, b: string) => number {
     if (colType === 'integer' || colType === 'float') return typedComparator(s => Number(s));
     if (colType === 'date' || colType === 'datetime') return typedComparator(s => Date.parse(s.trim()));
     if (colType === 'time') return typedComparator(parseTimeToSeconds);
@@ -257,6 +257,14 @@ export function buildGrid(): void {
     // Pull any frozen reference row out of the scrollable body into AG Grid's
     // pinned-top band so it stays visible while the body scrolls/sorts/filters.
     const { body: bodyRowData, pinnedTop: pinnedTopRowData } = partitionFrozenRows(rowData);
+
+    // Take the old grid down before its container is emptied. Clearing the DOM
+    // alone left the old instance alive with its listeners, one more on every
+    // rebuild, and an outside change or an undo of a column insert rebuilds.
+    // The handle is dropped first so nothing reaches the old grid while it goes.
+    const oldGrid = state.gridApi;
+    state.gridApi = null;
+    oldGrid?.destroy();
 
     const container = document.getElementById('grid-container')!;
     container.innerHTML = '';

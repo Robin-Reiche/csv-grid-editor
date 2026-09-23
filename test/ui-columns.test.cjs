@@ -335,4 +335,40 @@ runSuite('columns (browser)', [
             t.check(t.boxesIn(1) === 2, 'and still after a row is deleted (' + t.boxesIn(1) + ')');
         `),
     },
+    // ── what a rebuild leaves behind ────────────────────────────────────────
+    {
+        // Rebuilding emptied the container but left the old grid alive with its
+        // listeners, one more on every undo of a column change.
+        name: 'a rebuild takes the old grid down',
+        csv: 'a,b,c\n1,2,3',
+        steps: steps(`
+            // createGrid is a getter that cannot be replaced, so the whole
+            // global is swapped for a proxy that records every grid made.
+            const made = [];
+            const real = window.agGrid;
+            const wrap = (el, opts) => { const api = real.createGrid(el, opts); made.push(api); return api; };
+            window.agGrid = new Proxy(real, { get: (o, k) => k === 'createGrid' ? wrap : o[k] });
+            await t.colMenu('col_0', 'col-ctx-delete');
+            await t.button('btn-undo');
+            window.agGrid = real;
+            t.check(made.length === 2, 'delete and undo each built the grid again (' + made.length + ')');
+            t.check(made.length === 2 && made[0].isDestroyed() && !made[1].isDestroyed(),
+                'only the grid on screen is still alive');
+        `),
+    },
+    {
+        // 1.5 and 1.25 sort the wrong way round as text. A column that became a
+        // number column through an edit kept sorting as text.
+        name: 'the sort follows a column that became a number column',
+        csv: 'n,k\nx,a\n1.5,b\n1.25,c\n2,d',
+        steps: steps(`
+            t.check(t.types().split('|')[0] === 'string', 'the column starts as text (' + t.types() + ')');
+            await t.edit(0, 0, '0.5');
+            await t.wait(400);
+            t.check(t.types().split('|')[0] === 'float', 'the edit makes it a number column (' + t.types() + ')');
+            t.header(0).querySelector('.ag-header-cell-label').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(300);
+            t.check(t.col(1) === 'a,c,b,d', 'ascending sorts by value: 0.5, 1.25, 1.5, 2 (' + t.col(1) + ')');
+        `),
+    },
 ]);

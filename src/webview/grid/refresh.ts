@@ -1,5 +1,5 @@
 import { state, getNumCols, emptyTableKind } from '../state';
-import { buildGrid } from './builder';
+import { buildGrid, makeComparator } from './builder';
 import { recomputeColTypes, TYPE_LABELS } from './column-type';
 import { shownValue } from './control-char-cell';
 
@@ -62,7 +62,12 @@ export function syncColumnHeaders(): void {
             const cls  = 'col-type-' + type;
             const tip  = TYPE_LABELS[type] ?? 'Text';
             if (d.headerName !== name)   { d.headerName = name;   changed = true; }
-            if (d.headerClass !== cls)   { d.headerClass = cls;   changed = true; }
+            // The header class carries the type the column was last set up for,
+            // so a new class means a new type. The sort follows it: a column that
+            // became a number column after an edit would otherwise go on sorting
+            // as text until the next rebuild. The filter keeps the kind it was
+            // built with, because swapping it would drop what the user set in it.
+            if (d.headerClass !== cls)   { d.headerClass = cls; d.comparator = makeComparator(type); changed = true; }
             if (d.headerTooltip !== tip) { d.headerTooltip = tip; changed = true; }
         }
     }
