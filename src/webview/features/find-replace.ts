@@ -258,16 +258,46 @@ export function refreshFindInPlace(): void {
 // remembers its row by the place it had in state.data. The search that runs
 // again next finds the active match there. The row that has taken that place
 // is another one, so the active match jumped and Replace changed that row.
-// Each match is moved to where its row is now. When the row of the active
-// match is gone, the next match whose row is still there becomes the active
-// one, the match Next would have gone to.
+// Each match is moved to where its row is now.
 export function followMovedRows(before: CsvRow[]): void {
-    const matches = state.findMatches;
-    if (!matches.length) return;
+    if (!state.findMatches.length) return;
     const now = new Map<CsvRow, number>();
     state.data.forEach((row, i) => now.set(row, i));
+    moveMatches(i => now.get(before[i]));
+}
+
+// Public: undo or redo put back the rows of a step. state.data held `before`
+// until then. The step keeps a copy of its rows, so no row is the array it
+// was and followMovedRows would find none of them. Undoing a row added above
+// the active match moved the mark to the row below it and Replace changed
+// that row. A step adds or takes away rows in one place. The rows above that
+// place are equal in both tables and keep their place. The rows below it are
+// equal too and move by the number of rows added or taken away. A match in
+// between is on a row that changed and is let go. A step that keeps the
+// number of rows changed them where they are, the way an edit or a new
+// column does, so every match stays where it is.
+export function followRestoredRows(before: CsvRow[]): void {
+    if (!state.findMatches.length) return;
+    const after = state.data;
+    const added = after.length - before.length;
+    if (added === 0) return;
+    const same = (a: CsvRow, b: CsvRow) => a.length === b.length && a.every((v, i) => v === b[i]);
+    const shorter = Math.min(before.length, after.length);
+    let above = 0;
+    while (above < shorter && same(before[above], after[above])) above++;
+    let below = 0;
+    while (below < shorter - above && same(before[before.length - 1 - below], after[after.length - 1 - below])) below++;
+    moveMatches(i => i < above ? i : i >= before.length - below ? i + added : undefined);
+}
+
+// Moves each match to the place `to` gives for its row's old place in
+// state.data, undefined for a row that is gone. When the row of the active
+// match is gone, the next match whose row is still there becomes the active
+// one, the match Next would have gone to.
+function moveMatches(to: (origIndex: number) => number | undefined): void {
+    const matches = state.findMatches;
     const kept = matches.map(m => {
-        const at = now.get(before[m.origIndex]);
+        const at = to(m.origIndex);
         if (at === undefined) return false;
         m.origIndex = at;
         return true;

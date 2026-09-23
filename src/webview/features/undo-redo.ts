@@ -6,6 +6,9 @@ import { recomputeColTypes } from '../grid/column-type';
 import { resetDuplicatesState } from './duplicates';
 import { refreshProfileIfOpen } from './profile';
 import { updateDelimiterBadge } from './delimiter';
+import { closePlacedPopups } from './popups';
+import { closeRenamePopover } from './rename-column';
+import { followRestoredRows } from './find-replace';
 import type { UndoSnapshot } from '../types';
 
 // Captures the undoable view state: a deep clone of the data plus the freeze
@@ -34,8 +37,21 @@ export function snapshot(): UndoSnapshot {
 // the rows held the old one, it was swapped for the new one all through the
 // file.
 function restore(snap: UndoSnapshot): void {
+    // The row menu, the column menu and the Rename popover act on the row or
+    // column they were opened on, kept by its place. A step put back moves
+    // rows and columns under them, the way an outside change does (readText
+    // in messaging.ts). Ctrl+Z leaves the focus on the cell, so the menu
+    // stayed open. Delete row then took the row that had moved into that
+    // place. They close here. A pending rename is given up.
+    closePlacedPopups();
+    closeRenamePopover();
     const resplit = snap.delimiter !== state.currentDelimiter;
+    const before = state.data;
     state.data = snap.data;
+    // The grid searches again once it shows these rows and looks for the
+    // active match at its old place, so the matches move with their rows
+    // first.
+    followRestoredRows(before);
     state.currentDelimiter = snap.delimiter;
     state.lineFormat = snap.lineFormat;
     // Re-anchor frozen rows to the restored (cloned) arrays at their saved

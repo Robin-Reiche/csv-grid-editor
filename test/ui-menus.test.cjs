@@ -9,6 +9,10 @@
 // rows. The open cell editor is already closed on such a change (see
 // test/ui-columns.test.cjs). These close too.
 //
+// Undo, redo and the row shortcuts move the rows and columns the same way
+// while a menu stays open. The keys leave the focus on the cell, so the menu
+// stayed up. Delete row then deleted the row that had moved into place.
+//
 // Run after `tsc -p ./`:  node test/ui-menus.test.cjs
 
 const { runSuite } = require('./ui/harness.cjs');
@@ -26,6 +30,26 @@ const HELPERS = `
         await t.wait(200);
     };
     t.shown = (id) => !document.getElementById(id).classList.contains('hidden');
+    // Presses a key on the focused cell, where the keys go while a menu that
+    // was opened on a cell is up.
+    t.key = async (key, mods) => {
+        const target = document.querySelector('#grid-container .ag-cell-focus') || document.body;
+        target.dispatchEvent(new KeyboardEvent('keydown', Object.assign({ key, bubbles: true, cancelable: true }, mods)));
+        await t.wait(400);
+    };
+    // A toolbar button pressed from the keyboard: a click with no mousedown
+    // before it, so nothing outside the menu has been clicked.
+    t.button = async (id) => {
+        t.click(document.getElementById(id));
+        await t.wait(400);
+    };
+    t.rows = () => {
+        const out = [];
+        for (let r = 0; t.cell(r, 0); r++) out.push(t.cell(r, 0).textContent);
+        return out.join(',');
+    };
+    t.names = () => [...document.querySelectorAll('#grid-container .ag-header-cell[col-id^="col_"] .ag-header-cell-text')]
+        .map(h => h.textContent).join(',');
     // Where the keyboard is: the cell that has the browser focus as
     // row/column. Anything else gives its tag.
     t.onCell = () => {
@@ -36,6 +60,8 @@ const HELPERS = `
 `;
 
 const steps = (body) => `async (t, csv) => { ${HELPERS} await t.init(csv); ${body} }`;
+
+const CITIES = 'city,n\nBerlin,1\nHanoi,2\nParis,3\nRome,4\n';
 
 runSuite('menus across an outside change (browser)', [
     {
@@ -122,6 +148,92 @@ runSuite('menus across an outside change (browser)', [
             await t.wait(200);
             await t.update('k,v\\nA,1\\nB,2\\nC,3\\nD,4\\nE,5\\n');
             t.check(t.shown('goto-popover'), 'Go to row stays open');
+        `),
+    },
+    {
+        name: 'undo and redo by key close the row menu',
+        csv: CITIES,
+        steps: steps(`
+            await t.focusCell(1, 0);
+            await t.key('Enter', { ctrlKey: true, shiftKey: true });
+            t.check(t.rows() === 'Berlin,,Hanoi,Paris,Rome', 'a row is added above Hanoi (' + t.rows() + ')');
+            await t.rightClick(t.cell(3, 0));
+            t.check(t.shown('row-context-menu'), 'the row menu opens on Paris');
+            await t.key('z', { ctrlKey: true });
+            t.check(t.rows() === 'Berlin,Hanoi,Paris,Rome', 'Ctrl+Z takes the row out, Rome moves into row 3 (' + t.rows() + ')');
+            t.check(!t.shown('row-context-menu'), 'the row menu is closed, so Delete row cannot take Rome');
+            await t.rightClick(t.cell(1, 0));
+            t.check(t.shown('row-context-menu'), 'the row menu opens on Hanoi');
+            await t.key('y', { ctrlKey: true });
+            t.check(t.rows() === 'Berlin,,Hanoi,Paris,Rome', 'Ctrl+Y adds the row again (' + t.rows() + ')');
+            t.check(!t.shown('row-context-menu'), 'the row menu is closed, so Delete row cannot take the new row');
+        `),
+    },
+    {
+        name: 'the undo and redo buttons close the row menu',
+        csv: CITIES,
+        steps: steps(`
+            await t.focusCell(1, 0);
+            await t.key('Enter', { ctrlKey: true, shiftKey: true });
+            await t.rightClick(t.cell(3, 0));
+            t.check(t.shown('row-context-menu'), 'the row menu opens on Paris');
+            await t.button('btn-undo');
+            t.check(t.rows() === 'Berlin,Hanoi,Paris,Rome', 'Undo takes the row out (' + t.rows() + ')');
+            t.check(!t.shown('row-context-menu'), 'the row menu is closed after Undo');
+            await t.rightClick(t.cell(1, 0));
+            await t.button('btn-redo');
+            t.check(t.rows() === 'Berlin,,Hanoi,Paris,Rome', 'Redo adds the row again (' + t.rows() + ')');
+            t.check(!t.shown('row-context-menu'), 'the row menu is closed after Redo');
+        `),
+    },
+    {
+        name: 'undo closes the column menu and a rename',
+        csv: 'a,b,c\n1,2,3\n',
+        steps: steps(`
+            await t.rightClick(t.header(0));
+            t.click(document.getElementById('col-ctx-insert-left'));
+            await t.wait(400);
+            t.check(t.names() === ',a,b,c', 'a column is added left of a (' + t.names() + ')');
+            await t.rightClick(t.header(2));
+            t.check(t.shown('col-context-menu'), 'the column menu opens on b');
+            await t.key('z', { ctrlKey: true });
+            t.check(t.names() === 'a,b,c', 'Ctrl+Z takes the column out, c moves into its place (' + t.names() + ')');
+            t.check(!t.shown('col-context-menu'), 'the column menu is closed, so Delete column cannot take c');
+            await t.button('btn-redo');
+            await t.rightClick(t.header(3));
+            t.click(document.getElementById('col-ctx-rename'));
+            await t.wait(200);
+            t.check(t.shown('rename-popover'), 'the rename popover opens on c');
+            await t.button('btn-undo');
+            t.check(!t.shown('rename-popover'), 'Undo closes the rename popover');
+            const sent = t.sent('edit').length;
+            const input = document.getElementById('rename-input');
+            input.value = 'renamed';
+            input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+            await t.wait(300);
+            t.check(t.sent('edit').length === sent, 'no header wider than the rows is written ('
+                + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
+    {
+        name: 'a row shortcut closes the row menu',
+        csv: CITIES,
+        steps: steps(`
+            await t.focusCell(2, 0);
+            await t.rightClick(t.cell(2, 0));
+            t.check(t.shown('row-context-menu'), 'the row menu opens on Paris');
+            await t.key('Enter', { ctrlKey: true, shiftKey: true });
+            t.check(t.rows() === 'Berlin,Hanoi,,Paris,Rome', 'Ctrl+Shift+Enter adds a row where Paris was (' + t.rows() + ')');
+            t.check(!t.shown('row-context-menu'), 'the row menu is closed, so Delete row cannot take the new row');
+            await t.rightClick(t.cell(2, 0));
+            await t.key('Enter', { ctrlKey: true });
+            t.check(t.rows() === 'Berlin,Hanoi,,,Paris,Rome', 'Ctrl+Enter adds a row below (' + t.rows() + ')');
+            t.check(!t.shown('row-context-menu'), 'the row menu is closed after Ctrl+Enter');
+            await t.focusCell(4, 0);
+            await t.rightClick(t.cell(1, 0));
+            await t.key('K', { ctrlKey: true, shiftKey: true });
+            t.check(t.rows() === 'Berlin,Hanoi,,,Rome', 'Ctrl+Shift+K deletes the focused row (' + t.rows() + ')');
+            t.check(!t.shown('row-context-menu'), 'the row menu is closed after Ctrl+Shift+K');
         `),
     },
 ]);

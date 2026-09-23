@@ -19,7 +19,8 @@ import {
     getSelectedColIndices,
 } from './range-select';
 import { freezeRows, unfreezeRow, unfreezeAllRows, frozenRowCount } from './freeze-rows';
-import { closeAllPopups } from './popups';
+import { closeAllPopups, closePlacedPopups } from './popups';
+import { closeRenamePopover } from './rename-column';
 import { addFirstRow, addFirstColumn } from './empty-state';
 import { resetDuplicatesState } from './duplicates';
 import { shownValue } from '../grid/control-char-cell';
@@ -70,6 +71,12 @@ function deleteRows(displayIndices: number[]): void {
     const before = state.data;
     state.data = deleteRowsFromData(state.data, toDelete);
     followMovedRows(before);
+    // The row menu, the column menu and the Rename popover act on the place
+    // they were opened on. Ctrl+Shift+K leaves the focus on the cell, so the
+    // row menu stayed open. Its Delete row then took the row that had moved
+    // into that place. They close the way undo closes them.
+    closePlacedPopups();
+    closeRenamePopover();
     state.isAutoFitted = false;
     state.autoFitCache = null;
     refreshGrid();
@@ -156,6 +163,10 @@ function insertRows(anchorDisplayIndex: number, position: 'above' | 'below', cou
     const numCols = getNumCols(state.data);
     state.data = insertRowsIntoData(state.data, insertAt, count, numCols);
     followMovedRows(before);
+    // Ctrl+Enter and Ctrl+Shift+Enter move the rows under an open menu the
+    // same way, see deleteRows.
+    closePlacedPopups();
+    closeRenamePopover();
 
     state.isAutoFitted = false;
     state.autoFitCache = null;
