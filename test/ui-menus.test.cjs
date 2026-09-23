@@ -26,6 +26,13 @@ const HELPERS = `
         await t.wait(200);
     };
     t.shown = (id) => !document.getElementById(id).classList.contains('hidden');
+    // Where the keyboard is: the cell that has the browser focus as
+    // row/column. Anything else gives its tag.
+    t.onCell = () => {
+        const a = document.activeElement;
+        const cell = a && a.closest && a.closest('#grid-container .ag-cell');
+        return cell ? cell.closest('.ag-row').getAttribute('row-index') + '/' + cell.getAttribute('col-id') : String(a && a.tagName);
+    };
 `;
 
 const steps = (body) => `async (t, csv) => { ${HELPERS} await t.init(csv); ${body} }`;
@@ -72,6 +79,22 @@ runSuite('menus across an outside change (browser)', [
             await t.wait(300);
             t.check(t.sent('edit').length === 0, 'no header wider than the rows is written ('
                 + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
+    {
+        // Go to row, the column chooser and Settings close too. A box in
+        // them may have had the keyboard. The cell focused before takes it
+        // back, so the keys do not go nowhere.
+        name: 'the keys go back to the grid from a closed popover',
+        csv: 'k,v\nA,1\nB,2\nC,3\n',
+        steps: steps(`
+            await t.focusCell(1, 1);
+            document.getElementById('btn-go-to-row').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(200);
+            t.check(t.shown('goto-popover') && t.onCell() === 'INPUT', 'Go to row has the keyboard (' + t.onCell() + ')');
+            await t.update('k,v\\nA,1\\nB,2\\nC,3\\nD,4\\n');
+            t.check(!t.shown('goto-popover'), 'Go to row is closed');
+            t.check(t.onCell() === '1/col_1', 'the keyboard is back on the cell (' + t.onCell() + ')');
         `),
     },
 ]);
