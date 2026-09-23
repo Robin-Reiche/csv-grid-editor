@@ -1616,6 +1616,15 @@ body.spaces-shown .col-chooser-label {
 .col-chooser-master:hover .col-chooser-master-count,
 .csv-filter-master:hover .csv-filter-master-count,
 .csv-filter-value-row:hover .csv-filter-value-label.blank { opacity: 1; }
+/* A ticked box is filled with the accent color, the focus border, which many
+   themes share with the menu selection (#0078d4 for both in Dark Modern). On
+   a hovered row the fill went into the row and only the tick was left of the
+   box. The selection foreground is the color made to read on that row. */
+.settings-item:hover input,
+.col-chooser-item:hover input,
+.col-chooser-master:hover input,
+.csv-filter-master:hover input,
+.csv-filter-value-row:hover input[type="checkbox"] { accent-color: var(--vscode-menu-selectionForeground, #fff); }
 .settings-item input {
     cursor: pointer;
     margin: 1px 0 0;

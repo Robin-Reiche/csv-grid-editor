@@ -154,6 +154,25 @@ const SETUP = (theme) => `
             + all.length + ' texts, lowest ' + min.toFixed(2) + ':1'
             + (bad.length ? ', too faint: ' + bad.map(x => x.what + ' ' + x.state + ' ' + x.ratio.toFixed(2)).join('; ') : '') + ')');
     };
+    // A ticked box is filled with its accent color. On a hovered row that
+    // fill has to stand apart from the row. Otherwise all that is left of the
+    // box is its tick. 3:1 is the least a control needs against its ground.
+    t.boxesShow = (name, rows) => {
+        const all = [];
+        for (const row of rows) {
+            row.classList.add('__hover');
+            for (const box of row.querySelectorAll('input[type="checkbox"]')) {
+                if (!box.checked || !box.getClientRects().length) continue;
+                const accent = getComputedStyle(box).accentColor;
+                const bg = behind(row);
+                all.push(accent === 'auto' ? 1 : ratio(over(rgb(accent), bg), bg));
+            }
+            row.classList.remove('__hover');
+        }
+        const min = all.reduce((m, x) => Math.min(m, x), 99);
+        t.check(all.length > 0 && min >= 3, name + ': a ticked box stands apart from its hovered row ('
+            + all.length + ' boxes, lowest ' + min.toFixed(2) + ':1)');
+    };
     t.clickId = async (id) => {
         document.getElementById(id).dispatchEvent(new MouseEvent('click', { bubbles: true }));
         await t.wait(250);
@@ -179,11 +198,13 @@ runSuite('popover colors (browser)', each(`
 
     await t.clickId('btn-settings');
     t.readable('settings menu', pop('settings-popover'), [...pop('settings-popover').querySelectorAll('.settings-item')]);
+    t.boxesShow('settings menu', [...pop('settings-popover').querySelectorAll('.settings-item')]);
     await t.shut();
 
     await t.clickId('btn-columns');
     t.readable('column chooser', pop('col-chooser-popover'),
         [pop('col-chooser-master'), ...pop('col-chooser-popover').querySelectorAll('.col-chooser-item')]);
+    t.boxesShow('column chooser', [pop('col-chooser-master'), ...pop('col-chooser-popover').querySelectorAll('.col-chooser-item')]);
     const search = pop('col-chooser-search');
     search.value = 'zzz';
     search.dispatchEvent(new Event('input'));
@@ -230,6 +251,7 @@ runSuite('popover colors (browser)', each(`
     if (filter) {
         const rows = () => [...filter.querySelectorAll('.csv-filter-master, .csv-filter-value-row, .csv-filter-remove-btn, .csv-filter-join-toggle')];
         t.readable('column filter', filter, rows());
+        t.boxesShow('column filter', [...filter.querySelectorAll('.csv-filter-master, .csv-filter-value-row')]);
         // A second condition brings the AND/OR switch between the two.
         const sel = filter.querySelector('.csv-filter-select');
         sel.value = [...sel.options].map(o => o.value).find(v => v !== 'none') || sel.value;
