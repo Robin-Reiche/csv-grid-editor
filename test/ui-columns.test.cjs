@@ -174,6 +174,22 @@ runSuite('columns (browser)', [
         `),
     },
     {
+        // The old grid went before it could report the editor closed, so the
+        // page went on taking the editor for open and Ctrl+F did nothing.
+        name: 'the keys work again after an outside change closed the editor',
+        csv: 'name,city\nAnna,Berlin\nBen,Oslo\n',
+        steps: steps(`
+            await t.typeUnsaved(0, 1, 'half');
+            await t.update('name,city,zip\\nAnna,Berlin,1\\nBen,Oslo,2\\n');
+            t.check(!document.querySelector('#grid-container textarea'), 'the editor is closed');
+            await t.focusCell(0, 1);
+            document.activeElement.dispatchEvent(new KeyboardEvent('keydown',
+                { key: 'f', code: 'KeyF', keyCode: 70, ctrlKey: true, bubbles: true, cancelable: true }));
+            await t.wait(200);
+            t.check(!document.getElementById('find-bar').classList.contains('hidden'), 'Ctrl+F opens Find');
+        `),
+    },
+    {
         // The row the editor was opened on now holds the outside change's new row.
         name: 'an outside change adds a column and a row above the cell being edited',
         csv: 'a,b\n1,2\n3,4',

@@ -12,4 +12,5 @@ declare const INITIAL_PROFILE_LAYOUT: { dock: string; width: number; height: num
 
 declare const agGrid: {
     createGrid(container: HTMLElement, options: unknown): any;
+    _stopPropagationForAgGrid(event: Event): void;
 };

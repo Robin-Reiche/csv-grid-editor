@@ -1,11 +1,12 @@
-import { state, getNumCols, emptyTableKind, relabelVirtualHeader } from '../state';
+import { state, getNumCols, emptyTableKind, relabelVirtualHeader, fileRows } from '../state';
 import { getColumnType, scheduleRecomputeColTypes, TYPE_LABELS } from './column-type';
 import { NoRowsOverlay, renderNoColumns } from '../features/empty-state';
 import { createCombinedFilter, markValueListsStale } from './filter';
 import { dataRowIndexForNode } from './row-mapping';
 import { partitionFrozenRows, updateCountsDisplay } from './refresh';
 import { ControlCharCellRenderer, shownName, shownValue } from './control-char-cell';
-import { MultilineCellEditor } from './multiline-cell-editor';
+import { MultilineCellEditor, editorClosed, handOver, handedOverBefore } from './multiline-cell-editor';
+import { toCsv } from '../utils/csv';
 import { refreshProfileIfOpen } from '../features/profile';
 import { pushUndo, notifyChange, updateButtons } from '../features/undo-redo';
 import { getFindCellClassRules, refreshFindIfOpen, refreshFindInPlace } from '../features/find-replace';
@@ -165,7 +166,7 @@ export function commitOpenEditor(keepFocus = true): void {
     if (!cell) return;
     // Looked up before the commit, while the display position still names
     // the row being typed in, in case a commit ever moves the rows.
-    const node = cell.rowPinned ? api.getPinnedTopRow(cell.rowIndex) : api.getDisplayedRowAtIndex(cell.rowIndex);
+    const node = editedNode(api, cell);
     api.stopEditing();
     // Enter hands the keyboard back to the cell. stopEditing() does not, so
     // the focus fell to the page and the arrow keys and typing went nowhere
@@ -174,6 +175,45 @@ export function commitOpenEditor(keepFocus = true): void {
     if (keepFocus) api.setFocusedCell(cell.rowIndex, cell.column, cell.rowPinned);
     const colId = cell.column.getColId();
     if (node?.data) writeCellValue(node, colId, node.data[colId]);
+}
+
+// The row of the cell being edited. A frozen row sits in a band of its own
+// with row numbers of its own.
+function editedNode(api: any, cell: any): any {
+    return cell.rowPinned ? api.getPinnedTopRow(cell.rowIndex) : api.getDisplayedRowAtIndex(cell.rowIndex);
+}
+
+// A save asks for the value being typed (see multiline-cell-editor.ts). The
+// answer is the file with that value in its cell, written the way
+// notifyChange writes it. The editor stays open and the grid keeps its rows,
+// its undo steps and the text it holds, since nothing was committed. Null
+// with no editor open. Null too when the value is the cell's and no earlier
+// save took another one from this editor.
+export function flushOpenEditor(): string | null {
+    const api = state.gridApi;
+    const cell = api?.getEditingCells()[0];
+    const editor = api?.getCellEditorInstances().find((i: unknown) => i instanceof MultilineCellEditor);
+    if (!cell || !editor) return null;
+    const node = editedNode(api, cell);
+    // Mapped by _origIndex like writeCellValue, so a sorted or filtered view
+    // finds the row in the file.
+    const dataIndex = node?.data ? dataRowIndexForNode(node) : -1;
+    const colIndex = parseInt(cell.column.getColId().replace('col_', ''));
+    const row = state.data[dataIndex];
+    let text: string | null = null;
+    if (row && !isNaN(colIndex)) {
+        const value = editor.getValue();
+        if ((row[colIndex] ?? '') !== value || handedOverBefore()) {
+            const edited = row.slice();
+            while (edited.length <= colIndex) edited.push('');
+            edited[colIndex] = value;
+            const rows = state.data.slice();
+            rows[dataIndex] = edited;
+            text = toCsv(fileRows(rows, !state.firstRowIsHeader), state.currentDelimiter, state.lineFormat);
+        }
+    }
+    handOver(editor, text);
+    return text;
 }
 
 // Guards the one-time wiring of the resize-handle dblclick listener. #grid-container
@@ -206,6 +246,13 @@ export function buildGrid(): void {
     // the typed one was written. Cancel it instead. A caller that wants the
     // typed value kept commits it before it changes state.data.
     if (state.isCellEditing) state.gridApi?.stopEditing(true);
+    // The old grid is taken down below before it reports that the editor
+    // closed, so that report never comes. Without this the page went on
+    // taking the editor for open: Ctrl+F, Ctrl+C on a cell, Ctrl+G, paste and
+    // the selection keys did nothing until the next edit. The extension is
+    // told here for the same reason.
+    state.isCellEditing = false;
+    editorClosed();
     // The menus that act on a row or a column by its place close, the way
     // refreshGrid closes them.
     closePlacedPopups();
@@ -365,6 +412,9 @@ export function buildGrid(): void {
             // column take such dates only. Anything else typed in, an emptied
             // cell too, was thrown away.
             cellDataType: false,
+            // The key that finishes a VS Code key chord is VS Code's. It must
+            // not start an edit, move the focus or commit (keyboard.ts).
+            suppressKeyboardEvent: (p: any) => p.event === state.chordKey,
         },
         // External filter for "show only duplicates" mode — kept independent of
         // user column filters so toggling dup-only doesn't clobber them.
@@ -446,7 +496,9 @@ export function buildGrid(): void {
         // follow that cell's own history, and on the way out they go back to the
         // grid's stacks (features/undo-redo.ts).
         onCellEditingStarted: () => { state.isCellEditing = true;  updateButtons(); },
-        onCellEditingStopped:  () => { state.isCellEditing = false; updateButtons(); },
+        // The grid reports a committed value before this, so the extension
+        // has the edit by the time it hears the editor closed.
+        onCellEditingStopped:  () => { state.isCellEditing = false; updateButtons(); editorClosed(); },
 
         // Range selection (Excel-style) — hand-rolled since AG Grid Community has no
         // built-in cell-range selection.

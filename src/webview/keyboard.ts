@@ -61,18 +61,58 @@ export function isRedoKey(e: KeyLike): boolean {
 
 // The test VS Code's webview host makes before it saves: Ctrl or Cmd with
 // the S key, whatever else is held. keyCode names that key on any keyboard
-// layout, where `key` may be another letter.
+// layout, where `key` may be another letter. AltGr is left out, like in the
+// shortcuts above. Chromium on Windows can report it as Ctrl+Alt. AltGr+S
+// types a letter on some layouts (Polish ś). It closed the cell and wrote the
+// half typed word.
 function isSaveKey(e: KeyLike & { keyCode: number }): boolean {
+    if (e.ctrlKey && e.altKey && !e.metaKey) return false;
     return (e.ctrlKey || e.metaKey) && e.keyCode === 83;
 }
 
 // Ctrl+S saves what is being typed in a cell, the way a spreadsheet does
 // (grid/builder.ts commitOpenEditor). Capture phase, so it runs before
 // anything in the page can stop the key. The key itself goes on to VS Code,
-// which does the saving. Only the key does this. Auto-save leaves an open
-// cell alone.
+// which does the saving. Only the key does this. Every other save takes the
+// value and leaves the cell open (flushOpenEditor in grid/builder.ts).
 function onSaveKey(e: KeyboardEvent): void {
-    if (isSaveKey(e)) commitOpenEditor();
+    if (e !== state.chordKey && isSaveKey(e)) commitOpenEditor();
+}
+
+// VS Code's two key chords start with Ctrl+K, Cmd+K on macOS, where Ctrl+K
+// is a text editing key. The page keeps the focus while VS Code waits for
+// the second key, so that key went into the open cell or started typing over
+// the focused one: Ctrl+K S (Save All on Windows) put an S into the value.
+// The key after the chord's start is VS Code's. It types nothing and nothing
+// in the grid acts on it (state.chordKey). It still has to bubble up to the
+// window, where VS Code's webview host picks it up to finish the chord, so
+// it is never stopped. VS Code gives a chord up after five seconds and so
+// does the page. Waiting on, it swallowed the next key typed however late.
+// The time the chord started, null with none pending.
+let chordStartedAt: number | null = null;
+const CHORD_TIMEOUT_MS = 5000;
+
+function isChordStartKey(e: KeyLike & { keyCode: number }): boolean {
+    const mac = navigator.userAgent.includes('Macintosh');
+    const mod = mac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
+    return mod && !e.shiftKey && !e.altKey && e.keyCode === 75;
+}
+
+function onChordKey(e: KeyboardEvent): void {
+    // Ctrl and the other modifiers go down on their own between the keys.
+    if (e.key === 'Control' || e.key === 'Shift' || e.key === 'Alt' || e.key === 'Meta' || e.key === 'AltGraph') return;
+    const started = chordStartedAt;
+    chordStartedAt = null;
+    if (started === null || e.timeStamp - started > CHORD_TIMEOUT_MS) {
+        if (isChordStartKey(e)) chordStartedAt = e.timeStamp;
+        return;
+    }
+    state.chordKey = e;
+    e.preventDefault();
+    // AG Grid closes an open cell on Escape from a listener of its own. The
+    // mark tells that listener to leave the key alone, the way AG Grid's own
+    // parts do it.
+    agGrid._stopPropagationForAgGrid(e);
 }
 
 // The open cell editor is a <textarea> and has to get through — editing is the
@@ -91,6 +131,7 @@ function isOtherTextInput(t: EventTarget | null): boolean {
 // grid, the open textarea's own undo — can eat them first. stopPropagation keeps
 // everything else out of all five.
 function onGridShortcut(e: KeyboardEvent): void {
+    if (e === state.chordKey) return;
     let run: (() => void) | null = null;
     if (isInsertRowBelowKey(e))      run = () => insertRowAtFocus('below');
     else if (isInsertRowAboveKey(e)) run = () => insertRowAtFocus('above');
@@ -127,16 +168,23 @@ function copiedCell(): { node: any; colId: string } | null {
 }
 
 export function setupKeyboard(): void {
+    // On the window and in the capture phase, so it runs before every other
+    // key handler in the page.
+    window.addEventListener('keydown', onChordKey, true /* capture */);
+    // VS Code gives the chord up when the focus goes elsewhere.
+    window.addEventListener('blur', () => { chordStartedAt = null; });
     document.addEventListener('keydown', onGridShortcut, true /* capture */);
     document.addEventListener('keydown', onSaveKey, true /* capture */);
-    // Every other way to save starts outside the page: File > Save from the
-    // menu, Save All by its key chord, a click on another editor that auto-save
-    // follows. Each takes the focus out of the page first, and an open cell
-    // editor kept its value to itself, so the file was saved without it and
-    // the tab looked saved. The value is written as the page loses the focus.
+    // A click on another editor, a view or the menu takes the focus out of
+    // the page with a cell still open. The value is committed then, the way
+    // a click on another cell commits it. Saves do not wait for this. VS Code
+    // can save before the page has lost the focus and a key chord never
+    // takes it away. A save asks for the value itself (flushOpenEditor in
+    // grid/builder.ts).
     window.addEventListener('blur', () => commitOpenEditor(false));
 
     document.addEventListener('keydown', e => {
+        if (e === state.chordKey) return;
         // Single-cell copy. Multi-cell range copy is handled in capture phase by
         // range-select.ts, which stops propagation before this listener runs.
         // In the find box and the other text boxes the key copies the text
