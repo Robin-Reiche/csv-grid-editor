@@ -144,6 +144,15 @@ function syncClearFiltersButton(): void {
 }
 
 export function buildGrid(): void {
+    // An open cell editor belongs to the grid that is about to go, while
+    // state.data already holds the table that replaces it. The teardown takes
+    // the focus from the editor, which then commits into that new table at the
+    // row it was opened on. That row may now hold other data, even a row an
+    // outside change just added. The screen would show the file's value while
+    // the typed one was written. Cancel it instead. A caller that wants the
+    // typed value kept commits it before it changes state.data.
+    if (state.isCellEditing) state.gridApi?.stopEditing(true);
+
     // No columns to build: an empty file, or every column deleted. This used to
     // return and leave a blank area with nothing to click (issue #40). Tear down
     // any grid still standing, since undoing back to an empty file arrives here

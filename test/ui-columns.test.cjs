@@ -5,7 +5,9 @@
 // redo of a column insert or delete all arrive that way. The grid kept the
 // old columns: a restored column stayed invisible, a removed one stayed on
 // screen and renamed headers kept their old names. Building the columns again
-// drops the column filters, yet the Clear filters button stayed up. The type
+// drops the column filters, yet the Clear filters button stayed up. A cell
+// editor open at that moment is cancelled. What was typed would otherwise
+// land in the new table at the editor's old row, unseen on screen. The type
 // badge and the header tooltip went stale after an undo, a rename or the
 // "Hide spaces" switch, while the cells already used the new type. A column
 // with no name in the header row lost its type on every row swap: its badge
@@ -86,6 +88,16 @@ const HELPERS = `
         await t.pressEnter();
         await t.wait(300);
     };
+    // Opens the editor and types into it without committing.
+    t.typeUnsaved = async (row, col, value) => {
+        await t.focusCell(row, col);
+        await t.pressEnter();
+        const ta = document.querySelector('#grid-container textarea');
+        if (!ta) { t.check(false, 'Enter opens the editor on ' + row + ',' + col); return; }
+        ta.value = value;
+        ta.dispatchEvent(new Event('input', { bubbles: true }));
+        await t.wait(100);
+    };
     // The header tooltip is AG Grid's own popup, shown after a hover.
     t.tip = async (col) => {
         const h = t.header(col);
@@ -132,6 +144,33 @@ runSuite('columns (browser)', [
         steps: steps(`
             await t.update('x,y\\n1,2');
             t.check(t.names() === 'x|y|-|-', 'the headers read the new names (' + t.names() + ')');
+        `),
+    },
+    {
+        name: 'an outside change adds a column while a cell is being edited',
+        csv: 'a,b\n1,2\n3,4',
+        steps: steps(`
+            await t.typeUnsaved(0, 0, 'half');
+            await t.update('a,b,c\\n1,2,3\\n3,4,5');
+            t.check(!document.querySelector('#grid-container textarea'), 'the editor is closed');
+            t.check(t.sent('edit').length === 0, 'the typed value is not written ('
+                + JSON.stringify(t.lastEdit()) + ')');
+            t.check(t.col(0) === '1,3', 'the cells show the file (' + t.col(0) + ')');
+            await t.edit(0, 2, 'z');
+            t.check(t.lastEdit() === 'a,b,c\\n1,2,z\\n3,4,5', 'the next edit writes the file as it is on screen ('
+                + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
+    {
+        // The row the editor was opened on now holds the outside change's new row.
+        name: 'an outside change adds a column and a row above the cell being edited',
+        csv: 'a,b\n1,2\n3,4',
+        steps: steps(`
+            await t.typeUnsaved(0, 0, 'half');
+            await t.update('a,b,c\\nNEW,0,0\\n1,2,3\\n3,4,5');
+            t.check(t.sent('edit').length === 0, 'nothing is written over the new row ('
+                + JSON.stringify(t.lastEdit()) + ')');
+            t.check(t.col(0) === 'NEW,1,3', 'the cells show the file (' + t.col(0) + ')');
         `),
     },
     {
