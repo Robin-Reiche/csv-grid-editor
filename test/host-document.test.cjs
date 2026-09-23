@@ -932,6 +932,20 @@ async function main() {
         assert.strictEqual(group.activeTab, t.tab, 'the diff is not in front again');
     });
 
+    // Another program wrote the diff's unsaved edits to the file. The diff
+    // still shows them unsaved, but the document held the disk's text and
+    // looked to have none. Reload from Disk then only read the file and left
+    // the diff marked unsaved.
+    await test('the Reload from Disk command takes the unsaved mark off a diff whose file holds its edits', async () => {
+        const t = await diffOnly('diff-only-held.csv');
+        fs.writeFileSync(t.uri.fsPath, 'h\nmine\n');
+        await t.fireWatcher();
+        await t.provider.reloadActiveFromDisk();
+        await tick();
+        assert.strictEqual(t.doc.content, 'h\nmine\n');
+        assert.strictEqual(t.tab.isDirty, false, 'the diff is still marked unsaved');
+    });
+
     // File > Revert File does nothing on a tab not marked unsaved. Reload
     // from Disk went on to report the file loaded and the grid kept the edits.
     await test('Reload from Disk on a diff not marked unsaved still loads the file', async () => {

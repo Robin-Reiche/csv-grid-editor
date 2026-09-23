@@ -293,6 +293,13 @@ class CsvDocument implements vscode.CustomDocument {
         this.diskText = this.content;
         this.editsOnDisk = true;
     }
+
+    // Whether the tab shows edits the file does not have: a text of its own,
+    // the very text another program then wrote (editsOnDisk) or a value still
+    // being typed in a cell.
+    hasUnsavedEdits(): boolean {
+        return this.content !== this.diskText || this.editsOnDisk || this.typing.size > 0;
+    }
 }
 
 export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocument> {
@@ -959,7 +966,7 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             // follows brings nothing new. It is marked unsaved here, since the
             // grid no longer holds what the file does. Closing it lost the
             // value and kept the other program's text.
-            if (fromWatcher && (document.content !== document.diskText || document.editsOnDisk || document.typing.size > 0)) {
+            if (fromWatcher && document.hasUnsavedEdits()) {
                 // A tab whose edits another program wrote is marked unsaved
                 // already (see recordContentOnDisk). Marking it again started
                 // one more save with auto-save on, which was refused and put
@@ -1074,7 +1081,7 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         // comes back. A tab not marked unsaved drops the revert (issue #25),
         // so Reload from Disk then loads the file the way it does for such a
         // tab.
-        if (!tab && document.panels.size > 0 && document.content !== document.diskText) {
+        if (!tab && document.panels.size > 0 && document.hasUnsavedEdits()) {
             const viewColumn = vscode.window.tabGroups.activeTabGroup.viewColumn;
             const inFront = await this.toFront(document, () => vscode.commands.executeCommand('vscode.openWith',
                 document.uri, CsvEditorProvider.viewType, { viewColumn, preserveFocus: false, preview: false }));
