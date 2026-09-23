@@ -290,6 +290,54 @@ runSuite('settings menu (browser)', [
         }`,
     },
     {
+        name: 'auto-fit counts the spaces after a value',
+        // Only the fifty widest values of a column are measured exactly, picked
+        // by a quick first pass. Seventy values here are wider than the word
+        // Berlin. The one value wider than all of them is wide only for the
+        // spaces after it, so a first pass that left those out never handed
+        // it on. It sits below the first screen, out of reach of the check
+        // auto-fit runs on the drawn cells.
+        csv: ['city,n'].concat(Array.from({ length: 80 }, (_, i) =>
+            (i === 70 ? 'Berlin' + ' '.repeat(40) : 'Paris Paris') + ',' + i)).join('\n'),
+        settings: { trimDisplay: false },
+        steps: `async (t, csv) => {
+            ${DRAWN}
+            await t.init(csv);
+            document.getElementById('btn-autofit').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(1500);
+            const viewport = document.querySelector('#grid-container .ag-body-viewport');
+            viewport.scrollTop = 100000;
+            viewport.dispatchEvent(new Event('scroll'));
+            await t.wait(500);
+            const cell = t.cell(70, 0);
+            const drawn = cell && t.drawnWidth(cell);
+            t.check(!!cell && drawn > 100, 'the spaces after the value are drawn (' + drawn + ' wide)');
+            t.check(!!cell && cell.scrollWidth <= cell.clientWidth, 'and the column is wide enough for them ('
+                + (cell && cell.scrollWidth) + ' in ' + (cell && cell.clientWidth) + ')');
+        }`,
+    },
+    {
+        name: 'auto-fit leaves out the spaces it hides',
+        // The other way round, with "Hide spaces around values" on. Seventy
+        // values are only an x on screen but padded wider than anything in
+        // the column. Ranked with their padding they took all fifty places.
+        // The value really drawn widest was never measured.
+        csv: ['city,n'].concat(Array.from({ length: 80 }, (_, i) =>
+            (i === 70 ? 'A wider value than x' : ' '.repeat(60) + 'x') + ',' + i)).join('\n'),
+        steps: `async (t, csv) => {
+            await t.init(csv);
+            document.getElementById('btn-autofit').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(1500);
+            const viewport = document.querySelector('#grid-container .ag-body-viewport');
+            viewport.scrollTop = 100000;
+            viewport.dispatchEvent(new Event('scroll'));
+            await t.wait(500);
+            const cell = t.cell(70, 0);
+            t.check(!!cell && cell.scrollWidth <= cell.clientWidth, 'the widest value drawn fits its column ('
+                + (cell && cell.scrollWidth) + ' in ' + (cell && cell.clientWidth) + ')');
+        }`,
+    },
+    {
         name: 'Escape gives the keys back to the grid',
         csv: ['n,v'].concat(Array.from({ length: 12 }, (_, i) => i + ',' + i)).join('\n'),
         // A real click focuses what it lands on and a real key goes to the

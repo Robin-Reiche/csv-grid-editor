@@ -105,18 +105,23 @@ export function measureTextWidths(): { colId: string; width: number }[] {
         for (let r = 0; r < bodyRows.length; r++) {
             const val = bodyRows[r]?.[c] != null ? widthText(String(bodyRows[r][c])) : '';
             if (!val) continue;
-            // Use bounding-box extents when available — more accurate than
-            // advance-width (.width) for glyphs that extend beyond their
-            // advance box (W, Q, Y, italic chars, …).
-            const m = ctx.measureText(val);
-            const canvasW = (m.actualBoundingBoxLeft !== undefined && m.actualBoundingBoxRight !== undefined
-                && (Math.abs(m.actualBoundingBoxLeft) + m.actualBoundingBoxRight) > 0)
-                ? Math.abs(m.actualBoundingBoxLeft) + m.actualBoundingBoxRight
+            // Ranked by what the cell draws, which is what Phase 2 measures.
+            // With "Hide spaces around values" on the padding is not drawn.
+            // A value takes the room from the start of the text to the end of
+            // its advance (.width). A glyph that reaches past either end (W, Q,
+            // Y, italic chars, …) takes more. The ink alone missed the spaces
+            // after a value, since they have no ink. It counted the ones
+            // before a value twice. A value wide only for the spaces drawn
+            // after it never made the top N.
+            const shown = shownValue(val);
+            const m = ctx.measureText(shown);
+            const canvasW = (m.actualBoundingBoxLeft !== undefined && m.actualBoundingBoxRight !== undefined)
+                ? Math.max(0, m.actualBoundingBoxLeft) + Math.max(m.width, m.actualBoundingBoxRight)
                 : m.width;
             // Canvas measureText ignores CSS letter-spacing. Add it manually so
             // long strings with many characters rank correctly against shorter
             // strings that happen to use wide glyphs.
-            const w = letterSpacing > 0 ? canvasW + (val.length - 1) * letterSpacing : canvasW;
+            const w = letterSpacing > 0 ? canvasW + (shown.length - 1) * letterSpacing : canvasW;
             if (top.length < TOP_N || w > minTopW) {
                 top.push({ val, w });
                 if (top.length > TOP_N) {
