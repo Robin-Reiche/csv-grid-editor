@@ -2,10 +2,10 @@
 // untrimmed and "Hide spaces around values" decides what is shown).
 //
 // The rule everything here checks: with the setting on, every place that
-// lists, compares or exports values works on what the grid SHOWS, so ' Berlin '
-// and 'Berlin' are one value. With it off they are two, exactly as the file has
-// them. Switching the setting while a sort or a filter is active must leave
-// both working. None of this may ever write to the file.
+// lists, compares, copies or exports values works on what the grid SHOWS, so
+// ' Berlin ' and 'Berlin' are one value. With it off they are two, exactly as
+// the file has them. Switching the setting while a sort or a filter is active
+// must leave both working. None of this may ever write to the file.
 //
 // Also here: a Shift or Ctrl click on a checkbox is a selection gesture and
 // must not flip the value.
@@ -246,6 +246,71 @@ runSuite('spaces around values (browser)', [
             t.check(md.includes('|  Berlin  |') && md.includes('|  city  |'),
                 'with spaces shown the export keeps them in names and values alike (' + JSON.stringify(md) + ')');
             t.check(t.sent('edit').length === 0, 'exporting wrote nothing');
+        },
+    },
+    {
+        // Copy took the value as the file has it, so a cell that showed
+        // Berlin put '  Berlin  ' on the clipboard. Pasted into a search box
+        // or a spreadsheet, the hidden spaces made lookups fail.
+        name: 'copy',
+        csv: ' city ,b\n  Berlin  ,x\nHanoi, y ',
+        steps: async (t, csv) => {
+            const copied = [];
+            Object.defineProperty(navigator, 'clipboard', {
+                configurable: true,
+                value: { writeText: s => { copied.push(s); return Promise.resolve(); } },
+            });
+            const last = () => (copied.length ? copied[copied.length - 1] : null);
+            const ctrlC = async () => {
+                const target = document.querySelector('#grid-container .ag-cell-focus') || document.body;
+                target.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', code: 'KeyC', ctrlKey: true, bubbles: true, cancelable: true }));
+                await t.wait(100);
+            };
+            const shiftClick = async (row, col) => {
+                const c = t.cell(row, col);
+                ['mousedown', 'mouseup', 'click'].forEach(ty =>
+                    c.dispatchEvent(new MouseEvent(ty, { bubbles: true, button: 0, shiftKey: true })));
+                await t.wait(200);
+            };
+            const menu = async (row, col, label) => {
+                const c = t.cell(row, col);
+                const r = c.getBoundingClientRect();
+                c.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 5, clientY: r.top + 5 }));
+                await t.wait(200);
+                const item = [...document.querySelectorAll('#row-context-menu .row-ctx-item')].find(i => i.textContent === label);
+                if (!item) { t.check(false, 'the row menu offers ' + label); return; }
+                item.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+                await t.wait(100);
+            };
+            await t.init(csv);
+            t.check(t.cell(0, 0).textContent === 'Berlin', 'the cell shows Berlin (' + JSON.stringify(t.cell(0, 0).textContent) + ')');
+            await t.focusCell(0, 0);
+            await ctrlC();
+            t.check(last() === 'Berlin', 'Ctrl+C on the cell copies what it shows (' + JSON.stringify(last()) + ')');
+            await menu(0, 0, 'Copy');
+            t.check(last() === 'Berlin', 'so does Copy in the menu (' + JSON.stringify(last()) + ')');
+            await shiftClick(1, 1);
+            await ctrlC();
+            t.check(last() === 'Berlin\tx\nHanoi\ty', 'Ctrl+C on a range copies what the cells show (' + JSON.stringify(last()) + ')');
+            await menu(1, 1, 'Copy with header');
+            t.check(last() === 'city\tb\nBerlin\tx\nHanoi\ty',
+                'Copy with header takes the column names as shown too (' + JSON.stringify(last()) + ')');
+            await menu(1, 1, 'Copy as CSV');
+            t.check(last() === 'Berlin,x\nHanoi,y', 'Copy as CSV copies what the cells show (' + JSON.stringify(last()) + ')');
+            await menu(1, 1, 'Copy as CSV with header');
+            t.check(last() === 'city,b\nBerlin,x\nHanoi,y', 'and so does Copy as CSV with header (' + JSON.stringify(last()) + ')');
+
+            await t.setSetting('trimDisplay', false);
+            await t.focusCell(0, 0);
+            await ctrlC();
+            t.check(last() === '  Berlin  ', 'with spaces shown Ctrl+C keeps them (' + JSON.stringify(last()) + ')');
+            await menu(0, 0, 'Copy');
+            t.check(last() === '  Berlin  ', 'and so does Copy in the menu (' + JSON.stringify(last()) + ')');
+            await shiftClick(1, 1);
+            await menu(1, 1, 'Copy with header');
+            t.check(last() === ' city \tb\n  Berlin  \tx\nHanoi\t y ',
+                'and so does a range, column names included (' + JSON.stringify(last()) + ')');
+            t.check(t.sent('edit').length === 0, 'copying wrote nothing');
         },
     },
     {
