@@ -28,6 +28,9 @@ export const state = {
     focusedCellColId: null as string | null,
     focusedCellRowIndex: null as number | null,
     isCellEditing: false,
+    // The key that finished a VS Code key chord such as Ctrl+K S. It belongs
+    // to VS Code, so nothing in the grid acts on it (see keyboard.ts).
+    chordKey: null as KeyboardEvent | null,
 
     ZOOM_STEPS: [60, 70, 80, 90, 100, 110, 125, 150, 175, 200],
     zoomIndex: 4,

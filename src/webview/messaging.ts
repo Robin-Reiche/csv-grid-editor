@@ -1,7 +1,7 @@
 import { state } from './state';
 import { parseCsv, detectLineFormat } from './utils/csv';
 import { applyZoom } from './features/zoom';
-import { buildGrid } from './grid/builder';
+import { buildGrid, flushOpenEditor } from './grid/builder';
 import { refreshGrid } from './grid/refresh';
 import { hideLoader } from './utils/loader';
 import { updateDelimiterBadge } from './features/delimiter';
@@ -99,6 +99,15 @@ export function setupMessaging(): void {
             if (!rebuilt) refreshGrid();
         } else if (msg.type === 'pageData') {
             handlePageData(msg);
+        } else if (msg.type === 'flush') {
+            // A save asks for the value being typed in a cell. The grid
+            // reports a committed value on a timer, so a cell committed just
+            // before would already be closed with its edit not yet sent. The
+            // answer waits until after that timer, so the edit goes first.
+            setTimeout(() => {
+                const text = flushOpenEditor();
+                vscodeApi.postMessage(text === null ? { type: 'flushed' } : { type: 'flushed', text });
+            }, 0);
         }
     });
 }

@@ -22,6 +22,10 @@ const CHUNKED_THRESHOLD      = 50  * 1024 * 1024; // 50 MB
 const PREVIEW_ROW_COUNT      = 1000;
 const PAGE_SIZE              = 500;
 const CANCELLED_PREVIEW_MODE = '__cancelled__';
+// How long a save waits for an editor to hand over the value being typed in
+// one of its cells (see flushTyping).
+const FLUSH_TIMEOUT_MS       = 1000;
+const NO_ANSWER              = Symbol('no answer');
 
 // A hot exit backup is written as UTF-8, which holds any edit whatever the
 // file's encoding, but for one thing: a lone surrogate, which it turns into
@@ -168,6 +172,15 @@ class CsvDocument implements vscode.CustomDocument {
     // second editor on the same document for the modified side of a Source
     // Control diff while the grid tab stays open.
     public readonly panels = new Set<vscode.WebviewPanel>();
+    // The editors with a cell open that holds a value typed into it, which
+    // the document does not have yet. The tab is marked unsaved for it. A
+    // save asks each of them for the value first (see flushTyping).
+    public readonly typing = new Set<vscode.WebviewPanel>();
+    // The answer a save is waiting for from an editor, see flushTyping.
+    public readonly flushes = new Map<vscode.WebviewPanel, { answer: Promise<unknown>; take(text: unknown): void }>();
+    // How many times the document was reported changed, so a save can tell
+    // whether a change came in while it was writing.
+    public changes = 0;
     // The one watcher on the file while any editor is open, see
     // resolveCustomEditor. A preview has none.
     public watcher: vscode.FileSystemWatcher | undefined;
@@ -511,6 +524,8 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         this._documents.set(key, document);
         webviewPanel.onDidDispose(() => {
             document.panels.delete(webviewPanel);
+            document.typing.delete(webviewPanel);
+            document.flushes.get(webviewPanel)?.take(undefined);
             if (document.panels.size > 0) return;
             document.watcher?.dispose();
             document.watcher = undefined;
@@ -622,12 +637,26 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
                 this.context.globalState.update('csvGridEditor.profileHeight', msg.height);
 
             } else if (msg.type === 'edit' && !document.isPreview) {
-                document.content = msg.text;
-                // Every edit sends the whole text. Another editor of this
-                // document that kept the old one would send that back with its
-                // next edit and undo this one.
-                document.post({ type: 'update', text: document.content, delimiter: document.delimiter }, webviewPanel);
-                this._onDidChangeCustomDocument.fire({ document });
+                this.takeText(document, msg.text, webviewPanel);
+
+            // A cell of this editor holds a value typed into it. It reaches
+            // the document only when the cell is committed, but the tab has
+            // to show it unsaved now: Ctrl+W or the tab's close button closed
+            // it without asking and the value was lost. Sent again after a
+            // save took the value, since that save marked the tab saved.
+            } else if (msg.type === 'typing' && !document.isPreview) {
+                document.typing.add(webviewPanel);
+                this.fireChange(document);
+
+            // The cell was closed. When a save took its value and the cell
+            // was then left with Escape, the grid sends the text it holds, so
+            // the document gives that value up as well.
+            } else if (msg.type === 'typingEnded') {
+                document.typing.delete(webviewPanel);
+                if (typeof msg.text === 'string' && !document.isPreview) this.takeText(document, msg.text, webviewPanel);
+
+            } else if (msg.type === 'flushed') {
+                document.flushes.get(webviewPanel)?.take(msg.text);
 
             // F4: Export handler — the webview sends the converted text plus a
             // suggested filename; the extension picks dialog filters from its
@@ -665,6 +694,56 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
                 });
             }
         });
+    }
+
+    // Marks the tab unsaved.
+    private fireChange(document: CsvDocument): void {
+        document.changes++;
+        this._onDidChangeCustomDocument.fire({ document });
+    }
+
+    // The whole text of the file as one editor has it now. Another editor of
+    // this document that kept the old one would send that back with its next
+    // edit and undo this one, so the others get it too. A text the document
+    // already holds changes nothing. A save that took a value being typed
+    // gets it again when the cell is committed. Marking the tab unsaved for
+    // it asked to save a file that already held it.
+    private takeText(document: CsvDocument, text: string, from: vscode.WebviewPanel): void {
+        if (text === document.content) return;
+        document.content = text;
+        document.post({ type: 'update', text: document.content, delimiter: document.delimiter }, from);
+        this.fireChange(document);
+    }
+
+    // A value being typed into a cell reaches the document only when the cell
+    // is committed. Auto-save, Save All by its key chord and the save prompt
+    // of a closing tab saved the file without it and marked the tab saved.
+    // Each editor with such a value is asked for the file with the value in
+    // it, which leaves the cell open. Messages from one editor arrive in
+    // order, so an edit it sent before its answer is already in the document.
+    // An editor that does not answer in time is not waited for. Its value is
+    // then missing from the file. The result says whether that happened.
+    private async flushTyping(document: CsvDocument): Promise<boolean> {
+        const answers = [...document.typing].map(panel => {
+            const asked = document.flushes.get(panel);
+            if (asked) return asked.answer;
+            let take!: (text: unknown) => void;
+            const answer = new Promise<unknown>(resolve => { take = resolve; });
+            document.flushes.set(panel, { answer, take });
+            const timer = setTimeout(() => take(NO_ANSWER), FLUSH_TIMEOUT_MS);
+            void answer.then(() => {
+                clearTimeout(timer);
+                if (document.flushes.get(panel)?.answer === answer) document.flushes.delete(panel);
+            });
+            void panel.webview.postMessage({ type: 'flush' });
+            return answer;
+        });
+        let missed = false;
+        for (const text of await Promise.all(answers)) {
+            if (typeof text === 'string') document.content = text;
+            if (text === NO_ANSWER) missed = true;
+        }
+        return missed;
     }
 
     // Re-reads the file and hands it to every editor of the document. The
@@ -724,8 +803,10 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             // user choose. Recording the new disk text makes a second
             // event for the same write stay quiet. A later save still
             // resets it to what we wrote. The encoding is recorded as
-            // well, so that save keeps the file's new encoding.
-            if (fromWatcher && document.content !== document.diskText) {
+            // well, so that save keeps the file's new encoding. A value
+            // being typed counts as such an edit. The tab shows it unsaved
+            // and loading the file would close the cell and drop it.
+            if (fromWatcher && (document.content !== document.diskText || document.typing.size > 0)) {
                 document.diskText = text;
                 document.encoding = encoding;
                 this.warnChangedOnDisk(document);
@@ -817,6 +898,8 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             vscode.window.showWarningMessage('Cannot save in preview mode. Open the full file to edit.');
             return;
         }
+        // A value being typed in a cell goes into the file too (flushTyping).
+        const missed = document.typing.size > 0 && await this.flushTyping(document);
         // The text goes out as a pending save first, so a watcher event that
         // arrives while the write is still running is known as ours (see
         // reload). It becomes the disk's text only once the write has landed.
@@ -828,6 +911,7 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         const { bytes, encoding } = document.encode();
         const before = document.encoding;
         const pending = { text: document.content, encoding };
+        const changes = document.changes;
         document.pendingSave = pending;
         try {
             await vscode.workspace.fs.writeFile(document.uri, bytes);
@@ -837,6 +921,14 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         document.diskText = pending.text;
         document.encoding = encoding;
         if (encoding !== before) warnSavedAsUtf8(document.uri);
+        // VS Code marks the tab saved once this returns, whatever came in
+        // while the file was being written: an edit or a value typed into
+        // a cell after the save took the one before. The tab then looked
+        // saved without it and closing it lost it. It is marked again once
+        // the save is through, the same for a value the save did not get.
+        if (missed || document.content !== pending.text || document.changes !== changes) {
+            setTimeout(() => this.fireChange(document), 0);
+        }
     }
 
     async saveCustomDocumentAs(document: CsvDocument, destination: vscode.Uri, cancellation: vscode.CancellationToken): Promise<void> {
@@ -858,6 +950,8 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         if (sameResource(destination, document.uri)) {
             return this.saveCustomDocument(document, cancellation);
         }
+        // A value being typed in a cell goes into the copy too.
+        if (document.typing.size > 0) await this.flushTyping(document);
         const { bytes, encoding } = document.encode();
         await vscode.workspace.fs.writeFile(destination, bytes);
         if (encoding !== document.encoding) warnSavedAsUtf8(destination);

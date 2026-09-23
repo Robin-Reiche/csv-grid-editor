@@ -54,6 +54,23 @@ const HELPERS = `
         ta.dispatchEvent(new Event('input', { bubbles: true }));
         return ta;
     };
+    t.editor = () => document.querySelector('#grid-container textarea');
+    // Presses a key on el or where the keyboard is. The event it hands back
+    // tells whether the page stopped the browser's own action.
+    t.press = async (key, extra, el) => {
+        const letter = key.length === 1;
+        const ev = new KeyboardEvent('keydown', Object.assign({
+            key, code: letter ? 'Key' + key.toUpperCase() : key,
+            keyCode: letter ? key.toUpperCase().charCodeAt(0) : 0, bubbles: true, cancelable: true,
+        }, extra));
+        (el || document.activeElement || document.body).dispatchEvent(ev);
+        await t.wait(150);
+        return ev;
+    };
+    // VS Code's webview host listens on the window as a key bubbles up and
+    // finishes a key chord from there.
+    t.host = [];
+    window.addEventListener('keydown', e => t.host.push(e.key));
 `;
 
 const steps = (body) => `async (t, csv) => { ${HELPERS} await t.init(csv); ${body} }`;
@@ -160,10 +177,9 @@ runSuite('keyboard (browser)', [
         `),
     },
     {
-        // File > Save from the menu, Save All by its key chord or a click
-        // anywhere else in VS Code takes the focus out of the page first. The
-        // editor stayed open, so the save wrote the file without the value and
-        // the tab looked saved.
+        // File > Save from the menu or a click anywhere else in VS Code
+        // takes the focus out of the page first. The editor stayed open, so
+        // the save wrote the file without the value and the tab looked saved.
         name: 'leaving the page saves the value being typed',
         csv: 'name,city\nAnna,Berlin\nBen,Oslo\n',
         steps: steps(`
@@ -220,6 +236,87 @@ runSuite('keyboard (browser)', [
                 + JSON.stringify(t.lastEdit()) + ')');
             await t.wait(250);
             t.check(t.onCell() === 't-0/col_1', 'the keyboard is back on the frozen cell (' + t.onCell() + ')');
+        `),
+    },
+    {
+        // AltGr+S types a letter on some Windows layouts (Polish ś).
+        // Chromium can report AltGr as Ctrl+Alt. It closed the editor and
+        // wrote the half typed value. The rest of the word started a new one.
+        name: 'AltGr+S leaves the editor open',
+        csv: 'name,city\nAnna,Berlin\n',
+        steps: steps(`
+            const ta = await t.type(0, 0, 'Wi');
+            if (!ta) return;
+            await t.press('ś', { code: 'KeyS', keyCode: 83, ctrlKey: true, altKey: true });
+            t.check(t.editor() === ta && ta.value === 'Wi', 'the editor stays open with the value');
+            t.check(t.sent('edit').length === 0, 'nothing is written (' + JSON.stringify(t.sent('edit')) + ')');
+            // Save All on macOS is Cmd+Option+S.
+            await t.press('s', { metaKey: true, altKey: true });
+            t.check(t.lastEdit() === 'name,city\\nWi,Berlin\\n', 'Cmd+Option+S still writes it (' + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
+    {
+        // VS Code's two key chords start with Ctrl+K: Ctrl+K S is Save All
+        // on Windows. The page kept the focus, the S went into the cell and
+        // VS Code still ran the command.
+        name: 'the key after Ctrl+K is left to VS Code in an open cell',
+        csv: 'name,city\nAnna,Berlin\nBen,Oslo\n',
+        steps: steps(`
+            const ta = await t.type(0, 1, 'TYPED');
+            if (!ta) return;
+            await t.press('k', { ctrlKey: true });
+            const s = await t.press('s');
+            t.check(s.defaultPrevented, 'the S types nothing');
+            t.check(t.host.slice(-2).join(',') === 'k,s', 'VS Code gets both keys (' + t.host.join(',') + ')');
+            t.check(t.editor() === ta && ta.value === 'TYPED', 'the editor stays open with the value');
+            const next = await t.press('s');
+            t.check(!next.defaultPrevented, 'the key after that types again');
+            // A modifier pressed on its own does not finish the chord.
+            await t.press('k', { ctrlKey: true });
+            await t.press('Shift', { shiftKey: true });
+            t.check((await t.press('S', { shiftKey: true })).defaultPrevented, 'Ctrl+K Shift+S types nothing either');
+            await t.press('k', { ctrlKey: true });
+            await t.press('Escape');
+            t.check(t.editor() === ta, 'Ctrl+K Escape leaves the editor open');
+            await t.press('k', { ctrlKey: true });
+            await t.press('Enter');
+            t.check(t.editor() === ta, 'Ctrl+K Enter leaves the editor open');
+            await t.press('k', { ctrlKey: true });
+            await t.press('Enter', { shiftKey: true });
+            t.check(ta.value === 'TYPED', 'Ctrl+K Shift+Enter puts no line break in (' + JSON.stringify(ta.value) + ')');
+            // Ctrl+K Ctrl+S opens the keyboard shortcuts, it does not save.
+            await t.press('k', { ctrlKey: true });
+            await t.press('s', { ctrlKey: true });
+            t.check(t.editor() === ta && t.sent('edit').length === 0, 'Ctrl+K Ctrl+S leaves the editor open');
+            await t.pressEnter();
+            t.check(t.lastEdit() === 'name,city\\nAnna,TYPED\\nBen,Oslo\\n', 'Enter writes what was typed ('
+                + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
+    {
+        name: 'the key after Ctrl+K is left to VS Code on a cell',
+        csv: 'name,city\nAnna,Berlin\nBen,Oslo\n',
+        steps: steps(`
+            await t.focusCell(0, 1);
+            await t.press('k', { ctrlKey: true }, t.focused());
+            const s = await t.press('s', {}, t.focused());
+            t.check(s.defaultPrevented && !t.editor(), 'Ctrl+K S opens no editor');
+            t.check(t.host.slice(-2).join(',') === 'k,s', 'VS Code gets both keys (' + t.host.join(',') + ')');
+            // Each check starts on the focused cell, whatever the one before did.
+            if (t.editor()) { await t.press('Escape', {}, t.editor()); await t.focusCell(0, 1); }
+            await t.press('k', { ctrlKey: true }, t.focused());
+            await t.press('ArrowDown', {}, t.focused());
+            t.check(t.focusedRow() === 0, 'Ctrl+K ArrowDown leaves the focus where it was (' + t.focusedRow() + ')');
+            if (t.focusedRow() !== 0) await t.focusCell(0, 1);
+            await t.press('k', { ctrlKey: true }, t.focused());
+            await t.press('c', { ctrlKey: true }, t.focused());
+            t.check(t.copied.length === 0, 'Ctrl+K Ctrl+C copies nothing (' + JSON.stringify(t.copied) + ')');
+            // VS Code gives the chord up when the focus goes elsewhere.
+            await t.press('k', { ctrlKey: true }, t.focused());
+            window.dispatchEvent(new FocusEvent('blur'));
+            await t.press('x', {}, t.focused());
+            t.check(!!t.editor() && t.editor().value === 'x', 'after leaving the page a key types again ('
+                + (t.editor() && JSON.stringify(t.editor().value)) + ')');
         `),
     },
 ]);

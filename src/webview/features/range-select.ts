@@ -485,6 +485,8 @@ function followFocus(): void {
 }
 
 function onKeyDown(e: KeyboardEvent): void {
+    // The key that finishes a VS Code key chord is VS Code's (keyboard.ts).
+    if (e === state.chordKey) return;
     if (state.isCellEditing) return;
     if (isTypingTarget(e.target)) return;
     if (!state.gridApi) return;

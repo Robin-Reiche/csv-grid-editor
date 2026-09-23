@@ -1,3 +1,4 @@
+import { state } from '../state';
 import { updateButtons } from '../features/undo-redo';
 
 // ── Cell editor: multi-line aware ────────────────────────────────────────────
@@ -132,6 +133,50 @@ export function stepHistory(h: TextHistory, delta: -1 | 1): string | null {
     return h.entries[target];
 }
 
+// ── Telling the extension a value is being typed ─────────────────────────────
+// A value typed into a cell reaches the file only when the cell is committed.
+// Until then VS Code knew nothing of it. Ctrl+W or the tab's close button
+// closed the tab without asking and the value was lost. Auto-save and Save All
+// saved the file without it. So the editor says 'typing' on the first change,
+// which marks the tab unsaved. A save then asks for the value and gets the
+// file with it in (flushOpenEditor in grid/builder.ts). The cell stays open.
+// When the cell closes the extension is told with 'typingEnded'.
+//
+// Whether the extension was told about the editor that is open now. Kept here
+// and not in the editor: the editor is gone by the time the grid reports it
+// closed (editorClosed).
+let typingReported = false;
+// The text the last save took from the open editor, see flushOpenEditor.
+let handedOver: string | null = null;
+
+// The editor was closed, committed or not. Called once the grid has reported
+// the value it committed, so the edit reaches the extension before this does.
+// When a save took the file with the value in it and the cell was then left
+// with Escape, the grid holds another text than the one the save took. The
+// extension is given that text so it drops the value as well.
+export function editorClosed(): void {
+    const handed = handedOver;
+    handedOver = null;
+    if (!typingReported) return;
+    typingReported = false;
+    vscodeApi.postMessage(handed !== null && handed !== state.rawCsvText
+        ? { type: 'typingEnded', text: state.rawCsvText }
+        : { type: 'typingEnded' });
+}
+
+// A save took `text` from the open editor. It is null when the value was the
+// cell's. The tab is marked saved either way, so the next change of the value
+// has to mark it unsaved again.
+export function handOver(editor: MultilineCellEditor, text: string | null): void {
+    if (text !== null) handedOver = text;
+    editor.reportFrom(editor.getValue());
+}
+
+// Whether a save took a text from the open editor.
+export function handedOverBefore(): boolean {
+    return handedOver !== null;
+}
+
 export class MultilineCellEditor {
     private eGui!: HTMLDivElement;
     private eTextArea!: HTMLTextAreaElement;
@@ -140,6 +185,9 @@ export class MultilineCellEditor {
     private originalValue = '';
     private history: TextHistory = newHistory('');
     private eGridCell: HTMLElement | null = null;
+    // The value a change is measured against: the one the editor opened with
+    // or the one the last save took (handOver). Null once the change is told.
+    private unreported: string | null = null;
 
     init(params: any): void {
         const value = params.value == null ? '' : String(params.value);
@@ -178,6 +226,23 @@ export class MultilineCellEditor {
         this.eTextArea.addEventListener('keydown', this.onKeyDown);
         this.eTextArea.addEventListener('input', this.onInput);
         this.eTextArea.addEventListener('blur', this.onBlur);
+
+        // A letter, Backspace or Delete opens the editor changed already.
+        this.reportFrom(value);
+    }
+
+    // Tells the extension once the value differs from `from`, now or on a
+    // later change.
+    reportFrom(from: string): void {
+        this.unreported = from;
+        this.reportChange();
+    }
+
+    private reportChange(): void {
+        if (this.unreported === null || this.getValue() === this.unreported) return;
+        this.unreported = null;
+        typingReported = true;
+        vscodeApi.postMessage({ type: 'typing' });
     }
 
     getGui(): HTMLElement {
@@ -226,6 +291,9 @@ export class MultilineCellEditor {
 
     private onKeyDown = (e: KeyboardEvent): void => {
         const key = e.key;
+
+        // The key that finishes a VS Code key chord is VS Code's (keyboard.ts).
+        if (e === state.chordKey) return;
 
         // The whole point of the feature. preventDefault as well as stopPropagation:
         // Shift+Enter would otherwise ALSO insert the browser's own line break on
@@ -279,6 +347,7 @@ export class MultilineCellEditor {
         this.eTextArea.setSelectionRange(value.length, value.length);
         this.autoGrow();
         updateButtons();
+        this.reportChange();
         return true;
     }
 
@@ -286,6 +355,7 @@ export class MultilineCellEditor {
         recordHistory(this.history, this.eTextArea.value);
         this.autoGrow();
         updateButtons();
+        this.reportChange();
     };
 
     private insertNewline(): void {
@@ -299,6 +369,7 @@ export class MultilineCellEditor {
         recordHistory(this.history, ta.value);
         this.autoGrow();
         updateButtons();
+        this.reportChange();
     }
 
     // Height follows the content. 'auto' first so the textarea can also SHRINK
