@@ -27,6 +27,11 @@ const CANCELLED_PREVIEW_MODE = '__cancelled__';
 // one of its cells (see flushTyping).
 const FLUSH_TIMEOUT_MS       = 1000;
 const NO_ANSWER              = Symbol('no answer');
+// How long and how often Overwrite and Reload from Disk try to bring the
+// grid to the front before they give up on running File > Save or File >
+// Revert File on it (see toFront).
+const FRONT_TIMEOUT_MS       = 1500;
+const FRONT_RETRY_MS         = 300;
 
 // A hot exit backup is written as UTF-8, which holds any edit whatever the
 // file's encoding, but for one thing: a lone surrogate, which it turns into
@@ -215,6 +220,14 @@ class CsvDocument implements vscode.CustomDocument {
     public readonly typing = new Set<vscode.WebviewPanel>();
     // The answer a save is waiting for from an editor, see flushTyping.
     public readonly flushes = new Map<vscode.WebviewPanel, { answer: Promise<unknown>; take(text: unknown): void }>();
+    // The file with the value being typed in it, as each editor with such a
+    // value sends it while another editor shows the file. A Source Control
+    // diff closes without asking while the grid tab stays open. The value
+    // then goes to the other editors (see resolveCustomEditor).
+    public readonly typed = new Map<vscode.WebviewPanel, string>();
+    // The editors whose page has the keyboard, as each page reports it (see
+    // toFront).
+    public readonly focused = new Set<vscode.WebviewPanel>();
     // How many times the document was reported changed, so a save can tell
     // whether a change came in while it was writing.
     public changes = 0;
@@ -244,9 +257,13 @@ class CsvDocument implements vscode.CustomDocument {
     dispose(): void {}
 
     // Sends the message to every editor of this document but `except`.
-    post(message: unknown, except?: vscode.WebviewPanel): void {
+    post(message: { type: string; [key: string]: unknown }, except?: vscode.WebviewPanel): void {
         for (const panel of this.panels) {
-            if (panel !== except) panel.webview.postMessage(message);
+            if (panel === except) continue;
+            // A new text closes the cell open in that editor (readText in
+            // messaging.ts), so the value typed there is gone.
+            if (message.type === 'update') this.typed.delete(panel);
+            panel.webview.postMessage(message);
         }
     }
 
@@ -319,22 +336,19 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
     // unless the document has unsaved changes, so on a file only changed on disk
     // it does nothing at all (issue #25).
     private async reloadActiveFromDisk(): Promise<void> {
-        const group = vscode.window.tabGroups.activeTabGroup;
-        const input = group.activeTab?.input;
-        let documents: CsvDocument[];
-        if (input instanceof vscode.TabInputCustom && input.viewType === CsvEditorProvider.viewType) {
-            const document = this._documents.get(input.uri.toString());
-            documents = document ? [document] : [];
-        } else {
-            // A Source Control diff whose sides are grids. VS Code tells an
-            // extension nothing about the tab of such a diff, not even its
-            // files. Its grids are the ones in front in the group, though.
-            documents = [...this._documents.values()].filter(document =>
-                [...document.panels].some(panel => panel.visible && panel.viewColumn === group.viewColumn));
-            if (!documents.length) {
-                vscode.window.showWarningMessage('Reload from Disk works on an open CSV Grid Editor tab.');
-                return;
-            }
+        // The grid that is the active editor: a grid tab or a side of a
+        // Source Control diff whose sides are grids, a tab VS Code tells an
+        // extension nothing about. The other side of such a diff is in front
+        // in the same group. It was looked up in the active tab group, which
+        // VS Code does not move to a floating window. With the focus in such
+        // a window the command took the grid in front in the main window for
+        // the one to reload.
+        const active = [...this._documents.values()].flatMap(document => [...document.panels]).filter(panel => panel.active);
+        let documents = [...this._documents.values()].filter(document => [...document.panels].some(panel =>
+            active.some(other => other === panel || (panel.visible && other.viewColumn === panel.viewColumn))));
+        if (!documents.length) {
+            vscode.window.showWarningMessage('Reload from Disk works on an open CSV Grid Editor tab.');
+            return;
         }
 
         documents = documents.filter(document => !document.isPreview);
@@ -570,12 +584,24 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
 
         const key = document.uri.toString();
         document.panels.add(webviewPanel);
+        if (document.panels.size === 2) this.tellShared(document, webviewPanel);
         this._documents.set(key, document);
         webviewPanel.onDidDispose(() => {
             document.panels.delete(webviewPanel);
-            document.typing.delete(webviewPanel);
+            document.focused.delete(webviewPanel);
+            const typed = document.typing.delete(webviewPanel) ? document.typed.get(webviewPanel) : undefined;
+            document.typed.delete(webviewPanel);
             document.flushes.get(webviewPanel)?.take(undefined);
-            if (document.panels.size > 0) return;
+            if (document.panels.size > 0) {
+                // VS Code closes a Source Control diff without asking while
+                // the file's grid tab is open. Neither Ctrl+W nor the close
+                // button takes the focus out of the page first. A value being
+                // typed in the diff was lost, while the grid tab went on
+                // showing the file unsaved. It goes to the other editors now.
+                if (typed !== undefined) this.takeText(document, typed, webviewPanel);
+                if (document.panels.size === 1) this.tellShared(document);
+                return;
+            }
             document.watcher?.dispose();
             document.watcher = undefined;
             if (this._documents.get(key) === document) this._documents.delete(key);
@@ -654,7 +680,8 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
                         type: 'init',
                         text: document.content,
                         delimiter: document.delimiter,
-                        firstRowIsHeader
+                        firstRowIsHeader,
+                        shared: document.panels.size > 1
                     });
                 }
             } else if (msg.type === 'zoomChanged') {
@@ -686,6 +713,7 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
                 this.context.globalState.update('csvGridEditor.profileHeight', msg.height);
 
             } else if (msg.type === 'edit' && !document.isPreview) {
+                document.typed.delete(webviewPanel);
                 this.takeText(document, msg.text, webviewPanel);
 
             // A cell of this editor holds a value typed into it. It reaches
@@ -702,10 +730,27 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             // the document gives that value up as well.
             } else if (msg.type === 'typingEnded') {
                 document.typing.delete(webviewPanel);
+                document.typed.delete(webviewPanel);
                 if (typeof msg.text === 'string' && !document.isPreview) this.takeText(document, msg.text, webviewPanel);
+
+            // The file with the value being typed in a cell of this editor,
+            // which the grid sends while another editor shows the file. Kept
+            // for when this editor closes. Without a text the value is the
+            // cell's own again.
+            } else if (msg.type === 'typedText') {
+                if (typeof msg.text === 'string' && document.typing.has(webviewPanel)) document.typed.set(webviewPanel, msg.text);
+                else document.typed.delete(webviewPanel);
 
             } else if (msg.type === 'flushed') {
                 document.flushes.get(webviewPanel)?.take(msg.text);
+                // The value the save took replaces an older one kept from
+                // before, which would take it back when this editor closes.
+                if (typeof msg.text === 'string' && document.typing.has(webviewPanel)) document.typed.set(webviewPanel, msg.text);
+
+            // Whether this editor's page has the keyboard (see toFront).
+            } else if (msg.type === 'focus') {
+                if (msg.value === true) document.focused.add(webviewPanel);
+                else document.focused.delete(webviewPanel);
 
             // F4: Export handler — the webview sends the converted text plus a
             // suggested filename; the extension picks dialog filters from its
@@ -749,6 +794,15 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
     private fireChange(document: CsvDocument): void {
         document.changes++;
         this._onDidChangeCustomDocument.fire({ document });
+    }
+
+    // Tells the editors of the document but `except` whether another editor
+    // shows it too. `except` learns it with its init message. A grid that
+    // knows of another editor sends the value being typed in it (the
+    // typedText message). Writing out the whole file costs a pause on a
+    // large one, so a lone editor does not do it.
+    private tellShared(document: CsvDocument, except?: vscode.WebviewPanel): void {
+        document.post({ type: 'shared', value: document.panels.size > 1 }, except);
     }
 
     // The whole text of the file as one editor has it now. Another editor of
@@ -923,10 +977,19 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
     // save runs on the grid's own tab the way Ctrl+S does, which also shows
     // why a save failed. workspace.save saved every editor of the file. A
     // text editor of it that had loaded the change wrote it back over the
-    // edits. The grid then loaded it as a change on disk.
+    // edits. The grid then loaded it as a change on disk. The change on disk
+    // is given up only right before that save. Given up first, a save that
+    // never ran left the file with the other program's text and no warning.
+    // A grid that does not come to the front is written from here, which
+    // touches no other editor but leaves its tab marked unsaved.
     private async overwrite(document: CsvDocument): Promise<void> {
+        if (await this.onOwnTab(document, 'workbench.action.files.save', () => { document.conflict = false; })) return;
         document.conflict = false;
-        await this.onOwnTab(document, 'workbench.action.files.save');
+        try {
+            await this.saveCustomDocument(document, new vscode.CancellationTokenSource().token);
+        } catch (e) {
+            void vscode.window.showErrorMessage(`Failed to save '${path.basename(document.uri.fsPath)}': ${e instanceof Error ? e.message : String(e)}`);
+        }
     }
 
     // Reload from Disk, the command and the button on the warning above. A
@@ -941,9 +1004,10 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
     }
 
     // Runs File > Revert File or File > Save on the document's own grid tab
-    // and tells whether it ran. Both work on the editor in front. A tab
-    // without unsaved edits is left alone.
-    private async onOwnTab(document: CsvDocument, command: string): Promise<boolean> {
+    // and tells whether it ran. Both work on the editor in front of the
+    // window that has the focus. A tab without unsaved edits is left alone.
+    // `before` runs right before the command.
+    private async onOwnTab(document: CsvDocument, command: string, before?: () => void): Promise<boolean> {
         const isOwnTab = (tab: vscode.Tab | undefined): tab is vscode.Tab =>
             tab?.input instanceof vscode.TabInputCustom
             && tab.input.viewType === CsvEditorProvider.viewType
@@ -959,12 +1023,16 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         // so Reload from Disk then loads the file the way it does for such a
         // tab.
         if (!tab && document.panels.size > 0 && document.content !== document.diskText) {
-            await vscode.commands.executeCommand('vscode.openWith', document.uri, CsvEditorProvider.viewType,
-                { viewColumn: vscode.window.tabGroups.activeTabGroup.viewColumn, preserveFocus: false, preview: false });
-            const front = vscode.window.tabGroups.activeTabGroup.activeTab;
-            if (isOwnTab(front)) {
+            const viewColumn = vscode.window.tabGroups.activeTabGroup.viewColumn;
+            const inFront = await this.toFront(document, () => vscode.commands.executeCommand('vscode.openWith',
+                document.uri, CsvEditorProvider.viewType, { viewColumn, preserveFocus: false, preview: false }));
+            const front = ownTab();
+            if (front && inFront) {
                 const ran = front.isDirty;
-                if (ran) await vscode.commands.executeCommand(command);
+                if (ran) {
+                    before?.();
+                    await vscode.commands.executeCommand(command);
+                }
                 const opened = ownTab();
                 if (opened && !opened.isDirty) await vscode.window.tabGroups.close(opened);
                 if (ran) return true;
@@ -976,12 +1044,37 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             // selection instead. Should another tab still be in front, the
             // command is not run: a revert would throw away that tab's
             // unsaved edits.
-            await vscode.commands.executeCommand('vscode.openWith', document.uri, CsvEditorProvider.viewType,
-                { viewColumn: tab.group.viewColumn, preserveFocus: false });
-            if (isOwnTab(vscode.window.tabGroups.activeTabGroup.activeTab)) {
+            const viewColumn = tab.group.viewColumn;
+            if (await this.toFront(document, () => vscode.commands.executeCommand('vscode.openWith',
+                document.uri, CsvEditorProvider.viewType, { viewColumn, preserveFocus: false }))) {
+                before?.();
                 await vscode.commands.executeCommand(command);
                 return true;
             }
+        }
+        return false;
+    }
+
+    // Brings an editor of the document to the front with `open` and tells
+    // whether it got there, so that the command above acts on it: VS Code's
+    // active editor, with its page holding the keyboard. The active tab
+    // group cannot tell. VS Code does not move it to a floating window, so
+    // Overwrite found no grid tab in front there and did nothing. With the
+    // focus in a floating window, a grid in the main window looked to be in
+    // front and Reload from Disk reverted the other window's editor. The
+    // active editor alone cannot tell either: a click on a notification gives
+    // its window the focus and leaves the active editor as it was. VS Code
+    // moves the focus to the window of the tab a moment later. A tab in a
+    // floating window often gets only its window to the front at first, so
+    // it is brought to the front again until it gets there.
+    private async toFront(document: CsvDocument, open: () => Thenable<unknown>): Promise<boolean> {
+        const inFront = () => [...document.panels].some(panel => panel.active && document.focused.has(panel));
+        const giveUp = Date.now() + FRONT_TIMEOUT_MS;
+        while (Date.now() < giveUp) {
+            await open();
+            const retry = Math.min(Date.now() + FRONT_RETRY_MS, giveUp);
+            while (!inFront() && Date.now() < retry) await new Promise(resolve => setTimeout(resolve, 20));
+            if (inFront()) return true;
         }
         return false;
     }

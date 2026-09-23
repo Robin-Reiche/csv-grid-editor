@@ -190,6 +190,21 @@ function editedNode(api: any, cell: any): any {
 // with no editor open. Null too when the value is the cell's and no earlier
 // save took another one from this editor.
 export function flushOpenEditor(): string | null {
+    const open = openEditorText();
+    if (!open) return null;
+    handOver(open.editor, open.text);
+    return open.text;
+}
+
+// The same file for another editor of it to take over should this one close
+// (multiline-cell-editor.ts). Unlike a save, this hands nothing over.
+export function fileWithOpenValue(): string | null {
+    return openEditorText()?.text ?? null;
+}
+
+// The open editor and the file with its value, see flushOpenEditor. Null
+// with no editor open.
+function openEditorText(): { editor: MultilineCellEditor; text: string | null } | null {
     const api = state.gridApi;
     const cell = api?.getEditingCells()[0];
     const editor = api?.getCellEditorInstances().find((i: unknown) => i instanceof MultilineCellEditor);
@@ -212,8 +227,7 @@ export function flushOpenEditor(): string | null {
             text = toCsv(fileRows(rows, !state.firstRowIsHeader), state.currentDelimiter, state.lineFormat);
         }
     }
-    handOver(editor, text);
-    return text;
+    return { editor, text };
 }
 
 // Guards the one-time wiring of the resize-handle dblclick listener. #grid-container

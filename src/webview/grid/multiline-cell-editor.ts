@@ -1,5 +1,6 @@
 import { state } from '../state';
 import { updateButtons } from '../features/undo-redo';
+import { fileWithOpenValue } from './builder';
 
 // ── Cell editor: multi-line aware ────────────────────────────────────────────
 // AG Grid's stock text editor is an <input>, which cannot hold a line break — so
@@ -155,6 +156,7 @@ let handedOver: string | null = null;
 // with Escape, the grid holds another text than the one the save took. The
 // extension is given that text so it drops the value as well.
 export function editorClosed(): void {
+    stopSending();
     const handed = handedOver;
     handedOver = null;
     if (!typingReported) return;
@@ -170,11 +172,53 @@ export function editorClosed(): void {
 export function handOver(editor: MultilineCellEditor, text: string | null): void {
     if (text !== null) handedOver = text;
     editor.reportFrom(editor.getValue());
+    stopSending();
 }
 
 // Whether a save took a text from the open editor.
 export function handedOverBefore(): boolean {
     return handedOver !== null;
+}
+
+// ── Keeping another editor of the file up to date ───────────────────────────
+// VS Code opens a second editor on the file for the modified side of a Source
+// Control diff while the grid tab stays open. Closing the diff then does not
+// ask to save. Neither Ctrl+W nor the close button takes the focus out of the
+// page first. The value being typed in the diff was lost, while the grid tab
+// went on showing the file unsaved and a save wrote it without the value. So
+// while another editor shows the file (the extension says so), the extension
+// is sent the file with the value in it once the typing pauses. A key with
+// Ctrl or Cmd sends it at once, since it may be the one that closes the
+// editor. The extension hands that text to the other editors when this one
+// closes. Writing out a large file takes a moment, so a lone editor never
+// does it.
+const SEND_DELAY_MS = 300;
+let shared = false;
+let sendTimer: ReturnType<typeof setTimeout> | null = null;
+
+export function setShared(value: boolean): void {
+    shared = value;
+    if (!shared) stopSending();
+    else if (typingReported) sendSoon();
+}
+
+function sendSoon(): void {
+    if (sendTimer !== null) clearTimeout(sendTimer);
+    sendTimer = setTimeout(sendNow, SEND_DELAY_MS);
+}
+
+// Sends what waits to be sent. Without a text when the value is the cell's
+// own again.
+function sendNow(): void {
+    if (sendTimer === null) return;
+    stopSending();
+    const text = fileWithOpenValue();
+    vscodeApi.postMessage(text === null ? { type: 'typedText' } : { type: 'typedText', text });
+}
+
+function stopSending(): void {
+    if (sendTimer !== null) clearTimeout(sendTimer);
+    sendTimer = null;
 }
 
 export class MultilineCellEditor {
@@ -239,10 +283,12 @@ export class MultilineCellEditor {
     }
 
     private reportChange(): void {
-        if (this.unreported === null || this.getValue() === this.unreported) return;
-        this.unreported = null;
-        typingReported = true;
-        vscodeApi.postMessage({ type: 'typing' });
+        if (this.unreported !== null && this.getValue() !== this.unreported) {
+            this.unreported = null;
+            typingReported = true;
+            vscodeApi.postMessage({ type: 'typing' });
+        }
+        if (shared && typingReported) sendSoon();
     }
 
     getGui(): HTMLElement {
@@ -291,6 +337,9 @@ export class MultilineCellEditor {
 
     private onKeyDown = (e: KeyboardEvent): void => {
         const key = e.key;
+
+        // Ctrl+W may close the editor right after this (see sendNow).
+        if (e.ctrlKey || e.metaKey) sendNow();
 
         // The key that finishes a VS Code key chord is VS Code's (keyboard.ts).
         if (e === state.chordKey) return;
