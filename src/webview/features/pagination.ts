@@ -1,5 +1,5 @@
 import { state } from '../state';
-import { parseCsv } from '../utils/csv';
+import { parseCsv, detectLineFormat } from '../utils/csv';
 import { buildGrid } from '../grid/builder';
 import { hideLoader } from '../utils/loader';
 
@@ -37,6 +37,7 @@ export function handlePageData(msg: { pageNumber: number; totalPages: number; te
     // held, which sent you back to page 1 while the bar still said page 6 (#34).
     state.rawCsvText = msg.text;
     state.data = parseCsv(msg.text, state.currentDelimiter, false, true);
+    state.lineFormat = detectLineFormat(msg.text, state.currentDelimiter);
     buildGrid();
     hideLoader();
 }

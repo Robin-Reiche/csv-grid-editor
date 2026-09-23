@@ -155,6 +155,19 @@ async function main() {
         assert.strictEqual(t.doc.content, 'a\n1\n');
     });
 
+    await test('an edit with CRLF is saved as it came and its echo is ignored', async () => {
+        // The grid sends the file back with the line endings it was opened
+        // with. The save has to write them unchanged. Otherwise the watcher
+        // would take the echo of that save for an outside change.
+        const t = await open('/data/crlf.csv', 'a,b\r\n1,2\r\n');
+        await t.edit('a,b\r\n1,3\r\n');
+        await t.save();
+        assert.strictEqual(disk.get('/data/crlf.csv'), 'a,b\r\n1,3\r\n', 'the save changed the text');
+        await t.fireWatcher();
+        assert.strictEqual(t.updates().length, 0, 'reloaded on the echo of our own save');
+        assert.strictEqual(t.doc.content, 'a,b\r\n1,3\r\n');
+    });
+
     if (failures) { console.error(`\n${failures} test(s) failed`); process.exit(1); }
     console.log('\nAll auto-save echo tests passed.');
 }

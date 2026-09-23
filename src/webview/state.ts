@@ -1,5 +1,6 @@
 import type { CsvRow, ColType, FindMatch, UndoSnapshot } from './types';
 import { SETTING_DEFAULTS, type Settings } from './settings';
+import type { LineFormat } from './utils/csv';
 
 export const state = {
     currentDelimiter: ',',
@@ -7,6 +8,9 @@ export const state = {
     // outside change or the last edit it wrote. In the paged view it is the page
     // on display. A delimiter switch re-splits this (features/delimiter.ts).
     rawCsvText: '',
+    // How that text ends its rows, read every time it is split into state.data.
+    // Every edit writes the file back the same way (utils/csv.ts toCsv).
+    lineFormat: { eol: '\n', finalNewline: false } as LineFormat,
     data: [] as CsvRow[],
     undoStack: [] as UndoSnapshot[],
     redoStack: [] as UndoSnapshot[],

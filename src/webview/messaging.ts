@@ -1,5 +1,5 @@
 import { state } from './state';
-import { parseCsv } from './utils/csv';
+import { parseCsv, detectLineFormat } from './utils/csv';
 import { applyZoom } from './features/zoom';
 import { buildGrid } from './grid/builder';
 import { refreshGrid } from './grid/refresh';
@@ -14,6 +14,7 @@ function initWithData(text: string, delimiter: string): void {
     state.currentDelimiter = delimiter;
     // Untrimmed: the file's values exactly, see parseCsv.
     state.data = parseCsv(text, delimiter, false, true);
+    state.lineFormat = detectLineFormat(text, delimiter);
     state.isAutoFitted     = false;
     state.autoFitCache     = null;
     state.autoFitCacheZoom = -1;
@@ -54,6 +55,8 @@ export function setupMessaging(): void {
             const frozen = frozenRowPositions();
             state.rawCsvText = msg.text;
             state.data = parseCsv(msg.text, state.currentDelimiter, false, true);
+            // An outside change or a revert can bring other line endings.
+            state.lineFormat = detectLineFormat(msg.text, state.currentDelimiter);
             reanchorFrozenRows(frozen);
             // Existing dup highlights now point at stale rows. Leaving the
             // "Show only duplicates" view already rebuilds the rows from

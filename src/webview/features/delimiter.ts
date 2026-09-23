@@ -1,5 +1,5 @@
 import { state } from '../state';
-import { parseCsv } from '../utils/csv';
+import { parseCsv, detectLineFormat } from '../utils/csv';
 import { buildGrid } from '../grid/builder';
 import { frozenRowPositions, reanchorFrozenRows } from './freeze-rows';
 import { closeAllPopups } from './popups';
@@ -37,6 +37,9 @@ export function setupDelimiterBadge(): void {
             // frozen rows across the re-parse instead of losing them.
             const frozen = frozenRowPositions();
             state.data = parseCsv(state.rawCsvText, state.currentDelimiter, false, true);
+            // Which line breaks end a row depends on where quoted values start.
+            // That depends on the delimiter.
+            state.lineFormat = detectLineFormat(state.rawCsvText, state.currentDelimiter);
             reanchorFrozenRows(frozen);
             state.hiddenCols.clear(); // re-parse may change the column set — drop index-based hide state
             state.autoFitCache = null;
