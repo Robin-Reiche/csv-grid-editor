@@ -900,9 +900,19 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             // grid no longer holds what the file does. Closing it lost the
             // value and kept the other program's text.
             if (fromWatcher && (document.content !== document.diskText || document.editsOnDisk || document.typing.size > 0)) {
-                const looksSaved = document.content === document.diskText;
+                // A tab whose edits another program wrote is marked unsaved
+                // already (see recordContentOnDisk). Marking it again started
+                // one more save with auto-save on, which was refused and put
+                // the warning up once more.
+                const looksSaved = document.content === document.diskText && !document.editsOnDisk;
                 document.diskText = text;
                 document.encoding = encoding;
+                // Another program wrote the grid's text in another encoding,
+                // with a byte order mark the file did not have for one. The
+                // edits still count as unsaved, so the next change on disk is
+                // warned about too. Taken for a change under no unsaved edits,
+                // it was loaded over them without a word.
+                if (text === document.content) document.editsOnDisk = true;
                 if (looksSaved) this.fireChange(document);
                 this.warnChangedOnDisk(document);
                 return false;
@@ -1026,7 +1036,14 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         }
         // A value being typed in a cell goes into the file too (flushTyping).
         // A save refused below does not wait for it.
-        const missed = !document.conflict && document.typing.size > 0 && await this.flushTyping(document);
+        const waited = !document.conflict && document.typing.size > 0;
+        const missed = waited && await this.flushTyping(document);
+        // A change on disk during that wait can also be reported only after
+        // it. With a large file VS Code told of the change once the grid's
+        // answer was in, when the save had written over it already. So the
+        // file is read once more after the wait, which sets the mark below
+        // the way the watcher does (see reload).
+        if (waited) await this.reload(document, true);
         // Another program changed the file under the unsaved edits and the
         // user has not chosen between the two yet (see warnChangedOnDisk).
         // Auto-save wrote the edits over that change and Reload from Disk had

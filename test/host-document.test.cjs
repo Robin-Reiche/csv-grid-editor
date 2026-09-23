@@ -1084,6 +1084,48 @@ async function main() {
             await assert.rejects(t.save(), /changed on disk/, 'the save went through');
             assert.ok(fs.readFileSync(p).equals(bytes(FLIP_OUTSIDE)), 'the save wrote over the change on disk');
         });
+
+        // The tab already shows the edits unsaved. Marking it again for that
+        // change started one more save with auto-save on, which was refused
+        // and put the warning up once more.
+        await test(`a change on disk after the file held the unsaved edits does not mark the tab again in ${name}`, async () => {
+            const p = file(`flip-marked-${name.replace(/ /g, '-')}.csv`, bytes(FLIP_START));
+            const t = await open(p);
+            await t.edit(FLIP_MINE);
+            fs.writeFileSync(p, bytes(FLIP_MINE));
+            await t.fireWatcher();
+            const changes = t.changes();
+            fs.writeFileSync(p, bytes(FLIP_OUTSIDE));
+            await t.fireWatcher();
+            assert.strictEqual(warnings.length, 1, 'the test did not reach the warning');
+            assert.strictEqual(t.changes(), changes, 'the tab was marked unsaved again');
+        });
+    }
+
+    // Another program wrote the grid's text with a byte order mark the file
+    // did not have. That changed the encoding, which is warned about, but the
+    // edits were still unsaved. The next change on disk was taken for one
+    // under no unsaved edits and loaded over them without a word.
+    const withBom = text => Buffer.concat([BOM, Buffer.from(text)]);
+    for (const [name, before] of [['a change before it', [Buffer.from(FLIP_OUTSIDE)]], ['no change before it', []]]) {
+        await test(`a change on disk after the file held the edits with a byte order mark is warned about with ${name}`, async () => {
+            const p = file(`flip-bom-${before.length}.csv`, FLIP_START);
+            const t = await open(p);
+            await t.edit(FLIP_MINE);
+            for (const bytes of [...before, withBom(FLIP_MINE)]) {
+                fs.writeFileSync(p, bytes);
+                await t.fireWatcher();
+            }
+            assert.strictEqual(t.doc.encoding, 'utf8bom', 'the test did not reach the byte order mark');
+            const shown = warnings.length;
+            fs.writeFileSync(p, FLIP_OUTSIDE);
+            await t.fireWatcher();
+            assert.strictEqual(warnings.length, shown + 1, 'the change was not reported');
+            assert.strictEqual(t.updates().length, 0, 'the grid was reloaded over the unsaved edits');
+            assert.strictEqual(t.doc.content, FLIP_MINE, 'the edits are gone');
+            await assert.rejects(t.save(), /changed on disk/, 'the save went through');
+            assert.strictEqual(fs.readFileSync(p, 'utf8'), FLIP_OUTSIDE, 'the save wrote over the change on disk');
+        });
     }
 
     // Two warnings with the same text are one notification to VS Code, so
@@ -1524,6 +1566,30 @@ async function main() {
             await t.flushed('h\nTYPED\n');
             await tick();
             assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\nTYPED\n', 'Overwrite did not write the value');
+        });
+
+        // The change can also land during the wait and be reported only after
+        // it. With a large file VS Code told of the change only once the
+        // grid's answer was in, so the save found no mark and wrote over the
+        // change all the same.
+        await test(`${name} that waits for the value being typed does not write over a change on disk reported after the wait`, async () => {
+            const p = file(`typing-save-late-${name.length}.csv`, 'h\n1\n');
+            const t = await open(p);
+            await t.typing();
+            const saving = save(t);
+            await tick();
+            assert.strictEqual(t.flushes().length, 1, 'the test did not reach the wait');
+            fs.writeFileSync(p, 'h\nOUTSIDE\n');
+            await t.flushed('h\nTYPED\n');
+            await assert.rejects(saving, /changed on disk/, 'the save went through');
+            assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\nOUTSIDE\n', 'the save wrote over the change on disk');
+            await t.fireWatcher();
+            assert.strictEqual(t.tab.isDirty, true);
+            assert.strictEqual(t.updates().length, 0, 'the grid was reloaded under the open cell');
+            assert.strictEqual(onScreen().length, 1, 'the change was not reported once');
+            onScreen()[0].pick('Reload from Disk');
+            await tick();
+            assert.strictEqual(t.doc.content, 'h\nOUTSIDE\n', 'Reload from Disk had nothing to load');
         });
     }
 
