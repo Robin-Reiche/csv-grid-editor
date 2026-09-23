@@ -815,7 +815,17 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
     // workspace.save came with VS Code 1.86. Without it the next save writes.
     private async overwrite(document: CsvDocument): Promise<void> {
         document.conflict = false;
-        if (typeof vscode.workspace.save === 'function') await vscode.workspace.save(document.uri);
+        if (typeof vscode.workspace.save !== 'function') return;
+        try {
+            await vscode.workspace.save(document.uri);
+        } catch (error) {
+            // A file another program still holds open, for one. VS Code shows
+            // nothing for a save asked for this way, so the button seemed to
+            // do nothing.
+            void vscode.window.showErrorMessage(
+                `${path.basename(document.uri.fsPath)} was not saved: ${error instanceof Error ? error.message : String(error)}`
+            );
+        }
     }
 
     // Reload from Disk, the command and the button on the warning above. A

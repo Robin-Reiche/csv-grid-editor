@@ -34,6 +34,7 @@ const BOM = Buffer.from([0xEF, 0xBB, 0xBF]);
 
 const watchers = [];
 const warnings = [];
+const errors = [];
 let quickPickChoice = null;
 // What the last size question offered.
 let offered = null;
@@ -102,18 +103,15 @@ const vscodeStub = {
             delete: async uri => fs.rmSync(uri.fsPath, { force: true }),
         },
         // Came with VS Code 1.86: saves the editor of this file the way Ctrl+S
-        // does and gives back its URI, undefined when no editor shows it or
-        // the save failed. A test that restarts VS Code can leave the tab from
-        // before the restart behind, so the newest one is the file's editor.
+        // does and gives back its URI, undefined when no editor shows it. A
+        // save that fails rejects with its error. A test that restarts VS Code
+        // can leave the tab from before the restart behind, so the newest one
+        // is the file's editor.
         save: async uri => {
             const tab = group.tabs.findLast(t => t.save && t.input && t.input.uri.toString() === uri.toString());
             if (!tab) return undefined;
-            try {
-                await tab.save();
-                return uri;
-            } catch {
-                return undefined;
-            }
+            await tab.save();
+            return uri;
         },
         createFileSystemWatcher: () => {
             const w = {
@@ -129,6 +127,10 @@ const vscodeStub = {
         showQuickPick: async items => {
             offered = items.map(i => i.id);
             return items.find(i => i.id === quickPickChoice);
+        },
+        showErrorMessage: msg => {
+            errors.push(msg);
+            return Promise.resolve(undefined);
         },
         showWarningMessage: (msg, ...actions) => {
             const w = { msg, actions, pick: null };
@@ -200,6 +202,7 @@ let failures = 0;
 async function test(name, fn) {
     vscodeStub.workspace.save = workspaceSave;
     warnings.length = 0;
+    errors.length = 0;
     fakeSize = null;
     quickPickChoice = null;
     failNextWrite = false;
@@ -741,6 +744,24 @@ async function main() {
         await t.fireWatcher();                          // the echo of that save
         assert.strictEqual(t.updates().length, 0);
         assert.strictEqual(warnings.length, 1);
+    });
+
+    // A file another program still holds open. VS Code shows nothing for a
+    // save that workspace.save asked for, so the button seemed to do nothing.
+    await test('Overwrite that cannot write the file says so', async () => {
+        const p = file('dirty-overwrite-locked.csv', 'h\n1\n');
+        const t = await open(p);
+        await t.edit('h\nmine\n');
+        fs.writeFileSync(p, 'h\ntheirs\n');
+        await t.fireWatcher();
+        failNextWrite = true;
+        warnings[0].pick('Overwrite');
+        await tick();
+        assert.deepStrictEqual(errors, ['dirty-overwrite-locked.csv was not saved: EBUSY: resource busy or locked']);
+        assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\ntheirs\n');
+        assert.strictEqual(t.tab.isDirty, true);
+        await t.save();
+        assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\nmine\n', 'the next save did not write');
     });
 
     await test('Overwrite before VS Code 1.86 lets the next save write', async () => {
