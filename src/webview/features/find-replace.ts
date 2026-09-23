@@ -1,6 +1,7 @@
 import { state } from '../state';
 import { pushUndo, notifyChange } from './undo-redo';
 import { scheduleRecomputeColTypes } from '../grid/column-type';
+import { markValueListsStale } from '../grid/filter';
 import { dataRowIndexForFindMatch } from '../grid/row-mapping';
 import { focusCell } from '../grid/refresh';
 import type { FindMatch } from '../types';
@@ -234,12 +235,14 @@ export function closeFindBar(): void {
 // Rewrites one matched cell with `edit` and returns the grid row it lives on.
 // The grid's row objects are copies of state.data, so the new value is written
 // to both, otherwise the grid kept showing the old value and the next search
-// found it again.
+// found it again. The grid is not told of the write, so the column filters'
+// value lists are marked stale here.
 function replaceInCell(m: FindMatch, edit: (old: string) => string): any {
     const colIdx = parseInt(m.colField.replace('col_', ''));
     const dataIndex = dataRowIndexForFindMatch(m);
     const newVal = edit(String(state.data[dataIndex][colIdx] ?? ''));
     state.data[dataIndex][colIdx] = newVal;
+    markValueListsStale();
     const node = rowNodeFor(dataIndex);
     if (node) node.data[m.colField] = newVal;
     return node;

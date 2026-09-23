@@ -6,7 +6,8 @@
 // offered. After "Hide spaces around values" is switched with no filter on, it
 // would still list the values the old way. The list has to show the data as
 // it is each time the panel opens, while the ticks the user set on values
-// still there stay as they are.
+// still there stay as they are. Making the list costs a sort of every value,
+// so it is made again only after the rows changed.
 //
 // Run after `tsc -p ./`:  node test/ui-filter-values.test.cjs
 
@@ -97,6 +98,85 @@ runSuite('filter value list (browser)', [
             t.check(l.length === 5 && l.includes(' Berlin') && l.includes('Berlin') && l.includes('Hanoi '),
                 'spaces shown, the padded values are listed apart (' + labels() + ')');
             t.check(rows().every(r => r.querySelector('input').checked), 'and all of them are ticked (' + ticked() + ')');
+        `),
+    },
+    {
+        // The list was made again on every open and twice on the first one.
+        // Sorting the values each time froze the grid for seconds on a column
+        // with many different values.
+        name: 'opening the panel again without a change',
+        csv: 'city,n\nBerlin,1\nHanoi,2\nParis,3',
+        steps: steps(`
+            // createGrid is a getter that cannot be replaced, so the whole
+            // global is swapped for a proxy that hands out the grid it made.
+            let api = null;
+            const real = window.agGrid;
+            const wrap = (el, opts) => (api = real.createGrid(el, opts));
+            window.agGrid = new Proxy(real, { get: (o, k) => k === 'createGrid' ? wrap : o[k] });
+            await t.init(csv);
+            window.agGrid = real;
+            // Each time the list is made the filter goes through every row.
+            let walks = 0;
+            const walk = api.forEachNode;
+            api.forEachNode = function (...a) { walks++; return walk.apply(this, a); };
+            await openFilter(0);
+            t.check(walks === 1, 'the first open goes through the rows once (' + walks + ')');
+            const drawn = rows()[0];
+            await closeFilter();
+            walks = 0;
+            await openFilter(0);
+            t.check(walks === 0, 'opening it again goes through none (' + walks + ')');
+            t.check(rows()[0] === drawn && labels() === '["Berlin","Hanoi","Paris"]',
+                'and shows the list it drew before (' + labels() + ')');
+            await closeFilter();
+            await type(0, 0, 'Oslo');
+            await openFilter(0);
+            t.check(labels() === '["Hanoi","Oslo","Paris"]', 'after an edit the list is made again (' + labels() + ')');
+            await closeFilter();
+            walks = 0;
+            await openFilter(0);
+            t.check(walks === 0, 'and then kept again (' + walks + ')');
+        `),
+    },
+    {
+        // Replace and Delete write into the rows past the grid's own editing.
+        // Undo and an outside change swap the rows. The list has to follow
+        // each of them.
+        name: 'the list follows Replace, Delete, undo and an outside change',
+        csv: 'city,n\nBerlin,1\nHanoi,2\nParis,3',
+        steps: steps(`
+            await t.init(csv);
+            await openFilter(0);
+            t.check(labels() === '["Berlin","Hanoi","Paris"]', 'the list starts with the file values (' + labels() + ')');
+            await closeFilter();
+            t.click(document.getElementById('btn-find-replace'));
+            const fi = document.getElementById('find-input');
+            fi.value = 'Berlin';
+            fi.dispatchEvent(new Event('input', { bubbles: true }));
+            document.getElementById('replace-input').value = 'Oslo';
+            await t.wait(300);
+            t.click(document.getElementById('replace-all'));
+            await t.wait(300);
+            t.check(/Oslo/.test(t.lastEdit()), 'Replace All reached the file (' + JSON.stringify(t.lastEdit()) + ')');
+            await openFilter(0);
+            t.check(labels() === '["Hanoi","Oslo","Paris"]', 'the list follows Replace All (' + labels() + ')');
+            await closeFilter();
+            await t.focusCell(1, 0);
+            document.querySelector('#grid-container .ag-cell-focus')
+                .dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', code: 'Delete', bubbles: true, cancelable: true }));
+            await t.wait(200);
+            await openFilter(0);
+            t.check(labels() === '["(Blank)","Oslo","Paris"]', 'the list follows Delete (' + labels() + ')');
+            await closeFilter();
+            t.click(document.getElementById('btn-undo'));
+            await t.wait(300);
+            await openFilter(0);
+            t.check(labels() === '["Hanoi","Oslo","Paris"]', 'the list follows undo (' + labels() + ')');
+            await closeFilter();
+            window.postMessage({ type: 'update', text: 'city,n\\nRome,1\\nOslo,2', delimiter: ',' }, '*');
+            await t.wait(400);
+            await openFilter(0);
+            t.check(labels() === '["Oslo","Rome"]', 'the list follows an outside change (' + labels() + ')');
         `),
     },
 ]);

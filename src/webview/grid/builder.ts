@@ -1,7 +1,7 @@
 import { state, getNumCols, emptyTableKind, relabelVirtualHeader } from '../state';
 import { getColumnType, scheduleRecomputeColTypes, TYPE_LABELS } from './column-type';
 import { NoRowsOverlay, renderNoColumns } from '../features/empty-state';
-import { createCombinedFilter } from './filter';
+import { createCombinedFilter, markValueListsStale } from './filter';
 import { dataRowIndexForNode } from './row-mapping';
 import { partitionFrozenRows, updateCountsDisplay } from './refresh';
 import { ControlCharCellRenderer, shownValue } from './control-char-cell';
@@ -395,6 +395,9 @@ export function buildGrid(): void {
         // A rowData reset (undo/redo, row insert/delete, paste, dup-view) shifts
         // display indices, so the display-coordinate selection must be dropped.
         onRowDataUpdated: () => {
+            // Every row swap arrives here: undo, paste, an insert or a delete,
+            // an outside change, a freeze and the duplicates view.
+            markValueListsStale();
             clearRangeSelection();
             // With getRowId set (Issue #5) AG Grid reuses row nodes across a
             // rowData swap, so the '#' gutter — a display-position valueGetter —
@@ -434,6 +437,7 @@ export function buildGrid(): void {
             pushUndo();
             while (state.data[dataIndex].length <= colIndex) state.data[dataIndex].push('');
             state.data[dataIndex][colIndex] = event.newValue != null ? String(event.newValue) : '';
+            markValueListsStale();
             notifyChange();
             scheduleRecomputeColTypes();
         },

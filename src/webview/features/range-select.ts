@@ -5,6 +5,7 @@ import { toClipboardBlock } from '../utils/csv';
 import type { ClipboardFormat } from '../utils/csv';
 import { closeAllPopups } from './popups';
 import { shownValue } from '../grid/control-char-cell';
+import { markValueListsStale } from '../grid/filter';
 
 // ── Excel-style range selection for the main grid ─────────────────────────────
 // AG Grid Community has no built-in cell-range selection (Enterprise only), so
@@ -270,7 +271,10 @@ function clearSelectedCells(): void {
         }
     }
     // refreshCells (not a rowData reset) keeps the selection highlight in place.
+    // The grid is not told of the write that way, so the column filters' value
+    // lists are marked stale here.
     state.gridApi.refreshCells({ force: true });
+    markValueListsStale();
     recomputeColTypes();
     notifyChange();
 }

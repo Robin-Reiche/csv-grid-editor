@@ -20,6 +20,23 @@ function filterKey(raw: unknown, trimmed: boolean): string {
     return s.trim() === '' ? '' : trimmed ? trimPadding(s) : s;
 }
 
+// One collator for the whole sort of a value list. localeCompare with options
+// builds a new one on each call. A sort makes n log n calls, which took seconds
+// on a column with many different values.
+const collator = new Intl.Collator(undefined, { sensitivity: 'base' });
+
+// Counts the changes to the rows the value lists are made from. A list keeps
+// the count it was made at. Opening its panel makes the list again only when
+// the count has moved since. builder.ts counts every row swap and every edit
+// that goes through the grid. Replace (find-replace.ts) and Delete on a
+// selection (range-select.ts) write into the rows past the grid, so they count
+// as well.
+let rowsVersion = 0;
+
+export function markValueListsStale(): void {
+    rowsVersion++;
+}
+
 export function createCombinedFilter(colType: ColType): any {
     return class {
         params: any;
@@ -34,6 +51,8 @@ export function createCombinedFilter(colType: ColType): any {
         _displayedValues: string[] = [];
         // The trimDisplay setting the keys above were made under. See _syncKeys.
         _keyedTrimmed = state.settings.trimDisplay;
+        // The rowsVersion the list was made at.
+        _builtAt = -1;
 
         init(params: any) {
             this.params = params;
@@ -50,6 +69,7 @@ export function createCombinedFilter(colType: ColType): any {
             const vals = new Set<string>();
             this.hasBlank = false;
             this._keyedTrimmed = state.settings.trimDisplay;
+            this._builtAt = rowsVersion;
             this.params.api.forEachNode((n: any) => {
                 const key = filterKey(n.data[field], this._keyedTrimmed);
                 if (key === '') { this.hasBlank = true; return; }
@@ -59,7 +79,7 @@ export function createCombinedFilter(colType: ColType): any {
             if (colType === 'integer' || colType === 'float') {
                 arr.sort((a, b) => Number(a) - Number(b));
             } else {
-                arr.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+                arr.sort(collator.compare);
             }
             this.allValues = arr.slice(0, 2000);
             this.truncated = arr.length > 2000;
@@ -108,10 +128,10 @@ export function createCombinedFilter(colType: ColType): any {
         // Brings the list and the ticks up to date with the rows. The list is
         // made from the rows, so an edit, a paste or an outside change that
         // brings in a value or takes the last one away leaves it stale. Opening
-        // the panel passes `force` for that reason. Switching "Hide spaces
-        // around values" changes what a value is keyed under, so everything
-        // that reads the keys calls this first. The filter then never compares
-        // keys of two kinds.
+        // the panel passes `force` for that reason, when the rows changed since
+        // the list was made. Switching "Hide spaces around values" changes what
+        // a value is keyed under, so everything that reads the keys calls this
+        // first. The filter then never compares keys of two kinds.
         //
         // The ticks carry over row by row: a new key is ticked when any row
         // behind it was ticked under the old key. A value the old list did not
@@ -460,8 +480,10 @@ export function createCombinedFilter(colType: ColType): any {
         getGui() { return this.eGui; }
 
         // AG Grid calls this each time the panel opens, which is when a stale
-        // list would show.
-        afterGuiAttached() { this._syncKeys(true); }
+        // list would show. While the rows are as they were, the list on hand
+        // is still right and is kept. Making it again cost seconds on a column
+        // with many different values. On the first open init has just made it.
+        afterGuiAttached() { this._syncKeys(this._builtAt !== rowsVersion); }
 
         isFilterActive() {
             this._syncKeys();
