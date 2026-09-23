@@ -184,6 +184,23 @@ runSuite('columns (browser)', [
         `),
     },
     {
+        // The columns stay, so the grid only swaps the rows. The editor stayed
+        // open on its row position, which now held the row above. Enter wrote
+        // the typed value into that row.
+        name: 'an outside change adds a row above the cell being edited',
+        csv: 'a,b\n1,2\n3,4',
+        steps: steps(`
+            await t.typeUnsaved(1, 1, 'TYPED');
+            await t.update('a,b\\nNEW,0\\n1,2\\n3,4');
+            const open = !!document.querySelector('#grid-container textarea');
+            t.check(!open, 'the editor is closed');
+            if (open) await t.pressEnter();
+            t.check(t.sent('edit').length === 0, 'the typed value is not written ('
+                + JSON.stringify(t.lastEdit()) + ')');
+            t.check(t.col(1) === '0,2,4', 'the cells show the file (' + t.col(1) + ')');
+        `),
+    },
+    {
         name: 'undo and redo of a column delete',
         csv: 'a,b,c\n1,2,3',
         steps: steps(`
