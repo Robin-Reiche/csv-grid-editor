@@ -138,6 +138,8 @@ export function setupGoToRow(): void {
 
     const input = document.getElementById('goto-input') as HTMLInputElement | null;
     input?.addEventListener('keydown', e => {
+        // The key that finishes a VS Code key chord is VS Code's (keyboard.ts).
+        if (e === state.chordKey) return;
         if (e.key === 'Enter')  { e.preventDefault(); jumpToRow(); }
         if (e.key === 'Escape') { e.preventDefault(); dismissPopover(); }
     });
@@ -155,7 +157,7 @@ export function setupGoToRow(): void {
 
     // Ctrl/Cmd+G keyboard shortcut.
     document.addEventListener('keydown', e => {
-        if ((e.ctrlKey || e.metaKey) && e.key === 'g' && !state.isCellEditing) {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'g' && !state.isCellEditing && e !== state.chordKey) {
             e.preventDefault();
             const pop = document.getElementById('goto-popover');
             if (pop?.classList.contains('hidden')) openPopover();

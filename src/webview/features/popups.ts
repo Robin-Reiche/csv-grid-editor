@@ -64,6 +64,8 @@ export function isAnyPopupOpen(): boolean {
 export function setupPopups(): void {
     document.addEventListener('keydown', (e) => {
         if (e.key !== 'Escape') return;
+        // The key that finishes a VS Code key chord is VS Code's (keyboard.ts).
+        if (e === state.chordKey) return;
 
         // AG Grid's filter panel lives outside POPUP_IDS (it has no fixed id).
         // Detect it in the DOM and let AG Grid close it.

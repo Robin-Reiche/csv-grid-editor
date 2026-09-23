@@ -423,6 +423,8 @@ export function setupFindReplace(): void {
     if (fi) {
         fi.addEventListener('input', runFind);
         fi.addEventListener('keydown', e => {
+            // The key that finishes a VS Code key chord is VS Code's (keyboard.ts).
+            if (e === state.chordKey) return;
             if (e.key === 'Enter')  { e.preventDefault(); navigateFind(e.shiftKey ? -1 : 1); }
             if (e.key === 'Escape') closeFindBar();
         });
@@ -442,5 +444,5 @@ export function setupFindReplace(): void {
     document.getElementById('replace-all')?.addEventListener('click', replaceAll);
 
     document.getElementById('replace-input')
-        ?.addEventListener('keydown', e => { if (e.key === 'Escape') closeFindBar(); });
+        ?.addEventListener('keydown', e => { if (e.key === 'Escape' && e !== state.chordKey) closeFindBar(); });
 }

@@ -761,6 +761,27 @@ async function main() {
         assert.strictEqual(fs.readFileSync(dest, 'utf8'), 'h\nTYPED\n');
     });
 
+    // The modified side of a Source Control diff is a second editor. It kept
+    // the text from before the save and the commit that followed brought
+    // nothing new. Its next edit wrote the old value back over the saved one.
+    await test('the other editor gets the value a save took', async () => {
+        const p = file('typing-other.csv', 'h\n1\n');
+        const t = await open(p);
+        const diff = await t.openSecondEditor();
+        await t.typing();
+        const saving = t.save();
+        await tick();
+        await t.flushed('h\nTYPED\n');
+        await saving;
+        assert.deepStrictEqual(diff.updates().map(m => m.text), ['h\nTYPED\n'], 'the other editor kept the text without the value');
+        assert.strictEqual(t.updates().length, 0, 'the editor that handed the value over was sent it back');
+        await t.edit('h\nTYPED\n');
+        await t.typingEnded();
+        await diff.edit('h\nTYPED\nNEW\n');
+        await t.save();
+        assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\nTYPED\nNEW\n');
+    });
+
     await test('a save with no value being typed asks nothing', async () => {
         const p = file('typing-none.csv', 'h\n1\n');
         const t = await open(p);
@@ -824,7 +845,7 @@ async function main() {
         await t.typingEnded('h\n1\n');
         assert.strictEqual(t.doc.content, 'h\n1\n');
         assert.strictEqual(t.tab.isDirty, true, 'the tab looks saved while the file holds a value the grid does not');
-        assert.deepStrictEqual(diff.updates().map(m => m.text), ['h\n1\n'], 'the other editor was not told');
+        assert.deepStrictEqual(diff.updates().map(m => m.text), ['h\nTYPED\n', 'h\n1\n'], 'the other editor was not told');
         assert.strictEqual(t.updates().length, 0, 'the editor that sent it was sent it back');
         // No cell is open any more, so the next save asks nothing.
         await t.save();
@@ -887,6 +908,30 @@ async function main() {
         assert.strictEqual(t.doc.content, 'h\n1\n');
         assert.deepStrictEqual(warnings.map(w => w.msg),
             ['typing-outside.csv changed on disk. Your unsaved edits in the grid were kept.']);
+    });
+
+    // Auto-save took the value and marked the tab saved. The grid kept the
+    // cell open over the outside change, the commit brought nothing new and
+    // the tab closed without asking. The file kept the other program's text.
+    await test('an outside change after a save took the value being typed marks the tab unsaved', async () => {
+        const p = file('typing-outside-saved.csv', 'h\n1\n');
+        const t = await open(p);
+        await t.typing();
+        const saving = t.save();
+        await tick();
+        await t.flushed('h\nTYPED\n');
+        await saving;
+        await tick();
+        assert.strictEqual(t.tab.isDirty, false, 'the test did not reach a saved tab');
+        fs.writeFileSync(p, 'h\nEXCEL\n');
+        await t.fireWatcher();
+        assert.strictEqual(t.updates().length, 0, 'the grid was reloaded under the open cell');
+        assert.strictEqual(t.tab.isDirty, true, 'the tab looks saved while the file holds another text');
+        await t.edit('h\nTYPED\n');
+        await t.typingEnded();
+        assert.strictEqual(t.tab.isDirty, true);
+        await t.save();
+        assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\nTYPED\n');
     });
 
     await test('an unchanged document still reloads silently', async () => {

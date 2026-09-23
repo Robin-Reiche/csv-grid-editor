@@ -716,15 +716,19 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
     }
 
     // A value being typed into a cell reaches the document only when the cell
-    // is committed. Auto-save, Save All by its key chord and the save prompt
-    // of a closing tab saved the file without it and marked the tab saved.
-    // Each editor with such a value is asked for the file with the value in
-    // it, which leaves the cell open. Messages from one editor arrive in
-    // order, so an edit it sent before its answer is already in the document.
-    // An editor that does not answer in time is not waited for. Its value is
-    // then missing from the file. The result says whether that happened.
+    // is committed. Auto-save and Save All by its key chord saved the file
+    // without it and marked the tab saved. Each editor with such a value is
+    // asked for the file with the value in it, which leaves the cell open.
+    // Messages from one editor arrive in order, so an edit it sent before its
+    // answer is already in the document. An editor that does not answer in
+    // time is not waited for. Its value is then missing from the file. The
+    // result says whether that happened. The other editors get the text as
+    // they would an edit (takeText). The commit that follows brings nothing
+    // new. Without the text they kept the old one and their next edit wrote
+    // it back over the value.
     private async flushTyping(document: CsvDocument): Promise<boolean> {
-        const answers = [...document.typing].map(panel => {
+        const asking = [...document.typing];
+        const answers = asking.map(panel => {
             const asked = document.flushes.get(panel);
             if (asked) return asked.answer;
             let take!: (text: unknown) => void;
@@ -739,10 +743,13 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             return answer;
         });
         let missed = false;
-        for (const text of await Promise.all(answers)) {
-            if (typeof text === 'string') document.content = text;
+        (await Promise.all(answers)).forEach((text, i) => {
+            if (typeof text === 'string' && text !== document.content) {
+                document.content = text;
+                document.post({ type: 'update', text, delimiter: document.delimiter }, asking[i]);
+            }
             if (text === NO_ANSWER) missed = true;
-        }
+        });
         return missed;
     }
 
@@ -805,10 +812,16 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             // resets it to what we wrote. The encoding is recorded as
             // well, so that save keeps the file's new encoding. A value
             // being typed counts as such an edit. The tab shows it unsaved
-            // and loading the file would close the cell and drop it.
+            // and loading the file would close the cell and drop it. When a
+            // save took that value, the tab looks saved and the commit that
+            // follows brings nothing new. It is marked unsaved here, since the
+            // grid no longer holds what the file does. Closing it lost the
+            // value and kept the other program's text.
             if (fromWatcher && (document.content !== document.diskText || document.typing.size > 0)) {
+                const looksSaved = document.content === document.diskText;
                 document.diskText = text;
                 document.encoding = encoding;
+                if (looksSaved) this.fireChange(document);
                 this.warnChangedOnDisk(document);
                 return false;
             }

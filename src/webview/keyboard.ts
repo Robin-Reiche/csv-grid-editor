@@ -86,8 +86,11 @@ function onSaveKey(e: KeyboardEvent): void {
 // The key after the chord's start is VS Code's. It types nothing and nothing
 // in the grid acts on it (state.chordKey). It still has to bubble up to the
 // window, where VS Code's webview host picks it up to finish the chord, so
-// it is never stopped.
-let chordStarted = false;
+// it is never stopped. VS Code gives a chord up after five seconds and so
+// does the page. Waiting on, it swallowed the next key typed however late.
+// The time the chord started, null with none pending.
+let chordStartedAt: number | null = null;
+const CHORD_TIMEOUT_MS = 5000;
 
 function isChordStartKey(e: KeyLike & { keyCode: number }): boolean {
     const mac = navigator.userAgent.includes('Macintosh');
@@ -98,11 +101,12 @@ function isChordStartKey(e: KeyLike & { keyCode: number }): boolean {
 function onChordKey(e: KeyboardEvent): void {
     // Ctrl and the other modifiers go down on their own between the keys.
     if (e.key === 'Control' || e.key === 'Shift' || e.key === 'Alt' || e.key === 'Meta' || e.key === 'AltGraph') return;
-    if (!chordStarted) {
-        chordStarted = isChordStartKey(e);
+    const started = chordStartedAt;
+    chordStartedAt = null;
+    if (started === null || e.timeStamp - started > CHORD_TIMEOUT_MS) {
+        if (isChordStartKey(e)) chordStartedAt = e.timeStamp;
         return;
     }
-    chordStarted = false;
     state.chordKey = e;
     e.preventDefault();
     // AG Grid closes an open cell on Escape from a listener of its own. The
@@ -168,7 +172,7 @@ export function setupKeyboard(): void {
     // key handler in the page.
     window.addEventListener('keydown', onChordKey, true /* capture */);
     // VS Code gives the chord up when the focus goes elsewhere.
-    window.addEventListener('blur', () => { chordStarted = false; });
+    window.addEventListener('blur', () => { chordStartedAt = null; });
     document.addEventListener('keydown', onGridShortcut, true /* capture */);
     document.addEventListener('keydown', onSaveKey, true /* capture */);
     // A click on another editor, a view or the menu takes the focus out of

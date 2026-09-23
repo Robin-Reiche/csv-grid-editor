@@ -319,4 +319,84 @@ runSuite('keyboard (browser)', [
                 + (t.editor() && JSON.stringify(t.editor().value)) + ')');
         `),
     },
+    {
+        // VS Code gives a pending Ctrl+K up after five seconds. The page
+        // went on waiting, so the next key typed was lost however late.
+        name: 'the key after Ctrl+K types again once VS Code gave the chord up',
+        csv: 'name,city\nAnna,Berlin\nBen,Oslo\n',
+        steps: steps(`
+            const ta = await t.type(0, 1, 'TYPED');
+            if (!ta) return;
+            await t.press('k', { ctrlKey: true });
+            await t.wait(4500);
+            t.check((await t.press('s')).defaultPrevented, 'a key 4.5 s after Ctrl+K is still left to VS Code');
+            await t.press('k', { ctrlKey: true });
+            await t.wait(5500);
+            const x = await t.press('x');
+            t.check(!x.defaultPrevented, 'a key 5.5 s after Ctrl+K types');
+            t.check(!(await t.press('y')).defaultPrevented, 'the key after that types too');
+            t.check(t.editor() === ta, 'the editor stays open');
+        `),
+    },
+    {
+        // Ctrl+K Enter is VS Code's Keep Editor. The key after Ctrl+K still
+        // acted in the boxes and menus of the page: Enter renamed the column,
+        // Escape closed Find.
+        name: 'the key after Ctrl+K is left to VS Code in the boxes and menus',
+        csv: 'name,city\nAnna,Berlin\nBen,Oslo\n',
+        steps: steps(`
+            const shown = id => !document.getElementById(id).classList.contains('hidden');
+            const click = el => { el.dispatchEvent(new MouseEvent('click', { bubbles: true })); return t.wait(200); };
+            const chord = async (el, key, extra) => { await t.press('k', { ctrlKey: true }, el); return t.press(key, extra, el); };
+
+            await t.rightClick(t.header(1));
+            await click(document.getElementById('col-ctx-rename'));
+            const rename = document.getElementById('rename-input');
+            rename.value = 'Town';
+            await chord(rename, 'Enter');
+            await chord(rename, 'Escape');
+            t.check(shown('rename-popover'), 'Ctrl+K Enter and Ctrl+K Escape leave the rename box open');
+            t.check(t.sent('edit').length === 0, 'the column is not renamed (' + JSON.stringify(t.sent('edit')) + ')');
+            await click(document.getElementById('rename-cancel'));
+
+            await click(document.getElementById('btn-find-replace'));
+            const find = document.getElementById('find-input');
+            find.value = 'e';
+            find.dispatchEvent(new Event('input', { bubbles: true }));
+            await t.wait(500);
+            const count = document.getElementById('find-count').textContent;
+            await chord(find, 'Enter');
+            t.check(document.getElementById('find-count').textContent === count,
+                'Ctrl+K Enter stays on the match (' + count + ', then ' + document.getElementById('find-count').textContent + ')');
+            await chord(find, 'Escape');
+            t.check(shown('find-bar'), 'Ctrl+K Escape leaves Find open');
+            await chord(document.getElementById('replace-input'), 'Escape');
+            t.check(shown('find-bar'), 'Ctrl+K Escape in the replace box leaves Find open');
+            await click(document.getElementById('find-close'));
+
+            await chord(document.body, 'g', { ctrlKey: true });
+            t.check(!shown('goto-popover'), 'Ctrl+K Ctrl+G opens no Go to row');
+            await click(document.getElementById('btn-go-to-row'));
+            const go = document.getElementById('goto-input');
+            go.value = '2';
+            await chord(go, 'Enter');
+            await chord(go, 'Escape');
+            t.check(shown('goto-popover'), 'Ctrl+K Enter and Ctrl+K Escape leave Go to row open');
+            await click(document.getElementById('goto-cancel'));
+
+            await t.rightClick(t.header(0));
+            await chord(document.body, 'Escape');
+            t.check(shown('col-context-menu'), 'Ctrl+K Escape leaves the column menu open');
+            await t.press('Escape', {}, document.body);
+            t.check(!shown('col-context-menu'), 'Escape on its own still closes it');
+
+            await click(document.getElementById('btn-profile'));
+            const search = document.querySelector('.profile-ov-search');
+            if (!search) { t.check(false, 'the column profile has its filter box'); return; }
+            search.value = 'ci';
+            search.dispatchEvent(new Event('input', { bubbles: true }));
+            await chord(search, 'Escape');
+            t.check(search.value === 'ci', 'Ctrl+K Escape keeps the column profile filter (' + JSON.stringify(search.value) + ')');
+        `),
+    },
 ]);

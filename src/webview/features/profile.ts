@@ -391,7 +391,7 @@ export function makeOverviewTable(profiles: ColProfile[]): HTMLElement {
         applyProfileFilter();
     });
     search.addEventListener('keydown', e => {
-        if (e.key === 'Escape' && search.value !== '') {
+        if (e.key === 'Escape' && search.value !== '' && e !== state.chordKey) {
             search.value   = '';
             profileFilter  = '';
             applyProfileFilter();

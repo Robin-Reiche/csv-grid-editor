@@ -85,6 +85,8 @@ export function setupRenameColumn(): void {
 
     const input = document.getElementById('rename-input') as HTMLInputElement | null;
     input?.addEventListener('keydown', (e: KeyboardEvent) => {
+        // The key that finishes a VS Code key chord is VS Code's (keyboard.ts).
+        if (e === state.chordKey) return;
         if (e.key === 'Enter')  { e.preventDefault(); commitRename(); }
         if (e.key === 'Escape') { e.preventDefault(); closeRenamePopover(); }
     });
