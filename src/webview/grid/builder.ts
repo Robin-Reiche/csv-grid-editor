@@ -161,8 +161,14 @@ export function commitOpenEditor(): void {
     const api = state.gridApi;
     const cell = api?.getEditingCells()[0];
     if (!cell) return;
-    api.stopEditing();
+    // Looked up before the commit, while the display position still names
+    // the row being typed in, in case a commit ever moves the rows.
     const node = cell.rowPinned ? api.getPinnedTopRow(cell.rowIndex) : api.getDisplayedRowAtIndex(cell.rowIndex);
+    api.stopEditing();
+    // Enter hands the keyboard back to the cell. stopEditing() does not, so
+    // the focus fell to the page and the arrow keys and typing went nowhere
+    // until the next click.
+    api.setFocusedCell(cell.rowIndex, cell.column, cell.rowPinned);
     const colId = cell.column.getColId();
     if (node?.data) writeCellValue(node, colId, node.data[colId]);
 }

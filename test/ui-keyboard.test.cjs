@@ -37,6 +37,14 @@ const HELPERS = `
         el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 5, clientY: r.top + 5 }));
         await t.wait(200);
     };
+    // Where the keyboard is: the cell that has the browser focus as
+    // row/column. Anything else gives its tag. A frozen row's number
+    // starts with t-.
+    t.onCell = () => {
+        const a = document.activeElement;
+        const cell = a && a.closest && a.closest('#grid-container .ag-cell');
+        return cell ? cell.closest('.ag-row').getAttribute('row-index') + '/' + cell.getAttribute('col-id') : String(a && a.tagName);
+    };
     t.type = async (row, col, value) => {
         await t.focusCell(row, col);
         await t.pressEnter();
@@ -135,6 +143,11 @@ runSuite('keyboard (browser)', [
             t.check(!document.querySelector('#grid-container textarea'), 'the editor is closed');
             t.check(t.sent('edit').length === 1, 'the value is written once (' + t.sent('edit').length + ')');
             t.check(t.cell(0, 1).textContent === 'TYPED', 'the cell shows it');
+            // The keys stay with the grid, the way they do after Enter.
+            t.check(t.onCell() === '0/col_1', 'the keyboard is back on the cell (' + t.onCell() + ')');
+            document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+            await t.wait(250);
+            t.check(t.onCell() === '1/col_1', 'and the arrow keys move from there (' + t.onCell() + ')');
             document.getElementById('btn-undo').dispatchEvent(new MouseEvent('click', { bubbles: true }));
             await t.wait(300);
             t.check(t.lastEdit() === csv, 'one undo takes it back (' + JSON.stringify(t.lastEdit()) + ')');
@@ -156,6 +169,7 @@ runSuite('keyboard (browser)', [
             await t.wait(400);
             t.check(!document.querySelector('#grid-container textarea'), 'the editor is closed');
             t.check(t.sent('edit').length === 0, 'nothing is written (' + JSON.stringify(t.lastEdit()) + ')');
+            t.check(t.onCell() === '0/col_1', 'the keyboard is back on the cell (' + t.onCell() + ')');
             t.check(document.getElementById('btn-undo').disabled, 'and nothing is there to undo');
         `),
     },
@@ -182,6 +196,8 @@ runSuite('keyboard (browser)', [
             ta.dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', keyCode: 83, ctrlKey: true, bubbles: true, cancelable: true }));
             t.check(t.lastEdit() === 'name,city\\nAnna,Berlin\\nBen,Rome\\n', 'the frozen row gets the value ('
                 + JSON.stringify(t.lastEdit()) + ')');
+            await t.wait(250);
+            t.check(t.onCell() === 't-0/col_1', 'the keyboard is back on the frozen cell (' + t.onCell() + ')');
         `),
     },
 ]);
