@@ -2,6 +2,7 @@ import { state } from './state';
 import { parseCsv, detectLineFormat } from './utils/csv';
 import { applyZoom } from './features/zoom';
 import { buildGrid, flushOpenEditor } from './grid/builder';
+import { setShared } from './grid/multiline-cell-editor';
 import { refreshGrid } from './grid/refresh';
 import { hideLoader } from './utils/loader';
 import { updateDelimiterBadge } from './features/delimiter';
@@ -82,6 +83,10 @@ export function setupMessaging(): void {
         const msg = event.data;
         if (msg.type === 'init') {
             initWithData(msg.text, msg.delimiter, msg.firstRowIsHeader !== false);
+            setShared(msg.shared === true);
+        } else if (msg.type === 'shared') {
+            // Whether another editor shows the file (multiline-cell-editor.ts).
+            setShared(msg.value === true);
         } else if (msg.type === 'update') {
             // External file change → re-parse. Re-anchor frozen rows by position so
             // they survive the reload (best effort: positions past the new row count
@@ -114,4 +119,13 @@ export function setupMessaging(): void {
             }, 0);
         }
     });
+
+    // Whether this page has the keyboard. Overwrite and Reload from Disk run
+    // File > Save or File > Revert File, which act on the editor in front of
+    // the window that has the focus. With a floating window VS Code cannot
+    // tell the extension which one that is, so it waits for this page to
+    // have the keyboard (toFront in csvEditorProvider.ts).
+    window.addEventListener('focus', () => vscodeApi.postMessage({ type: 'focus', value: true }));
+    window.addEventListener('blur', () => vscodeApi.postMessage({ type: 'focus', value: false }));
+    vscodeApi.postMessage({ type: 'focus', value: document.hasFocus() });
 }

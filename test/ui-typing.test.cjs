@@ -42,7 +42,9 @@ const HELPERS = `
         return f[f.length - 1];
     };
     t.ended = () => t.sent('typingEnded');
-    t.order = () => window.__sent.map(m => m.type).filter(ty => ty !== 'ready').join(',');
+    // The typing messages in the order sent. The page also says when it has
+    // the keyboard, which has nothing to do with them.
+    t.order = () => window.__sent.map(m => m.type).filter(ty => ty !== 'ready' && ty !== 'focus').join(',');
     t.sortBy = async (col) => {
         t.header(col).querySelector('.ag-header-cell-label').dispatchEvent(new MouseEvent('click', { bubbles: true }));
         await t.wait(400);
@@ -276,6 +278,130 @@ runSuite('typing (browser)', [
             t.check(!!f && f.text === 'Anna,Berlin\\nBen,X\\n', 'the file gets the value and no letters ('
                 + JSON.stringify(f) + ')');
         }`,
+    },
+    // A Source Control diff closes without asking while the file's grid tab
+    // is open. Neither Ctrl+W nor the close button takes the focus out of
+    // the page. The value typed in the diff was lost. While another editor
+    // shows the file, the grid sends the extension the file with the value
+    // in it, which the extension hands to the other editor when this one
+    // closes.
+    {
+        name: 'a lone editor does not write out the file while a value is typed',
+        csv: 'name,city\nAnna,Berlin\nBen,Oslo\n',
+        steps: steps(`
+            const ta = await t.open(0, 1);
+            if (!ta) return;
+            t.input(ta, 'TYPED');
+            await t.wait(1000);
+            t.check(t.sent('typedText').length === 0, 'the file was sent for nobody (' + t.sent('typedText').length + ')');
+        `),
+    },
+    {
+        name: 'with another editor on the file the value is sent once the typing pauses',
+        csv: 'name,city\nAnna,Berlin\nBen,Oslo\n',
+        steps: steps(`
+            window.postMessage({ type: 'shared', value: true }, '*');
+            await t.wait(50);
+            const ta = await t.open(0, 1);
+            if (!ta) return;
+            t.input(ta, 'T');
+            await t.wait(100);
+            t.input(ta, 'TY');
+            await t.wait(100);
+            t.check(t.sent('typedText').length === 0, 'the file was written out with every key ('
+                + t.sent('typedText').length + ')');
+            await t.wait(500);
+            const sent = t.sent('typedText');
+            t.check(sent.length === 1 && sent[0].text === 'name,city\\nAnna,TY\\nBen,Oslo\\n', 'the file with the value is sent once ('
+                + JSON.stringify(sent) + ')');
+            t.check(t.editor() === ta && document.activeElement === ta, 'the editor stays open and keeps the keyboard');
+            t.check(t.sent('edit').length === 0, 'nothing is written into the grid');
+            t.check(t.cell(0, 1).textContent === 'Berlin', 'the cell under the editor is unchanged');
+        `),
+    },
+    {
+        name: 'a key with Ctrl sends the value at once',
+        csv: 'name,city\nAnna,Berlin\nBen,Oslo\n',
+        steps: `async (t, csv) => { ${HELPERS}
+            window.postMessage({ type: 'init', text: csv, delimiter: ',', shared: true }, '*');
+            await t.wait(900);
+            const ta = await t.open(0, 1);
+            if (!ta) return;
+            t.input(ta, 'X');
+            // Ctrl+W closes the diff right away, before any pause.
+            ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'w', code: 'KeyW', keyCode: 87, ctrlKey: true, bubbles: true, cancelable: true }));
+            const sent = t.sent('typedText');
+            t.check(sent.length === 1 && sent[0].text === 'name,city\\nAnna,X\\nBen,Oslo\\n', 'the value is sent before the key reaches VS Code ('
+                + JSON.stringify(sent) + ')');
+            await t.wait(600);
+            t.check(t.sent('typedText').length === 1, 'and not again after the pause (' + t.sent('typedText').length + ')');
+        }`,
+    },
+    {
+        name: 'a value typed back to the cell\'s own is sent without a text',
+        csv: 'name,city\nAnna,Berlin\nBen,Oslo\n',
+        steps: steps(`
+            window.postMessage({ type: 'shared', value: true }, '*');
+            await t.wait(50);
+            const ta = await t.open(0, 1);
+            if (!ta) return;
+            t.input(ta, 'X');
+            await t.wait(500);
+            t.input(ta, 'Berlin');
+            await t.wait(500);
+            const sent = t.sent('typedText');
+            t.check(sent.length === 2 && 'text' in sent[0] && !('text' in sent[1]), 'the second report has no text ('
+                + JSON.stringify(sent) + ')');
+        `),
+    },
+    {
+        name: 'nothing is sent once the cell is closed',
+        csv: 'name,city\nAnna,Berlin\nBen,Oslo\n',
+        steps: steps(`
+            window.postMessage({ type: 'shared', value: true }, '*');
+            await t.wait(50);
+            const ta = await t.open(0, 1);
+            if (!ta) return;
+            t.input(ta, 'X');
+            await t.key(ta, 'Escape');
+            await t.wait(500);
+            t.check(t.sent('typedText').length === 0, 'a value given up was sent (' + JSON.stringify(t.sent('typedText')) + ')');
+            window.postMessage({ type: 'shared', value: false }, '*');
+            const tb = await t.open(1, 1);
+            if (!tb) return;
+            t.input(tb, 'Y');
+            await t.wait(500);
+            t.check(t.sent('typedText').length === 0, 'the file was sent after the other editor closed');
+        `),
+    },
+    {
+        name: 'an editor told of another editor while a value is typed sends it',
+        csv: 'name,city\nAnna,Berlin\nBen,Oslo\n',
+        steps: steps(`
+            const ta = await t.open(0, 1);
+            if (!ta) return;
+            t.input(ta, 'X');
+            window.postMessage({ type: 'shared', value: true }, '*');
+            await t.wait(500);
+            const sent = t.sent('typedText');
+            t.check(sent.length === 1 && sent[0].text === 'name,city\\nAnna,X\\nBen,Oslo\\n', 'the value was not sent ('
+                + JSON.stringify(sent) + ')');
+        `),
+    },
+    {
+        name: 'a save that takes the value leaves nothing to send',
+        csv: 'name,city\nAnna,Berlin\nBen,Oslo\n',
+        steps: steps(`
+            window.postMessage({ type: 'shared', value: true }, '*');
+            await t.wait(50);
+            const ta = await t.open(0, 1);
+            if (!ta) return;
+            t.input(ta, 'X');
+            await t.flush();
+            await t.wait(500);
+            t.check(t.sent('typedText').length === 0, 'the value the save took was sent again ('
+                + JSON.stringify(t.sent('typedText')) + ')');
+        `),
     },
     {
         name: 'an outside change that rebuilds the grid ends the report',

@@ -399,4 +399,19 @@ runSuite('keyboard (browser)', [
             t.check(search.value === 'ci', 'Ctrl+K Escape keeps the column profile filter (' + JSON.stringify(search.value) + ')');
         `),
     },
+    {
+        // Overwrite and Reload from Disk run File > Save or File > Revert
+        // File, which act on the editor in front of the window that has the
+        // focus. The extension runs them only once this page has the
+        // keyboard. With a floating window VS Code cannot tell it.
+        name: 'the page tells the extension whether it has the keyboard',
+        csv: 'name,city\nAnna,Berlin\n',
+        steps: steps(`
+            const told = () => t.sent('focus').map(m => m.value);
+            t.check(told().length === 1 && typeof told()[0] === 'boolean', 'the page tells it on load (' + JSON.stringify(told()) + ')');
+            window.dispatchEvent(new FocusEvent('blur'));
+            window.dispatchEvent(new FocusEvent('focus'));
+            t.check(JSON.stringify(told().slice(1)) === '[false,true]', 'and whenever it changes (' + JSON.stringify(told()) + ')');
+        `),
+    },
 ]);

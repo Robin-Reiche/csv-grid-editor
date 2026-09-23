@@ -163,9 +163,11 @@ const vscodeStub = {
             });
         },
         setStatusBarMessage() {},
+        showErrorMessage: msg => { errors.push(msg); return Promise.resolve(undefined); },
     },
     commands: {},
     Disposable: { from() {} },
+    CancellationTokenSource: class { constructor() { this.token = { isCancellationRequested: false }; } },
 };
 
 // VS Code's tabs, as far as the provider looks at them: one editor group with
@@ -174,37 +176,98 @@ const vscodeStub = {
 // mark off again.
 class TabInputCustom { constructor(uri, viewType) { this.uri = uri; this.viewType = viewType; } }
 const group = { tabs: [], activeTab: null, viewColumn: 1, isActive: true };
+// The group of a floating window (Move Editor into New Window). VS Code
+// never makes it the extension's active tab group, not even while that
+// window has the focus.
+const floating = { tabs: [], activeTab: null, viewColumn: 2, isActive: false };
+// The group of the window that has the focus. File > Save and File > Revert
+// File act on its active tab. A tab brought to the front in another window
+// gets the focus a moment later (focusDelay).
+let focusedGroup = group;
+let focusDelay = 0;
+// Every editor panel, see attach. The panel of the focused group's active
+// tab is the active one and its page has the keyboard.
+const panels = [];
+function settleFocus() {
+    const front = focusedGroup.activeTab;
+    for (const panel of panels) {
+        const active = !!front && front.panel === panel;
+        if (panel.active !== active) {
+            panel.active = active;
+            for (const f of panel.viewStateListeners) f({ webviewPanel: panel });
+        }
+        if (panel.hasKeyboard !== active) {
+            panel.hasKeyboard = active;
+            panel.receive({ type: 'focus', value: active });
+        }
+    }
+}
+function focus(g) {
+    const move = () => { focusedGroup = g; settleFocus(); };
+    if (focusDelay) setTimeout(move, focusDelay);
+    else move();
+}
+// The command palette or a notification takes the keyboard from the page.
+function blurPages() {
+    for (const panel of panels) {
+        if (!panel.hasKeyboard) continue;
+        panel.hasKeyboard = false;
+        panel.receive({ type: 'focus', value: false });
+    }
+}
+// A click on a notification in the main window: that window takes the
+// focus, but VS Code keeps the editor it had for the active one.
+function clickMainWindow() {
+    focusedGroup = group;
+    blurPages();
+}
+const allTabs = () => [...group.tabs, ...floating.tabs];
 vscodeStub.TabInputCustom = TabInputCustom;
 vscodeStub.window.tabGroups = {
-    all: [group], activeTabGroup: group,
+    all: [group, floating], activeTabGroup: group,
     close: async tab => {
-        group.tabs.splice(group.tabs.indexOf(tab), 1);
-        if (group.activeTab === tab) group.activeTab = group.tabs[group.tabs.length - 1] || null;
+        const g = tab.group;
+        g.tabs.splice(g.tabs.indexOf(tab), 1);
+        if (g.activeTab === tab) g.activeTab = g.tabs[g.tabs.length - 1] || null;
+        settleFocus();
         return true;
     },
 };
 // Lets a test pretend VS Code could not bring a tab to the front.
 let openWithFails = false;
+// How many times bringing a tab to the front moves only the focus to its
+// window, which VS Code does for a tab in a floating window at times.
+let windowOnly = 0;
 vscodeStub.commands.executeCommand = async (id, ...args) => {
     if (id === 'vscode.openWith') {
-        const [uri, viewType] = args;
-        let tab = group.tabs.find(t => t.input && t.input.uri.toString() === uri.toString() && t.input.viewType === viewType);
+        const [uri, viewType, options] = args;
+        let tab = allTabs().find(t => t.input && t.input.uri.toString() === uri.toString() && t.input.viewType === viewType);
         // A document that only a Source Control diff shows opens in a tab of
         // its own. The two tabs share the document, so its unsaved mark, its
         // revert and its save.
-        const diff = group.tabs.find(t => !t.input && t.uri.toString() === uri.toString());
+        const diff = allTabs().find(t => !t.input && t.uri && t.uri.toString() === uri.toString());
         if (!tab && diff && !openWithFails) {
+            const into = options && options.viewColumn === floating.viewColumn ? floating : group;
             tab = {
-                input: new TabInputCustom(uri, viewType), group, isActive: true, revert: diff.revert, save: diff.save,
+                input: new TabInputCustom(uri, viewType), group: into, isActive: true, revert: diff.revert, save: diff.save,
+                panel: diff.panel,
                 get isDirty() { return diff.isDirty; }, set isDirty(v) { diff.isDirty = v; },
             };
-            group.tabs.push(tab);
+            into.tabs.push(tab);
         }
-        if (tab && !openWithFails) group.activeTab = tab;
+        if (tab && !openWithFails) {
+            tab.group.activeTab = tab;
+            if (windowOnly > 0) {
+                windowOnly--;
+                focusedGroup = tab.group;
+            } else {
+                focus(tab.group);
+            }
+        }
     } else if (id === 'workbench.action.files.revert') {
         // File > Revert File reverts the active editor if it has unsaved
         // edits. VS Code drops it for any other.
-        const tab = group.activeTab;
+        const tab = focusedGroup.activeTab;
         if (tab && tab.isDirty) {
             tab.isDirty = false;
             await tab.revert();
@@ -212,7 +275,7 @@ vscodeStub.commands.executeCommand = async (id, ...args) => {
     } else if (id === 'workbench.action.files.save') {
         // File > Save saves the active editor and nothing else. A save that
         // fails is shown as an error, the tab keeps its unsaved mark.
-        const tab = group.activeTab;
+        const tab = focusedGroup.activeTab;
         if (tab && tab.save) {
             try {
                 await tab.save();
@@ -245,8 +308,14 @@ async function test(name, fn) {
     failNextWrite = false;
     duringNextWrite = null;
     openWithFails = false;
+    windowOnly = 0;
     group.tabs.length = 0;
     group.activeTab = null;
+    floating.tabs.length = 0;
+    floating.activeTab = null;
+    focusedGroup = group;
+    focusDelay = 0;
+    panels.length = 0;
     try { await fn(); console.log('  ✓ ' + name); }
     catch (e) { failures++; console.error('  ✗ ' + name + '\n      ' + e.message); }
 }
@@ -273,14 +342,27 @@ async function attach(provider, doc) {
         onDidDispose(f) { disposeListeners.push(f); },
         // In the one editor group, in front.
         visible: true, viewColumn: 1,
+        // Whether it is VS Code's active editor and whether its page has the
+        // keyboard, see settleFocus.
+        active: false, hasKeyboard: false,
+        viewStateListeners: [],
+        onDidChangeViewState(f) {
+            this.viewStateListeners.push(f);
+            return { dispose: () => this.viewStateListeners.splice(this.viewStateListeners.indexOf(f), 1) };
+        },
+        receive: m => onMessage(m),
     };
+    panels.push(panel);
     await provider.resolveCustomEditor(doc, panel, {});
     return {
-        posted,
+        posted, panel,
         ready: () => onMessage({ type: 'ready' }),
         edit: text => onMessage({ type: 'edit', text }),
         updates: () => posted.filter(m => m.type === 'update'),
-        close: () => { for (const f of disposeListeners) f(); },
+        close: () => {
+            panels.splice(panels.indexOf(panel), 1);
+            for (const f of disposeListeners) f();
+        },
         // A cell of this editor holds a value being typed: the grid says so
         // on the first change, hands the value over when a save asks for it
         // (flush) and says when the cell is closed again.
@@ -288,13 +370,21 @@ async function attach(provider, doc) {
         typingEnded: text => onMessage(text === undefined ? { type: 'typingEnded' } : { type: 'typingEnded', text }),
         flushed: text => onMessage(text === undefined ? { type: 'flushed' } : { type: 'flushed', text }),
         flushes: () => posted.filter(m => m.type === 'flush'),
+        // While another editor shows the file, the grid sends the file with
+        // the value being typed in it. Without a text when the value is the
+        // cell's again.
+        typedText: text => onMessage(text === undefined ? { type: 'typedText' } : { type: 'typedText', text }),
+        // What the extension told this editor about other editors of the file.
+        shared: () => posted.filter(m => m.type === 'shared').map(m => m.value),
     };
 }
 
 // Opens a file in the provider and hands back what a test needs to drive it.
-async function open(filePath, openContext = {}, uri = uriFile(filePath)) {
+// A new provider unless the test hands one over, like the one VS Code keeps
+// for all files.
+async function open(filePath, openContext = {}, uri = uriFile(filePath), provider = undefined) {
     const context = { extensionUri: uriFile('/ext'), globalState: { get: (_k, d) => d, update() {} } };
-    const provider = new CsvEditorProvider(context);
+    provider = provider || new CsvEditorProvider(context);
     const doc = await provider.openCustomDocument(uri, openContext, {});
     // VS Code shows a document restored from a backup as unsaved.
     const tab = {
@@ -341,6 +431,10 @@ async function open(filePath, openContext = {}, uri = uriFile(filePath)) {
         return result;
     };
     const editor = await watched(() => attach(provider, doc));
+    // The new tab is the active editor and has the keyboard.
+    tab.panel = editor.panel;
+    focusedGroup = group;
+    settleFocus();
     return {
         ...editor, provider, doc, uri, tab, watchers: own,
         // How many times the document was reported changed.
@@ -369,6 +463,9 @@ async function open(filePath, openContext = {}, uri = uriFile(filePath)) {
 }
 
 const tick = () => new Promise(r => setTimeout(r, 20));
+// Long enough for the provider to give up on a grid that does not come to
+// the front (FRONT_TIMEOUT_MS in csvEditorProvider.ts).
+const gaveUp = () => new Promise(r => setTimeout(r, 2000));
 // The warnings still on screen, the ones a user can click.
 const onScreen = () => warnings.filter(w => w.open);
 
@@ -781,7 +878,7 @@ async function main() {
         await t.fireWatcher();
         openWithFails = true;
         warnings[0].pick('Reload from Disk');
-        await tick();
+        await gaveUp();
         assert.strictEqual(front.doc.content, 'x\nFRONT UNSAVED\n', 'the tab in front lost its unsaved edits');
         assert.strictEqual(front.tab.isDirty, true);
         assert.strictEqual(t.doc.content, 'h\ntheirs\n', 'the action did not load the disk');
@@ -963,6 +1060,237 @@ async function main() {
         await tick();
         assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\nmine\n', 'Overwrite did not write');
         assert.strictEqual(t.tab.isDirty, false);
+    });
+
+    // Move Editor into New Window puts a tab into a floating window, which
+    // takes the focus. File > Save and File > Revert File act on the editor
+    // in front of the window that has the focus. VS Code moves the focus to
+    // the window of a tab brought to the front a moment later. It keeps the
+    // extension's active tab group on the main window's group throughout.
+    const toFloating = tab => {
+        tab.group.tabs.splice(tab.group.tabs.indexOf(tab), 1);
+        if (tab.group.activeTab === tab) tab.group.activeTab = tab.group.tabs[tab.group.tabs.length - 1] || null;
+        floating.tabs.push(tab);
+        floating.activeTab = tab;
+        tab.group = floating;
+        if (tab.panel) tab.panel.viewColumn = floating.viewColumn;
+        focusedGroup = floating;
+        settleFocus();
+    };
+    // A text file with unsaved edits in front of group `g`, which has the focus.
+    const notesIn = g => {
+        const notes = {
+            input: { uri: uriFile(path.join(tmpDir, 'notes.txt')) }, group: g, isDirty: true, text: 'UNSAVED NOTES',
+            revert: async () => { notes.text = 'saved notes'; },
+            save: async () => { notes.saved = notes.text; notes.isDirty = false; },
+        };
+        g.tabs.push(notes);
+        g.activeTab = notes;
+        focusedGroup = g;
+        settleFocus();
+        return notes;
+    };
+    const untouched = notes => {
+        assert.strictEqual(notes.text, 'UNSAVED NOTES', 'the text file in front lost its unsaved edits');
+        assert.strictEqual(notes.isDirty, true, 'the text file is no longer marked unsaved');
+        assert.strictEqual(notes.saved, undefined, 'the text file was saved');
+    };
+
+    // The command palette of the floating window ran Reload from Disk. The
+    // active tab group named the grid in the main window, so the command
+    // brought that grid to the front and ran File > Revert File at once. The
+    // floating window still had the focus: its text file lost its unsaved
+    // edits and the grid kept the change on disk waiting.
+    await test('the Reload from Disk command reverts no editor of a floating window that has the focus', async () => {
+        const p = file('float-command.csv', 'h\n1\n');
+        const t = await open(p);
+        await t.edit('h\nmine\n');
+        const notes = notesIn(group);
+        toFloating(notes);
+        fs.writeFileSync(p, 'h\ntheirs\n');
+        await t.fireWatcher();
+        focusDelay = 50;
+        await t.provider.reloadActiveFromDisk();
+        await gaveUp();
+        untouched(notes);
+        assert.ok(warnings.some(w => w.msg === 'Reload from Disk works on an open CSV Grid Editor tab.'),
+            'the command did not say it needs a grid tab');
+        assert.strictEqual(t.doc.content, 'h\nmine\n', 'the grid nobody looked at was reloaded');
+    });
+
+    await test('the Reload from Disk command reloads the grid of the floating window that has the focus', async () => {
+        const a = await open(file('float-command-a.csv', 'h\n1\n'));
+        await a.edit('h\nA MINE\n');
+        const p = file('float-command-b.csv', 'h\n1\n');
+        const b = await open(p, {}, uriFile(p), a.provider);
+        await b.edit('h\nB MINE\n');
+        toFloating(b.tab);
+        group.activeTab = a.tab;
+        fs.writeFileSync(p, 'h\nB THEIRS\n');
+        await b.fireWatcher();
+        focusDelay = 50;
+        blurPages();                                    // the command palette takes the keyboard
+        await b.provider.reloadActiveFromDisk();
+        await gaveUp();
+        assert.strictEqual(a.doc.content, 'h\nA MINE\n', 'the grid in the main window lost its unsaved edits');
+        assert.strictEqual(a.tab.isDirty, true);
+        assert.strictEqual(b.doc.content, 'h\nB THEIRS\n', 'the grid in front was not reloaded');
+        assert.strictEqual(b.tab.isDirty, false, 'the grid in front is still marked unsaved');
+    });
+
+    // The HEAD side of a Source Control diff whose sides are grids has the
+    // focus. The command reloads the working file, whose grid is in front on
+    // the other side of the diff.
+    await test('the Reload from Disk command reloads the other side of a diff too', async () => {
+        const p = file('float-diff-sides.csv', 'h\n1\n');
+        gitBlobs.set(p, Buffer.from('h\n0\n'));
+        const t = await open(p);
+        const head = await open(p, {}, uriGit(p), t.provider);
+        t.panel.active = false;
+        head.panel.active = true;
+        fs.writeFileSync(p, 'h\nnew\n');
+        await t.provider.reloadActiveFromDisk();
+        await tick();
+        assert.deepStrictEqual(warnings.map(w => w.msg), [], 'the command refused the diff');
+        assert.strictEqual(t.doc.content, 'h\nnew\n', 'the working file was not reloaded');
+    });
+
+    // The grid tab sits in a floating window and the warning in the main
+    // window, whose click gives that window the focus. Overwrite looked for
+    // the grid in the extension's active tab group, did not find it there
+    // and ran nothing. It had already taken the change on disk off the
+    // document: no warning was left and the file kept the other program's
+    // text. Reload from Disk loaded the file but left the tab marked unsaved.
+    await test('Overwrite saves a grid tab of a floating window', async () => {
+        const p = file('float-overwrite.csv', 'h\n1\n');
+        const t = await open(p);
+        await t.edit('h\nmine\n');
+        toFloating(t.tab);
+        const notes = notesIn(group);
+        fs.writeFileSync(p, 'h\ntheirs\n');
+        await t.fireWatcher();
+        focusDelay = 50;
+        clickMainWindow();
+        warnings[0].pick('Overwrite');
+        await gaveUp();
+        assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\nmine\n', 'Overwrite did not write the edits');
+        assert.strictEqual(t.tab.isDirty, false, 'the tab is still marked unsaved');
+        assert.strictEqual(t.doc.conflict, false);
+        untouched(notes);
+    });
+
+    await test('Overwrite brings a grid tab of a floating window to the front a second time', async () => {
+        const p = file('float-twice.csv', 'h\n1\n');
+        const t = await open(p);
+        await t.edit('h\nmine\n');
+        toFloating(t.tab);
+        const notes = notesIn(group);
+        fs.writeFileSync(p, 'h\ntheirs\n');
+        await t.fireWatcher();
+        clickMainWindow();
+        windowOnly = 1;
+        warnings[0].pick('Overwrite');
+        await gaveUp();
+        assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\nmine\n', 'Overwrite did not write the edits');
+        assert.strictEqual(t.tab.isDirty, false, 'the save did not run on the grid tab');
+        untouched(notes);
+    });
+
+    await test('Reload from Disk takes the unsaved mark off a grid tab of a floating window', async () => {
+        const p = file('float-revert.csv', 'h\n1\n');
+        const t = await open(p);
+        await t.edit('h\nmine\n');
+        toFloating(t.tab);
+        const notes = notesIn(group);
+        fs.writeFileSync(p, 'h\ntheirs\n');
+        await t.fireWatcher();
+        focusDelay = 50;
+        clickMainWindow();
+        warnings[0].pick('Reload from Disk');
+        await gaveUp();
+        assert.strictEqual(t.doc.content, 'h\ntheirs\n', 'the action did not load the disk');
+        assert.strictEqual(t.tab.isDirty, false, 'the tab is still marked unsaved');
+        untouched(notes);
+    });
+
+    // The grid was the active editor in the floating window when the user
+    // clicked the warning in the main window. VS Code keeps such an editor
+    // active, but File > Revert File acts on the window that has the focus
+    // until the grid's window takes it back.
+    await test('Reload from Disk waits for the grid\'s own window to have the focus', async () => {
+        const p = file('float-stale.csv', 'h\n1\n');
+        const t = await open(p);
+        await t.edit('h\nmine\n');
+        const notes = notesIn(group);
+        toFloating(t.tab);
+        assert.strictEqual(t.panel.active, true, 'the test did not reach an active grid');
+        fs.writeFileSync(p, 'h\ntheirs\n');
+        await t.fireWatcher();
+        focusDelay = 50;
+        clickMainWindow();
+        warnings[0].pick('Reload from Disk');
+        await gaveUp();
+        untouched(notes);
+        assert.strictEqual(t.doc.content, 'h\ntheirs\n', 'the action did not load the disk');
+        assert.strictEqual(t.tab.isDirty, false, 'the tab is still marked unsaved');
+    });
+
+    // A grid that does not come to the front runs no command at all. The
+    // change on disk stays taken care of: Overwrite writes the edits itself.
+    // That leaves the tab marked unsaved but never touches another editor.
+    await test('Overwrite writes the edits when the grid does not come to the front', async () => {
+        const p = file('float-stuck.csv', 'h\n1\n');
+        const t = await open(p);
+        await t.edit('h\nmine\n');
+        const notes = notesIn(group);
+        toFloating(t.tab);
+        fs.writeFileSync(p, 'h\ntheirs\n');
+        await t.fireWatcher();
+        clickMainWindow();
+        openWithFails = true;
+        warnings[0].pick('Overwrite');
+        await gaveUp();
+        untouched(notes);
+        assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\nmine\n', 'Overwrite did not write the edits');
+        assert.strictEqual(t.doc.conflict, false);
+        await t.fireWatcher();                          // the echo of that write
+        assert.strictEqual(t.updates().length, 0);
+        assert.strictEqual(onScreen().length, 0, 'the echo was taken for another change');
+    });
+
+    await test('Overwrite that cannot write the file itself says so', async () => {
+        const p = file('float-stuck-locked.csv', 'h\n1\n');
+        const t = await open(p);
+        await t.edit('h\nmine\n');
+        fs.writeFileSync(p, 'h\ntheirs\n');
+        await t.fireWatcher();
+        openWithFails = true;
+        failNextWrite = true;
+        clickMainWindow();
+        warnings[0].pick('Overwrite');
+        await gaveUp();
+        assert.deepStrictEqual(errors, ["Failed to save 'float-stuck-locked.csv': EBUSY: resource busy or locked"]);
+        assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\ntheirs\n');
+        assert.strictEqual(t.tab.isDirty, true);
+    });
+
+    // Ctrl+W on the grid tab and Don't Save: VS Code loads the file into the
+    // document and closes the tab. The warning stays in the notification
+    // list. Overwrite on it wrote that text over a newer change on disk.
+    await test('Overwrite on the warning of a grid tab closed without saving writes nothing', async () => {
+        const p = file('closed-overwrite.csv', 'h\n1\n');
+        const t = await open(p);
+        await t.edit('h\nmine\n');
+        fs.writeFileSync(p, 'h\ntheirs1\n');
+        await t.fireWatcher();
+        await t.provider.revertCustomDocument(t.doc, {});    // Don't Save
+        t.close();
+        await vscodeStub.window.tabGroups.close(t.tab);
+        fs.writeFileSync(p, 'h\ntheirs2\n');                // another program writes again
+        warnings[0].pick('Overwrite');
+        await gaveUp();
+        assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\ntheirs2\n', 'Overwrite wrote over the newer change on disk');
+        assert.deepStrictEqual(errors, []);
     });
 
     await test('Save As onto the file itself after the warning is refused, onto another file it is not', async () => {
@@ -1328,6 +1656,104 @@ async function main() {
         await diff.edit('a\nFROM THE DIFF\n');
         assert.deepStrictEqual(t.updates().map(m => m.text), ['a\nFROM THE DIFF\n'], 'the grid tab missed the edit');
         assert.strictEqual(diff.updates().length, 0, 'the editor that made the edit was sent it back');
+    });
+
+    // Closing a Source Control diff does not ask to save while the file's
+    // grid tab is open. Neither Ctrl+W nor the close button takes the focus
+    // out of the page. A value being typed in the diff never reached the
+    // document. The grid tab kept the old value and still showed the file
+    // unsaved. A save wrote the file without the value. While another editor
+    // shows the file, the grid sends the file with the value in it. The
+    // document takes that when the editor goes.
+    await test('the value being typed in an editor that closes goes to the other editor', async () => {
+        const p = file('typed-close.csv', 'h\n1\n');
+        const t = await open(p);
+        const diff = await t.openSecondEditor();
+        await diff.typing();
+        await diff.typedText('h\nTYPED\n');
+        assert.strictEqual(t.doc.content, 'h\n1\n', 'the document took the value before the editor closed');
+        assert.strictEqual(t.updates().length, 0, 'the other editor was sent the value before the editor closed');
+        diff.close();
+        assert.strictEqual(t.doc.content, 'h\nTYPED\n', 'the value was lost');
+        assert.deepStrictEqual(t.updates().map(m => m.text), ['h\nTYPED\n'], 'the grid tab kept the old value');
+        assert.strictEqual(t.tab.isDirty, true);
+        await t.save();
+        assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\nTYPED\n', 'the save wrote the file without the value');
+    });
+
+    // Writing out the whole file for every pause in the typing costs time on
+    // a large file, so the grid does it only while another editor shows it.
+    await test('an editor is told whether another editor shows the file', async () => {
+        const t = await open(file('typed-shared.csv', 'h\n1\n'));
+        await t.ready();
+        assert.strictEqual(t.posted.find(m => m.type === 'init').shared, false);
+        const diff = await t.openSecondEditor();
+        await diff.ready();
+        assert.strictEqual(diff.posted.find(m => m.type === 'init').shared, true, 'the new editor was not told');
+        assert.deepStrictEqual(t.shared(), [true], 'the first editor was not told');
+        diff.close();
+        assert.deepStrictEqual(t.shared(), [true, false], 'the editor left alone was not told');
+    });
+
+    await test('a value given up with Escape is not handed over when the editor closes', async () => {
+        const t = await open(file('typed-escape.csv', 'h\n1\n'));
+        const diff = await t.openSecondEditor();
+        await diff.typing();
+        await diff.typedText('h\nTYPED\n');
+        await diff.typingEnded();
+        diff.close();
+        assert.strictEqual(t.doc.content, 'h\n1\n');
+        assert.strictEqual(t.updates().length, 0);
+    });
+
+    await test('a value typed back to the cell\'s own is not handed over', async () => {
+        const t = await open(file('typed-back.csv', 'h\n1\n'));
+        const diff = await t.openSecondEditor();
+        await diff.typing();
+        await diff.typedText('h\nTYPED\n');
+        await diff.typedText();
+        diff.close();
+        assert.strictEqual(t.doc.content, 'h\n1\n');
+        assert.strictEqual(t.updates().length, 0);
+    });
+
+    // Don't Save on the question VS Code asks when a tab closes reverts the
+    // document. The value being typed goes with it.
+    await test('a revert drops the value being typed', async () => {
+        const t = await open(file('typed-revert.csv', 'h\n1\n'));
+        const diff = await t.openSecondEditor();
+        await diff.typing();
+        await diff.typedText('h\nTYPED\n');
+        await t.provider.revertCustomDocument(t.doc, {});
+        diff.close();
+        assert.strictEqual(t.doc.content, 'h\n1\n', 'the value came back after the revert');
+    });
+
+    // A new text closes the cell open in an editor (readText in messaging.ts).
+    // The value typed there would undo the edit that brought the text.
+    await test('an edit in the other editor drops the value being typed', async () => {
+        const t = await open(file('typed-other-edit.csv', 'h\n1\n'));
+        const diff = await t.openSecondEditor();
+        await diff.typing();
+        await diff.typedText('h\nTYPED\n');
+        await t.edit('h\nOTHER\n');
+        diff.close();
+        assert.strictEqual(t.doc.content, 'h\nOTHER\n', 'the value undid the edit of the other editor');
+    });
+
+    await test('a value a save took is not taken back when the editor closes', async () => {
+        const p = file('typed-saved.csv', 'h\n1\n');
+        const t = await open(p);
+        const diff = await t.openSecondEditor();
+        await diff.typing();
+        await diff.typedText('h\nTYP\n');
+        const saving = t.save();
+        await tick();
+        await diff.flushed('h\nTYPED\n');
+        await saving;
+        diff.close();
+        assert.strictEqual(t.doc.content, 'h\nTYPED\n', 'an older value came back');
+        assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\nTYPED\n');
     });
 
     // A value being typed into a cell reached the extension only when the cell
