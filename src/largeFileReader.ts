@@ -1,8 +1,9 @@
 import * as fs from 'fs';
-import { decodeWindows1252, startsAsUtf8 } from './encoding';
+import { decodeUtf8KeepingStrays, decodeWindows1252, startsAsUtf8 } from './encoding';
 
-// The encodings a preview reads, see readPreviewEncoding.
-export type PreviewEncoding = 'utf8' | 'windows1252';
+// The encodings a preview reads, see readPreviewEncoding. utf8bom is UTF-8
+// behind a byte order mark, whose stray bytes read as Windows-1252.
+export type PreviewEncoding = 'utf8' | 'utf8bom' | 'windows1252';
 
 export interface RowPageIndex {
     offsets: number[];   // byte offset of the first byte of each page's first data record
@@ -30,18 +31,22 @@ function bomLength(buf: Buffer): number {
 // file can hold the mark.
 function decode(buf: Buffer, start: number, encoding: PreviewEncoding): string {
     if (encoding === 'windows1252') return decodeWindows1252(buf);
-    return buf.toString('utf8', start === 0 ? bomLength(buf) : 0);
+    const body = start === 0 ? buf.subarray(bomLength(buf)) : buf;
+    return encoding === 'utf8bom' ? decodeUtf8KeepingStrays(body) : body.toString('utf8');
 }
 
 // Open Full File reads a file that is not valid UTF-8 as Windows-1252, the way
 // Excel writes plain "CSV" (see encoding.ts). A preview reads only part of the
 // file, so it goes by the first 64 KB: UTF-8 unless they are not valid UTF-8.
 // A file whose first invalid byte comes later still shows U+FFFD there. A
-// preview cannot be saved, so that costs no data. A UTF-16 file cannot be
-// previewed readably at all: the scanners below look for the line break and
-// the quote as single bytes, which UTF-16 does not have.
+// preview cannot be saved, so that costs no data. A file that starts with the
+// UTF-8 byte order mark is UTF-8 with only its stray bytes read as
+// Windows-1252, the way Open Full File reads it, wherever those bytes are. A
+// UTF-16 file cannot be previewed readably at all: the scanners below look for
+// the line break and the quote as single bytes, which UTF-16 does not have.
 export async function readPreviewEncoding(filePath: string): Promise<PreviewEncoding> {
     const start = await readRange(filePath, 0, 64 * 1024 - 1);
+    if (bomLength(start)) return 'utf8bom';
     return startsAsUtf8(start) ? 'utf8' : 'windows1252';
 }
 

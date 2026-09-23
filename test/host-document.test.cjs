@@ -845,6 +845,51 @@ async function main() {
         assert.strictEqual(fs.readFileSync(p, 'utf8'), 'Name;Stadt\r\nJörg;Köln\r\nAnna;Graz\r\n');
     });
 
+    // A UTF-8 export with a byte order mark that a legacy tool later added a
+    // Windows-1252 line to. It was read whole as Windows-1252: the first
+    // header name started with "ï»¿", every umlaut was mojibake and a save
+    // that needed UTF-8 wrote all of that into the file.
+    const STRAY = Buffer.concat([BOM, Buffer.from('name;city\nMüller;Köln\nSch'), Buffer.from([0xF6]), Buffer.from('n;x\n')]);
+    const STRAY_TEXT = 'name;city\nMüller;Köln\nSchön;x\n';
+
+    await test('a stray byte in a UTF-8 file with a byte order mark leaves the rest UTF-8', async () => {
+        const p = file('stray.csv', STRAY);
+        const t = await open(p);
+        assert.strictEqual(t.doc.content, STRAY_TEXT);
+        await t.edit('name;city\nMüller;Köln\nSch✓n;x\n');
+        await t.save();
+        assert.ok(fs.readFileSync(p).equals(Buffer.concat([BOM, Buffer.from('name;city\nMüller;Köln\nSch✓n;x\n')])), 'saved ' + hex(p));
+        assert.deepStrictEqual(warnings.map(w => w.msg), [], 'a file that was UTF-8 already was reported as turned into UTF-8');
+    });
+
+    await test('a change event on a file with a stray byte that did not change keeps quiet', async () => {
+        const p = file('stray-event.csv', STRAY);
+        const t = await open(p);
+        await t.edit(STRAY_TEXT + 'Eva;Graz\n');
+        await t.fireWatcher();                          // nothing was written
+        await t.fireWatcher();
+        assert.deepStrictEqual(warnings.map(w => w.msg), [], 'the unchanged file was taken for an outside change');
+        assert.strictEqual(t.doc.content, STRAY_TEXT + 'Eva;Graz\n');
+        await t.provider.revertCustomDocument(t.doc, {});
+        assert.strictEqual(await t.provider.reload(t.doc), false, 'Reload from Disk found a change in the unchanged file');
+    });
+
+    for (const mode of ['head', 'tail', 'chunked', 'plaintext']) {
+        await test(`a stray byte in a UTF-8 file with a byte order mark reads the same in ${mode}`, async () => {
+            const rows = Array.from({ length: 1500 }, (_, i) => `${i};Köln ${i}`).join('\n') + '\n';
+            const p = file(`stray-${mode}.csv`, Buffer.concat([STRAY, Buffer.from(rows)]));
+            fakeSize = 60 * 1024 * 1024;
+            quickPickChoice = mode;
+            const t = await open(p);
+            assert.strictEqual(t.doc.isPreview, true, 'the test did not reach the preview');
+            await t.ready();
+            const shown = t.posted.find(m => m.type === 'init').text;
+            assert.ok(shown.startsWith('name;city\n'), 'the preview starts ' + JSON.stringify(shown.slice(0, 20)));
+            assert.ok(shown.includes(';Köln ') && !/Ã|�/.test(shown), 'the umlauts of the UTF-8 rows');
+            if (mode !== 'tail') assert.ok(shown.includes('Müller;Köln\nSchön;x\n'), 'the rows around the stray byte');
+        });
+    }
+
     // A preview reads only part of the file, so it decides the encoding by
     // the start of it. Plain text reads all of it.
     for (const mode of ['head', 'tail', 'chunked', 'plaintext']) {

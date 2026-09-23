@@ -71,6 +71,61 @@ test('Windows-1252 cannot write a character it has no byte for', () => {
     assert.ok(encodeFile('\u20AC \u201Equoted\u201C \u2013 \u0178', 'windows1252'), 'a character Windows-1252 has was refused');
 });
 
+// A UTF-8 export with a byte order mark that a legacy tool later added a
+// Windows-1252 line to. Read whole as Windows-1252, the mark stood in front
+// of the first header name as "ï»¿" and every umlaut was mojibake. The first
+// save that needed UTF-8 wrote all of that into the file.
+test('a stray byte in a UTF-8 file with a byte order mark is read on its own', () => {
+    const utf8 = s => [...Buffer.from(s, 'utf8')];
+    const raw = bytes([0xEF, 0xBB, 0xBF], utf8('name;city\nMüller;Köln\nSch'), [0xF6], utf8('n;x\n'));
+    const { text, encoding } = decodeFile(raw);
+    assert.strictEqual(text, 'name;city\nMüller;Köln\nSchön;x\n');
+    assert.strictEqual(encoding, 'utf8bom');
+    // Written back, only the stray byte changes, into the UTF-8 of its character.
+    const back = Buffer.from(encodeFile(text, encoding));
+    assert.strictEqual(back.toString('hex'),
+        Buffer.from(bytes([0xEF, 0xBB, 0xBF], utf8('name;city\nMüller;Köln\nSchön;x\n'))).toString('hex'));
+});
+
+test('without a byte order mark a file that is not UTF-8 is still Windows-1252', () => {
+    const raw = bytes([...Buffer.from('Müller;', 'utf8')], [0xF6]);
+    assert.deepStrictEqual(decodeFile(raw), { text: 'MÃ¼ller;ö', encoding: 'windows1252' });
+});
+
+test('behind a byte order mark each byte outside a valid UTF-8 sequence is its Windows-1252 character', () => {
+    // Every sequence TextDecoder accepts as one character is read as UTF-8.
+    const valid = (b, i) => {
+        for (let n = 1; n <= 4 && i + n <= b.length; n++) {
+            try {
+                const s = new TextDecoder('utf-8', { fatal: true }).decode(b.subarray(i, i + n));
+                if ([...s].length === 1) return n;
+            } catch {}
+        }
+        return 0;
+    };
+    let seed = 7;
+    const rnd = n => { seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5; return (seed >>> 0) % n; };
+    for (let run = 0; run < 300; run++) {
+        const parts = [];
+        for (let k = 0; k < 40; k++) {
+            const pick = rnd(4);
+            if (pick === 0) parts.push(rnd(256));
+            else if (pick === 1) parts.push(0xC0 + rnd(64), rnd(256));
+            else parts.push(...Buffer.from(String.fromCodePoint(rnd(0x110000)), 'utf8'));
+        }
+        const body = Buffer.from(parts);
+        let want = '';
+        for (let i = 0; i < body.length;) {
+            const n = valid(body, i);
+            want += n ? new TextDecoder().decode(body.subarray(i, i + n)) : decodeWindows1252(body.subarray(i, i + 1));
+            i += n || 1;
+        }
+        const raw = Buffer.concat([Buffer.from([0xEF, 0xBB, 0xBF]), body]);
+        const got = decodeFile(raw).text;
+        assert.strictEqual(got, want, 'bytes ' + body.toString('hex'));
+    }
+});
+
 test('the start of a file counts as UTF-8 when a character is cut at its end', () => {
     const cut = Buffer.from('abc ö').subarray(0, 5);    // the first byte of ö only
     assert.strictEqual(startsAsUtf8(cut), true);

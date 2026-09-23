@@ -621,6 +621,12 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             // this: Reload from Disk is the explicit request for the disk.
             if (fromWatcher && holds(document.diskText)) return false;
             const { text, encoding } = decodeFile(raw, document.encoding);
+            // The same two checks for a file with stray bytes behind a UTF-8
+            // byte order mark (see encoding.ts). A save writes those bytes as
+            // UTF-8, so its bytes never match the file's, but the text read
+            // from it tells whether anything changed.
+            if (encoding === document.encoding
+                && (text === document.content || (fromWatcher && text === document.diskText))) return false;
             // Another program changed the file while the grid holds
             // unsaved edits. Loading it silently replaced those edits and
             // left the tab dirty, so the next save made the loss final.
