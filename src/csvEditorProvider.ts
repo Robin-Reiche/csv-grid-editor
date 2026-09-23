@@ -770,15 +770,18 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         // extension nothing about. So the document is opened in a tab of its
         // own for the revert, which takes the mark off the diff as well. That
         // tab is closed again afterwards, so the editor that was in front
-        // comes back.
+        // comes back. A tab not marked unsaved drops the revert (issue #25),
+        // so the file is then loaded below the way it is for such a tab.
         if (!tab && document.panels.size > 0 && document.content !== document.diskText) {
             await vscode.commands.executeCommand('vscode.openWith', document.uri, CsvEditorProvider.viewType,
                 { viewColumn: vscode.window.tabGroups.activeTabGroup.viewColumn, preserveFocus: false, preview: false });
-            if (isOwnTab(vscode.window.tabGroups.activeTabGroup.activeTab)) {
-                await vscode.commands.executeCommand('workbench.action.files.revert');
+            const front = vscode.window.tabGroups.activeTabGroup.activeTab;
+            if (isOwnTab(front)) {
+                const reverted = front.isDirty;
+                if (reverted) await vscode.commands.executeCommand('workbench.action.files.revert');
                 const opened = ownTab();
                 if (opened && !opened.isDirty) await vscode.window.tabGroups.close(opened);
-                return true;
+                if (reverted) return true;
             }
         }
         if (tab?.isDirty) {

@@ -548,6 +548,19 @@ async function main() {
         assert.deepStrictEqual(group.tabs, [t.tab], 'the tab opened for the revert is still open');
     });
 
+    // File > Revert File does nothing on a tab not marked unsaved. Reload
+    // from Disk went on to report the file loaded and the grid kept the edits.
+    await test('Reload from Disk on a diff not marked unsaved still loads the file', async () => {
+        const t = await diffOnly('diff-only-clean.csv');
+        await t.fireWatcher();
+        t.tab.isDirty = false;
+        warnings[0].pick('Reload from Disk');
+        await tick();
+        assert.strictEqual(t.doc.content, 'h\ntheirs\n', 'the action did not load the disk');
+        assert.deepStrictEqual(t.updates().map(m => m.text), ['h\ntheirs\n']);
+        assert.deepStrictEqual(group.tabs, [t.tab], 'the tab opened for the revert is still open');
+    });
+
     await test('saving after the warning keeps the edits', async () => {
         const p = file('dirty-save.csv', 'h\n1\n');
         const t = await open(p);
