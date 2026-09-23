@@ -23,6 +23,12 @@ const FIND = `
   const count = () => document.getElementById('find-count').textContent;
   const col = (t, c, n) => { const out = []; for (let r = 0; r < n; r++) out.push(t.cell(r, c).textContent); return out.join(','); };
   async function press(t, id) { t.click(document.getElementById(id)); await t.wait(300); }
+  // Presses a key on the focused cell.
+  async function key(t, k, mods) {
+    document.querySelector('#grid-container .ag-cell-focus')
+      .dispatchEvent(new KeyboardEvent('keydown', Object.assign({ key: k, bubbles: true, cancelable: true }, mods)));
+    await t.wait(400);
+  }
   async function freezeRow(t, row) {
     const c = t.cell(row, 0);
     const r = c.getBoundingClientRect();
@@ -648,6 +654,196 @@ runSuite('find and replace (browser)', [
             t.check(count() === '2 / 2' && activeAt() === '1:apple', 'the row of 3 has the active match (' + count() + ', ' + activeAt() + ')');
             await press(t, 'replace-one');
             t.check(t.lastEdit() === 'k,v,w\\n4,x,x\\n3,R,x\\n1,apple,x', 'Replace takes the row of 3 (' + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
+    {
+        // Undo and redo put back a copy of the rows, so the search that runs
+        // again found the active match by its old place in the table. Undoing
+        // a row added above moved the mark to the row below it and Replace
+        // changed that row.
+        name: 'undo of a row added above keeps the active match',
+        csv: 'k,v\nx1,a\nx2,b\nx3,c\nx4,d\n',
+        steps: steps(`
+            await t.init(csv);
+            await t.focusCell(0, 0);
+            await key(t, 'Enter', { ctrlKey: true, shiftKey: true });
+            t.check(t.lastEdit() === 'k,v\\n,\\nx1,a\\nx2,b\\nx3,c\\nx4,d\\n', 'a row is added on top (' + JSON.stringify(t.lastEdit()) + ')');
+            await find(t, 'x', 'Y');
+            await press(t, 'find-next');
+            await press(t, 'find-next');
+            t.check(count() === '3 / 4' && activeAt() === '3:x3', 'Next moved to x3 (' + count() + ', ' + activeAt() + ')');
+            await press(t, 'btn-undo');
+            t.check(count() === '3 / 4' && activeAt() === '2:x3', 'x3 keeps the active match after Undo (' + count() + ', ' + activeAt() + ')');
+            await press(t, 'replace-one');
+            t.check(t.lastEdit() === 'k,v\\nx1,a\\nx2,b\\nY3,c\\nx4,d\\n', 'Replace takes x3 (' + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
+    {
+        name: 'undo of a row deleted above keeps the active match',
+        csv: 'k,v\nx1,a\nx2,b\nx3,c\nx4,d\n',
+        steps: steps(`
+            await t.init(csv);
+            await t.focusCell(0, 0);
+            await key(t, 'K', { ctrlKey: true, shiftKey: true });
+            t.check(t.lastEdit() === 'k,v\\nx2,b\\nx3,c\\nx4,d\\n', 'the x1 row is deleted (' + JSON.stringify(t.lastEdit()) + ')');
+            await find(t, 'x', 'Y');
+            await press(t, 'find-next');
+            t.check(count() === '2 / 3' && activeAt() === '1:x3', 'Next moved to x3 (' + count() + ', ' + activeAt() + ')');
+            await key(t, 'z', { ctrlKey: true });
+            t.check(count() === '3 / 4' && activeAt() === '2:x3', 'x3 keeps the active match after Ctrl+Z (' + count() + ', ' + activeAt() + ')');
+            await press(t, 'replace-one');
+            t.check(t.lastEdit() === 'k,v\\nx1,a\\nx2,b\\nY3,c\\nx4,d\\n', 'Replace takes x3 (' + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
+    {
+        name: 'redo of a row added above keeps the active match',
+        csv: 'k,v\nx1,a\nx2,b\nx3,c\nx4,d\n',
+        steps: steps(`
+            await t.init(csv);
+            await t.focusCell(0, 0);
+            await key(t, 'Enter', { ctrlKey: true, shiftKey: true });
+            await press(t, 'btn-undo');
+            await find(t, 'x', 'Y');
+            await press(t, 'find-next');
+            await press(t, 'find-next');
+            t.check(count() === '3 / 4' && activeAt() === '2:x3', 'Next moved to x3 (' + count() + ', ' + activeAt() + ')');
+            await press(t, 'btn-redo');
+            t.check(count() === '3 / 4' && activeAt() === '3:x3', 'x3 keeps the active match after Redo (' + count() + ', ' + activeAt() + ')');
+            await press(t, 'replace-one');
+            t.check(t.lastEdit() === 'k,v\\n,\\nx1,a\\nx2,b\\nY3,c\\nx4,d\\n', 'Replace takes x3 (' + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
+    {
+        // The next match after it is where Next would have gone, the same
+        // as when the row is deleted from the menu.
+        name: 'redo that deletes the row of the active match moves on to the next match',
+        csv: 'k,v\nx1,a\nx2,x\nx3,c\n',
+        steps: steps(`
+            await t.init(csv);
+            await t.focusCell(1, 0);
+            await key(t, 'K', { ctrlKey: true, shiftKey: true });
+            await press(t, 'btn-undo');
+            await find(t, 'x', 'Y');
+            await press(t, 'find-next');
+            await press(t, 'find-next');
+            t.check(count() === '3 / 4' && activeAt() === '1:x', 'Next moved to the v cell of the x2 row (' + count() + ', ' + activeAt() + ')');
+            await press(t, 'btn-redo');
+            t.check(count() === '2 / 2' && activeAt() === '1:x3', 'x3 has the active match (' + count() + ', ' + activeAt() + ')');
+            await press(t, 'replace-one');
+            t.check(t.lastEdit() === 'k,v\\nx1,a\\nY3,c\\n', 'Replace takes x3 (' + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
+    {
+        // An undo that keeps the number of rows changed them in place. The
+        // active match stays on its row even where the undo changed that row.
+        name: 'undo of an edit in the row of the active match keeps it',
+        csv: 'k,v\nx1,a\nx2,b\nx3,c\nx4,d\n',
+        steps: steps(`
+            await t.init(csv);
+            await find(t, 'x', 'Y');
+            await press(t, 'find-next');
+            await press(t, 'find-next');
+            t.check(count() === '3 / 4' && activeAt() === '2:x3', 'Next moved to x3 (' + count() + ', ' + activeAt() + ')');
+            await t.focusCell(2, 1);
+            await t.pressEnter();
+            const ta = document.querySelector('#grid-container textarea');
+            ta.value = 'C';
+            ta.dispatchEvent(new Event('input', { bubbles: true }));
+            await t.pressEnter();
+            await t.wait(300);
+            t.check(t.lastEdit() === 'k,v\\nx1,a\\nx2,b\\nx3,C\\nx4,d\\n', 'the v cell of x3 is edited (' + JSON.stringify(t.lastEdit()) + ')');
+            await press(t, 'btn-undo');
+            t.check(count() === '3 / 4' && activeAt() === '2:x3', 'x3 keeps the active match after Undo (' + count() + ', ' + activeAt() + ')');
+            await press(t, 'replace-one');
+            t.check(t.lastEdit() === 'k,v\\nx1,a\\nx2,b\\nY3,c\\nx4,d\\n', 'Replace takes x3 (' + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
+    {
+        // Without a header row the grid's first row holds the column letters.
+        // Deleting the only wide row took the letter C away, while the undo
+        // step still had it. The first rows differed, so every match above
+        // the change was let go and the active one moved on to x4.
+        name: 'undo in a file without a header keeps the active match when the letters change',
+        csv: 'x1,a\nx2,b\nx3,c,WIDE\nx4,d\n',
+        steps: steps(`
+            window.postMessage({ type: 'init', text: csv, delimiter: ',', firstRowIsHeader: false }, '*');
+            await t.wait(900);
+            await t.focusCell(2, 0);
+            await key(t, 'K', { ctrlKey: true, shiftKey: true });
+            t.check(t.lastEdit() === 'x1,a\\nx2,b\\nx4,d\\n', 'the wide row is deleted (' + JSON.stringify(t.lastEdit()) + ')');
+            await find(t, 'x', 'Y');
+            await press(t, 'find-next');
+            t.check(count() === '2 / 3' && activeAt() === '1:x2', 'Next moved to x2 (' + count() + ', ' + activeAt() + ')');
+            await press(t, 'btn-undo');
+            t.check(count() === '2 / 4' && activeAt() === '1:x2', 'x2 keeps the active match after Undo (' + count() + ', ' + activeAt() + ')');
+            await press(t, 'replace-one');
+            t.check(t.lastEdit() === 'x1,a\\nY2,b\\nx3,c,WIDE\\nx4,d\\n', 'Replace takes x2 (' + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
+    {
+        name: 'redo in a file without a header keeps the active match when the letters change',
+        csv: 'x1,a\nx2,b\nx3,c,WIDE\nx4,d\n',
+        steps: steps(`
+            window.postMessage({ type: 'init', text: csv, delimiter: ',', firstRowIsHeader: false }, '*');
+            await t.wait(900);
+            await t.focusCell(2, 0);
+            await key(t, 'K', { ctrlKey: true, shiftKey: true });
+            await press(t, 'btn-undo');
+            await find(t, 'x', 'Y');
+            await press(t, 'find-next');
+            t.check(count() === '2 / 4' && activeAt() === '1:x2', 'Next moved to x2 (' + count() + ', ' + activeAt() + ')');
+            await press(t, 'btn-redo');
+            t.check(count() === '2 / 3' && activeAt() === '1:x2', 'x2 keeps the active match after Redo (' + count() + ', ' + activeAt() + ')');
+            await press(t, 'replace-one');
+            t.check(t.lastEdit() === 'x1,a\\nY2,b\\nx4,d\\n', 'Replace takes x2 (' + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
+    {
+        // Rows next to each other under a sort can lie far apart in the file.
+        // Undoing their delete changed the rows in more than one place, so no
+        // row kept its place and the counter went back to the first match.
+        name: 'undo of rows deleted under a sort keeps the active match',
+        csv: 'k,v\nx1,b\nx2,z\nx3,c\nx4,d\nx5,a\n',
+        steps: steps(`
+            await t.init(csv);
+            t.header(1).querySelector('.ag-header-cell-label').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(400);
+            for (const [row, shiftKey] of [[0, false], [1, true]]) {
+                const gutter = document.querySelector('#grid-container .ag-row[row-index="' + row + '"] .ag-cell[col-id="row-index"]');
+                ['mousedown', 'mouseup', 'click'].forEach(ty => gutter.dispatchEvent(new MouseEvent(ty, { bubbles: true, button: 0, shiftKey })));
+                await t.wait(200);
+            }
+            await rowMenu(t, 0, 'Delete 2 rows');
+            t.check(t.lastEdit() === 'k,v\\nx2,z\\nx3,c\\nx4,d\\n', 'x5 and x1 are deleted (' + JSON.stringify(t.lastEdit()) + ')');
+            await find(t, 'x', 'Y');
+            await press(t, 'find-next');
+            t.check(count() === '2 / 3' && activeAt() === '1:x4', 'Next moved to x4 (' + count() + ', ' + activeAt() + ')');
+            await press(t, 'btn-undo');
+            t.check(count() === '4 / 5' && activeAt() === '3:x4', 'x4 keeps the active match after Undo (' + count() + ', ' + activeAt() + ')');
+            await press(t, 'replace-one');
+            t.check(t.lastEdit() === 'k,v\\nx1,b\\nx2,z\\nx3,c\\nY4,d\\nx5,a\\n', 'Replace takes x4 (' + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
+    {
+        // An insert under a sort writes the rows in the order the sort shows
+        // them. Its undo puts every row back in another place.
+        name: 'undo of a row added under a sort keeps the active match',
+        csv: 'k,v\nx1,b\nx2,z\nx3,c\nx4,d\nx5,a\n',
+        steps: steps(`
+            await t.init(csv);
+            t.header(1).querySelector('.ag-header-cell-label').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(400);
+            await find(t, 'x', 'Y');
+            await press(t, 'find-next');
+            await press(t, 'find-next');
+            t.check(count() === '3 / 5' && activeAt() === '2:x3', 'Next moved to x3 (' + count() + ', ' + activeAt() + ')');
+            await t.focusCell(4, 0);
+            await key(t, 'Enter', { ctrlKey: true });
+            t.check(t.lastEdit() === 'k,v\\nx5,a\\nx1,b\\nx3,c\\nx4,d\\nx2,z\\n,\\n', 'a row is added below x2 (' + JSON.stringify(t.lastEdit()) + ')');
+            await press(t, 'btn-undo');
+            t.check(count() === '3 / 5' && activeAt() === '2:x3', 'x3 keeps the active match after Undo (' + count() + ', ' + activeAt() + ')');
+            await press(t, 'replace-one');
+            t.check(t.lastEdit() === 'k,v\\nx1,b\\nx2,z\\nY3,c\\nx4,d\\nx5,a\\n', 'Replace takes x3 (' + JSON.stringify(t.lastEdit()) + ')');
         `),
     },
     {

@@ -6,6 +6,7 @@ import { recomputeColTypes } from '../grid/column-type';
 import { resetDuplicatesState } from './duplicates';
 import { refreshProfileIfOpen } from './profile';
 import { updateDelimiterBadge } from './delimiter';
+import { followRestoredRows } from './find-replace';
 import type { UndoSnapshot } from '../types';
 
 // Captures the undoable view state: a deep clone of the data plus the freeze
@@ -35,7 +36,12 @@ export function snapshot(): UndoSnapshot {
 // file.
 function restore(snap: UndoSnapshot): void {
     const resplit = snap.delimiter !== state.currentDelimiter;
+    const before = state.data;
     state.data = snap.data;
+    // The grid searches again once it shows these rows and looks for the
+    // active match at its old place, so the matches move with their rows
+    // first.
+    followRestoredRows(before);
     state.currentDelimiter = snap.delimiter;
     state.lineFormat = snap.lineFormat;
     // Re-anchor frozen rows to the restored (cloned) arrays at their saved
@@ -141,7 +147,7 @@ export function notifyChange(known?: string): void {
     // again from the rows, a step taken after a delimiter switch lost the
     // quotes the file needed: its rows were split on a delimiter the file
     // was not written with.
-    const text = known ?? toCsv(fileRows(state.data, !state.firstRowIsHeader), state.currentDelimiter, state.lineFormat);
+    const text = known ?? toCsv(fileRows(state.data, !state.firstRowIsHeader), state.currentDelimiter, state.lineFormat, FILENAME);
     // The file already holds this text when it is the one last sent or
     // received. The extension marks the file unsaved for every edit it gets,
     // so a Replace on a cell that no longer held the search text made the tab

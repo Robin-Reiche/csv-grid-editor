@@ -1262,6 +1262,79 @@ async function main() {
         assert.strictEqual(t.doc.delimiter, ';');
     });
 
+    // An inch mark in a header name is part of the name. Only a quote at the
+    // start of a value opens a quoted one. Detection took any two quotes for a
+    // pair, so the separators between two inch marks did not count. The file
+    // opened as one comma column and the first edit wrote the header back as
+    // one quoted name. Every way to open a file detects the same way.
+    const HEADERS = [
+        ['Breite (");Höhe (")', ';', 2],
+        ['Diagonale (");Hersteller;Modell;Rahmen (")', ';', 4],
+        ['Size 5"\tSize 7"', '\t', 2],
+        ['Zoll 5";Zoll 7";Preis, EUR', ';', 3],
+        ['"Name, Vorname";Stadt', ';', 2],
+    ];
+    for (const mode of ['full', 'head', 'tail', 'chunked']) {
+        await test(`inch marks in the header leave its delimiter to count in ${mode}`, async () => {
+            for (const [i, [header, delimiter, columns]] of HEADERS.entries()) {
+                const row = n => Array.from({ length: columns }, (_, c) => n * 10 + c).join(delimiter);
+                const p = file(`inch-${mode}-${i}.csv`, [header, row(1), row(2), row(3)].join('\n') + '\n');
+                if (mode !== 'full') {
+                    fakeSize = 60 * 1024 * 1024;
+                    quickPickChoice = mode;
+                }
+                const t = await open(p);
+                assert.strictEqual(t.doc.previewMode, mode, 'the test did not reach ' + mode);
+                assert.strictEqual(t.doc.delimiter, delimiter, JSON.stringify(header));
+                await t.ready();
+                assert.strictEqual(t.posted.find(m => m.type === 'init').delimiter, delimiter,
+                    'the grid is told another delimiter for ' + JSON.stringify(header));
+            }
+        });
+    }
+
+    // The header is what detection reads when the file is opened again. The
+    // grid writes a value in quotes only when it has to. "Name, Vorname"
+    // lost its quotes on the first save, which left one comma against one
+    // semicolon. The file opened again as a comma file split in the wrong
+    // places.
+    await test('a quoted header name keeps a semicolon file a semicolon file after a save', async () => {
+        const { parseCsv, toCsv, detectLineFormat } = require('../out/webview/utils/csv.js');
+        const text = '"Name, Vorname";Stadt\r\n"Müller, Jörg";Köln\r\n"Schmidt, Anna";Wien\r\n';
+        const p = file('quoted-header-save.csv', text);
+        const t = await open(p);
+        assert.strictEqual(t.doc.delimiter, ';');
+        await t.ready();
+        // What the grid sends for an edit of one value: the rows it read,
+        // written back the way the file ends its lines.
+        const rows = parseCsv(text, ';', false, true);
+        rows[1][1] = 'Düsseldorf';
+        const edited = toCsv(rows, ';', detectLineFormat(text, ';'));
+        assert.strictEqual(edited.split('\r\n')[0], '"Name, Vorname";Stadt', 'the header line written');
+        await t.edit(edited);
+        await t.save();
+        t.close();
+        const again = await open(p);
+        assert.strictEqual(again.doc.delimiter, ';', 'the saved file opens as ' + JSON.stringify(again.doc.delimiter));
+    });
+
+    // A header that tells its delimiter plainly is written exactly as it was.
+    await test('a header that needs no quotes keeps its bytes', () => {
+        const { parseCsv, toCsv, detectLineFormat } = require('../out/webview/utils/csv.js');
+        for (const [text, delimiter] of [
+            ['Preis;Menge, kg;Summe\r\n1;2;3\r\n', ';'],
+            ['Name, Vorname;Stadt;PLZ\n1;2;3\n', ';'],
+            ['size;"5"" disk"\n1;2\n', ';'],
+            ['a,b;c,d\n1,2,3\n', ','],
+            ['a\tb,c\td\n1\t2\t3\n', '\t'],
+        ]) {
+            const rows = parseCsv(text, delimiter, false, true);
+            rows[1][0] = 'X';
+            const written = toCsv(rows, delimiter, detectLineFormat(text, delimiter));
+            assert.strictEqual(written.split(/\r?\n/)[0], text.split(/\r?\n/)[0], JSON.stringify(text));
+        }
+    });
+
     // The previews of a large Mac file read it as one record: all of it went
     // to the grid, the banner said "of 0 rows" and the paged view put every
     // row into the header.

@@ -4,6 +4,8 @@ import { recomputeColTypes, TYPE_LABELS } from './column-type';
 import { refreshFindInPlace } from '../features/find-replace';
 import { shownValue } from './control-char-cell';
 import { updateColumnsButton } from '../features/column-chooser';
+import { closePlacedPopups } from '../features/popups';
+import { closeRenamePopover } from '../features/rename-column';
 
 // Splits a freshly-built rowData array into the scrollable body and the frozen
 // reference rows (AG Grid renders the latter in a fixed pinned-top band). Frozen
@@ -186,6 +188,16 @@ function gridDataColCount(): number {
 }
 
 export function refreshGrid(): void {
+    // The row menu, the column menu, the column chooser and the Rename popover
+    // act on the row or column they were opened on, kept by its place. Every
+    // change that moves rows or columns comes through here or buildGrid: undo,
+    // redo, an insert, a delete, a paste, an outside change. Ctrl+Z, the row
+    // shortcuts and Ctrl+V leave the focus on the cell, so a menu opened there
+    // stayed up. Delete row then took the row that had moved into that place.
+    // Under a sort a paste moves rows too. They close here. A pending rename
+    // is given up.
+    closePlacedPopups();
+    closeRenamePopover();
     // In a file without a header row the letters count the columns too, so
     // they have to match the rows before anything below counts. A delete that
     // took the only wide row away takes its column along.

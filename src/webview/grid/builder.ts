@@ -14,6 +14,8 @@ import { attachHeaderContextMenus } from '../features/freeze-columns';
 import { applyZoom } from '../features/zoom';
 import { applyGridTheme } from '../features/theme';
 import { applyColorMode } from '../features/color-mode';
+import { closePlacedPopups } from '../features/popups';
+import { closeRenamePopover } from '../features/rename-column';
 import {
     getRangeCellClassRules,
     onCellMouseDownHandler,
@@ -204,6 +206,10 @@ export function buildGrid(): void {
     // the typed one was written. Cancel it instead. A caller that wants the
     // typed value kept commits it before it changes state.data.
     if (state.isCellEditing) state.gridApi?.stopEditing(true);
+    // The menus that act on a row or a column by its place close, the way
+    // refreshGrid closes them.
+    closePlacedPopups();
+    closeRenamePopover();
 
     // A file without a header row is named by column letters, which have to
     // match the columns this build is for.
