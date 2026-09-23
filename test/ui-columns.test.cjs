@@ -254,6 +254,54 @@ runSuite('columns (browser)', [
         `),
     },
     {
+        name: 'the Columns button follows the hidden columns',
+        csv: 'a,b,c\n1,2,3',
+        // Every way the hidden columns can be dropped, plus one where a hidden
+        // column survives. The button is marked while a column is hidden.
+        steps: steps(`
+            const marked = () => document.getElementById('btn-columns').classList.contains('btn-active');
+            const hide = async (i) => {
+                await t.button('btn-columns');
+                const box = document.querySelectorAll('#col-chooser-list .col-chooser-item input')[i];
+                box.checked = false;
+                box.dispatchEvent(new Event('change', { bubbles: true }));
+                await t.wait(200);
+                document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+                await t.wait(100);
+            };
+            await hide(2);
+            t.check(marked(), 'hiding c marks the button');
+            await t.update('a,b\\n1,2');
+            t.check(t.names() === 'a|b|-|-' && !marked(), 'an outside change that drops c leaves nothing hidden and the button unmarked ('
+                + t.names() + ', marked ' + marked() + ')');
+
+            await hide(1);
+            await t.update('a,b\\n9,9');
+            t.check(t.names() === 'a|-|-|-' && marked(), 'a hidden column that is still there keeps the mark ('
+                + t.names() + ', marked ' + marked() + ')');
+
+            await t.update('a,b,c\\n1,2,3');
+            await hide(2);
+            document.getElementById('delim-badge').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(100);
+            document.querySelector('.delim-option[data-delim=";"]').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(400);
+            t.check(!marked(), 'a delimiter switch shows every column and unmarks the button');
+            document.getElementById('delim-badge').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(100);
+            document.querySelector('.delim-option[data-delim=","]').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(400);
+
+            await hide(2);
+            await t.colMenu('col_0', 'col-ctx-insert-right');
+            t.check(!marked(), 'inserting a column unmarks it (' + t.names() + ')');
+
+            await hide(2);
+            await t.colMenu('col_0', 'col-ctx-delete');
+            t.check(!marked(), 'deleting a column unmarks it (' + t.names() + ')');
+        `),
+    },
+    {
         name: 'a rebuild turns the Clear filters button off',
         csv: 'city,n\nBerlin,1\nParis,2\nRome,3',
         steps: steps(`

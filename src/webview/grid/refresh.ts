@@ -2,6 +2,7 @@ import { state, getNumCols, emptyTableKind, relabelVirtualHeader } from '../stat
 import { buildGrid, makeComparator } from './builder';
 import { recomputeColTypes, TYPE_LABELS } from './column-type';
 import { shownValue } from './control-char-cell';
+import { updateColumnsButton } from '../features/column-chooser';
 
 // Splits a freshly-built rowData array into the scrollable body and the frozen
 // reference rows (AG Grid renders the latter in a fixed pinned-top band). Frozen
@@ -255,6 +256,12 @@ export function refreshGrid(): void {
 // buildGrid() and refreshGrid() (and the filter handler) so the counts stay live
 // across every structural change, not just full rebuilds.
 export function updateCountsDisplay(): void {
+    // The column count is shown here. Every change to the column set passes
+    // through here, the ones that drop hidden columns included (insert,
+    // delete, a delimiter switch, an outside change with fewer columns). None
+    // of those went past the Columns button, which stayed marked with nothing
+    // hidden.
+    updateColumnsButton();
     const infoEl   = document.getElementById('info');
     const statusEl = document.getElementById('status');
     if (!infoEl && !statusEl) return;

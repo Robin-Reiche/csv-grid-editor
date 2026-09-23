@@ -18,7 +18,7 @@ function setColHidden(colIndex: number, hidden: boolean): void {
     if (hidden) state.hiddenCols.add(colIndex);
     else state.hiddenCols.delete(colIndex);
     state.gridApi?.setColumnsVisible(['col_' + colIndex], !hidden);
-    updateButton();
+    updateColumnsButton();
     syncMaster();
 }
 
@@ -55,7 +55,7 @@ function setVisibleColsHidden(hidden: boolean): void {
         state.gridApi?.setColumnsVisible(cols.map(c => 'col_' + c), !hidden);
     }
     buildList();
-    updateButton();
+    updateColumnsButton();
 }
 
 function allColIds(): string[] {
@@ -117,7 +117,12 @@ function buildList(): void {
     syncMaster();
 }
 
-function updateButton(): void {
+// The Columns button is marked while any column is hidden. Exported because
+// the hidden set also shrinks outside the chooser: a column insert or delete,
+// a delimiter switch and an outside change that leaves fewer columns all drop
+// hidden columns and build the grid again. The build calls this through
+// updateCountsDisplay (grid/refresh.ts).
+export function updateColumnsButton(): void {
     document.getElementById('btn-columns')?.classList.toggle('btn-active', state.hiddenCols.size > 0);
 }
 
