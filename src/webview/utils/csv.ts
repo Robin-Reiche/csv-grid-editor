@@ -14,6 +14,47 @@ const CR    = 13;
 const SPACE = 32;
 const TAB   = 9;
 
+// Whether the rows of the text end with a lone CR, the way a classic Mac file
+// ends them. That takes no LF outside a quoted value anywhere and a CR there.
+// Otherwise an LF ends a row together with the CRs right in front of it. Any
+// other CR is then a character of the value it sits in. parseCsv and
+// detectLineFormat both ask this first, so they agree on where rows end. The
+// quotes are tracked the way parseCsv tracks them in a Mac file: a CR starts
+// a new field there, so a quote right after it opens a quoted value. Mac Excel
+// writes a value with a line break like that, an LF in quotes at a row start.
+function rowsEndWithCr(text: string, delimiter: string): boolean {
+    // Text without a single LF only needs a CR. For every other file the scan
+    // below stops at the first LF outside quotes, most often in the first line.
+    if (text.indexOf('\n') < 0) return text.indexOf('\r') >= 0;
+    const delim = delimiter.length === 1 ? delimiter.charCodeAt(0) : -1;
+    let inQuotes = false;
+    let padOnly = true;
+    let cr = false;
+    for (let i = 0; i < text.length; i++) {
+        const ch = text.charCodeAt(i);
+        if (inQuotes) {
+            if (ch === QUOTE) {
+                if (text.charCodeAt(i + 1) === QUOTE) { padOnly = false; i++; }
+                else inQuotes = false;
+            } else if (ch !== SPACE && ch !== TAB) {
+                padOnly = false;
+            }
+        } else if (ch === QUOTE && padOnly) {
+            inQuotes = true;
+        } else if (ch === delim) {
+            padOnly = true;
+        } else if (ch === LF) {
+            return false;
+        } else if (ch === CR) {
+            cr = true;
+            padOnly = true;
+        } else if (ch !== SPACE && ch !== TAB) {
+            padOnly = false;
+        }
+    }
+    return cr;
+}
+
 // trimFields defaults to true for the callers that want clean values out of a
 // string, such as the tests. The grid itself reads files with it off: a value
 // is kept exactly as the file has it, spaces included, and the settings menu
@@ -26,7 +67,7 @@ const TAB   = 9;
 // Paste reads the clipboard through here too and leaves it off.
 //
 // Each value is cut out of the text with slice, in one piece wherever it can
-// be. Only an escaped "" or a skipped CR splits it into pieces that are joined.
+// be. Only a quoted section splits it into pieces that are joined.
 // Built one character at a time, a value stayed a chain with a link per
 // character inside V8. Nothing flattened it once the grid stopped trimming what
 // it reads. A file with a long text column then took 5 to 14 times the memory
@@ -37,14 +78,16 @@ export function parseCsv(text: string, delimiter: string, trimFields: boolean = 
     // The delimiter is one character. Compared as a char code, a longer one
     // matches nothing, the way it matched nothing as a string.
     const delim = delimiter.length === 1 ? delimiter.charCodeAt(0) : -1;
+    const crRows = rowsEndWithCr(text, delimiter);
     let row: string[] = [];
     // The value so far is `field` followed by the text from `start` up to
-    // where the scan is. `field` holds the pieces a quoted section or a
-    // skipped CR has already cut off. It stays empty for most values.
+    // where the scan is. `field` holds the pieces a quoted section has
+    // already cut off. It stays empty for most values.
     let field = '';
     let start = 0;
     // Whether the value so far holds only spaces and tabs, which is what
-    // decides whether a quote opens a quoted section.
+    // decides whether a quote opens a quoted section. A CR counts as padding
+    // here, the way it does in largeFileReader.ts.
     let padOnly = true;
     // Whether a quoted field has turned up on the current line. Only the last
     // line needs it, see the blank line rule below.
@@ -92,19 +135,27 @@ export function parseCsv(text: string, delimiter: string, trimFields: boolean = 
             field = '';
             start = i + 1;
             padOnly = true;
-        } else if (ch === CR) {
-            // A CR outside quotes is skipped.
-            field += text.slice(start, i);
-            start = i + 1;
-        } else if (ch === LF) {
-            row.push(finalize(field + text.slice(start, i)));
+        } else if (ch === LF || (ch === CR && crRows)) {
+            // The CRs right in front of an LF belong to the break. That is
+            // CRLF or the CR CR LF Python's csv module writes on Windows. In a
+            // file whose rows end with a lone CR that CR is the break. An LF
+            // straight after it belongs to it. Any other CR is part of the
+            // value. It used to be dropped, which lost a byte from a row
+            // nobody touched and read a whole Mac file as one row.
+            let end = i;
+            if (ch === LF) {
+                while (end > start && text.charCodeAt(end - 1) === CR) end--;
+            } else if (text.charCodeAt(i + 1) === LF) {
+                i++;
+            }
+            row.push(finalize(field + text.slice(start, end)));
             rows.push(row);
             row = [];
             field = '';
             start = i + 1;
             padOnly = true;
             lineQuoted = false;
-        } else if (padOnly && ch !== SPACE && ch !== TAB) {
+        } else if (padOnly && ch !== SPACE && ch !== TAB && ch !== CR) {
             padOnly = false;
         }
     }
@@ -127,25 +178,27 @@ export function parseCsv(text: string, delimiter: string, trimFields: boolean = 
 // How a file ends its rows: the line break it puts between two rows and
 // whether one follows the last row too. The grid writes the whole file on every
 // edit, so without this the first edit would rewrite every line of a CRLF file
-// and take the break off the end of the file.
-export type LineFormat = { eol: '\n' | '\r\n'; finalNewline: boolean };
-
-const LF_NO_FINAL_BREAK: LineFormat = { eol: '\n', finalNewline: false };
+// and take the break off the end of the file. CR CR LF is what Python's csv
+// module writes on Windows. A lone CR ends the rows of a classic Mac file.
+export type LineFormat = { eol: '\n' | '\r\n' | '\r\r\n' | '\r'; finalNewline: boolean };
 
 // Reads the line format from the text parseCsv is about to split into rows. It
 // counts only the breaks that end a row, so it tracks quotes exactly the way
 // parseCsv does and has to stay in step with it. A break inside a quoted value
 // belongs to the value and is written back as it is, CRLF or LF (issue #31).
-// A file that mixes both gets the one most of its rows end with, so the
-// fewest bytes change on the next edit. A tie goes to LF.
+// A file that mixes them gets the one most of its rows end with, so the
+// fewest bytes change on the next edit. A tie goes to LF, then to CRLF.
 //
 // Text with no row break at all says nothing about its line ending. It keeps
 // the one of `previous` when there is one: a CRLF file trimmed to a single
 // line and read again stays CRLF, so a row added later does not bring LF into
 // it. Without `previous` it gets LF.
 export function detectLineFormat(text: string, delimiter: string, previous?: LineFormat): LineFormat {
-    let crlf = 0;
+    const crRows = rowsEndWithCr(text, delimiter);
     let lf = 0;
+    let crlf = 0;
+    let crcrlf = 0;
+    let cr = 0;
     let inQuotes = false;
     // Whether the field so far holds only spaces and tabs. That is all parseCsv
     // looks at to decide whether a quote opens a quoted field.
@@ -167,38 +220,62 @@ export function detectLineFormat(text: string, delimiter: string, previous?: Lin
             inQuotes = true;
         } else if (ch === delimiter) {
             blank = true;
+        } else if (crRows && (ch === '\r' || ch === '\n')) {
+            // Every break ends a row of a Mac file, a CRLF counted once, the
+            // way parseCsv splits it.
+            cr++;
+            if (ch === '\r' && text[i + 1] === '\n') i++;
+            blank = true;
         } else if (ch === '\n') {
-            // A CR right before this break is outside quotes as well. A quote
-            // that closed in between would sit between the two.
-            if (i > 0 && text[i - 1] === '\r') crlf++;
-            else lf++;
+            // The CRs right before this break are outside quotes as well. A
+            // quote that closed in between would sit between them.
+            if (text[i - 1] !== '\r') lf++;
+            else if (text[i - 2] !== '\r') crlf++;
+            else crcrlf++;
             blank = true;
         } else if (ch !== '\r' && ch !== ' ' && ch !== '\t') {
             blank = false;
         }
     }
-    const unknown = crlf + lf === 0;
-    return {
-        eol: unknown && previous ? previous.eol : crlf > lf ? '\r\n' : '\n',
-        finalNewline: !inQuotes && text.endsWith('\n'),
-    };
+    let eol: LineFormat['eol'];
+    if (lf + crlf + crcrlf + cr === 0) eol = previous ? previous.eol : '\n';
+    else if (cr > 0) eol = '\r';
+    else if (crcrlf > crlf && crcrlf > lf) eol = '\r\r\n';
+    else eol = crlf > lf ? '\r\n' : '\n';
+    const last = text[text.length - 1];
+    return { eol, finalNewline: !inQuotes && (last === '\n' || (crRows && last === '\r')) };
 }
 
 // Without a line format the rows are joined with LF and nothing follows the
-// last one. The clipboard wants exactly that. The grid writes the file with
-// the format it was read with (state.lineFormat).
-export function toCsv(rows: CsvRow[], delimiter: string, format: LineFormat = LF_NO_FINAL_BREAK): string {
-    const text = rows.map(row =>
-        row.map(cell => {
-            const s = String(cell);
-            if (s.includes(delimiter) || s.includes('"') || s.includes('\n') || s.includes('\r')) {
-                return '"' + s.replace(/"/g, '""') + '"';
-            }
-            return s;
-        }).join(delimiter)
-    ).join(format.eol);
+// last one. The clipboard wants exactly that. It also gets every value with a
+// CR in quotes, since other programs read a lone CR as a line break. The grid
+// writes the file with the format it was read with (state.lineFormat). The
+// file is read back by parseCsv, which keeps a CR inside an unquoted value.
+// So a value with a CR is quoted there only where parseCsv would read the CR
+// as part of a row break. Quoting it anywhere else changed a row nobody had
+// touched on the first edit.
+export function toCsv(rows: CsvRow[], delimiter: string, format?: LineFormat): string {
+    const eol = format ? format.eol : '\n';
     // An empty table stays empty. A lone break would read back as a blank row.
-    return format.finalNewline && rows.length > 0 ? text + format.eol : text;
+    const finalNewline = !!format && format.finalNewline && rows.length > 0;
+    const last = rows.length - 1;
+    // The clipboard quotes every CR. So does a Mac file, which ends a row at
+    // every CR outside quotes. Text with no LF between or after its rows is
+    // read as a Mac file as soon as it holds a CR.
+    const quoteEveryCr = !format || eol === '\r' || (last < 1 && !finalNewline);
+    const text = rows.map((row, r) =>
+        row.map((cell, c) => {
+            const s = String(cell);
+            let quote = s.includes(delimiter) || s.includes('"') || s.includes('\n');
+            // A CR at the end of the row's last value would sit right in front
+            // of the break and be read as part of it.
+            if (!quote && s.includes('\r')) {
+                quote = quoteEveryCr || (s.endsWith('\r') && c === row.length - 1 && (r < last || finalNewline));
+            }
+            return quote ? '"' + s.replace(/"/g, '""') + '"' : s;
+        }).join(delimiter)
+    ).join(eol);
+    return finalNewline ? text + eol : text;
 }
 
 // TSV-quote a single cell — matches Excel's clipboard format. Wraps the value

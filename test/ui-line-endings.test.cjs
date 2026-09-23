@@ -115,6 +115,43 @@ runSuite('line endings (browser)', [
         `),
     },
     {
+        // A classic Mac file ends its rows with a lone CR. It opened as one
+        // header of four columns. The first edit joined its lines for good.
+        name: 'rows ending with a lone CR',
+        csv: 'a,b\r1,2\r3,4\r',
+        steps: steps(`
+            const info = document.getElementById('info').textContent;
+            t.check(info === '2 rows × 2 columns', 'the file opens as its rows (' + info + ')');
+            await t.edit(1, 1, 'X');
+            t.same(csv.replace('3,4', '3,X'), 'only the edited cell changes');
+        `),
+    },
+    {
+        // What Python's csv module writes on Windows without newline=''.
+        name: 'rows ending with CR CR LF',
+        csv: 'a,b\r\r\n1,2\r\r\n3,4\r\r\n',
+        steps: steps(`
+            await t.edit(1, 1, 'X');
+            t.same(csv.replace('3,4', '3,X'), 'only the edited cell changes');
+        `),
+    },
+    {
+        name: 'a CR inside an unquoted value',
+        csv: 'a,b\n1,x\ry\n3,4\n',
+        steps: steps(`
+            await t.edit(1, 1, 'X');
+            t.same(csv.replace('3,4', '3,X'), 'the CR stays in the row nobody touched');
+        `),
+    },
+    {
+        name: 'a CR at the end of the file',
+        csv: 'a,b\n1,2\n3,4\r',
+        steps: steps(`
+            await t.edit(0, 1, 'X');
+            t.same(csv.replace('1,2', '1,X'), 'the CR at the end stays');
+        `),
+    },
+    {
         // Deleting the only row leaves a CRLF file with no row break to read.
         // A delimiter switch reads the text again and fell back to LF, so the
         // next added row went into the file with LF.

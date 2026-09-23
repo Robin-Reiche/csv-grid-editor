@@ -100,11 +100,81 @@ test('a file read and written unchanged comes back byte for byte', () => {
         'a,b\r\n,\r\n',
         '\r\n',
         '',
+        'a,b\r1,2\r3,4\r',
+        'a,b\r1,2',
+        'a,b\r"x\ny",2\r',
+        'a,b\r\r\n1,2\r\r\n',
+        'a,b\n1,x\ry\n3,4\n',
+        'a,b\n1,2\n3,4\r',
+        'a\n\r',
     ];
     for (const text of texts) {
         const rows = parseCsv(text, ',', false, true);
         assert.strictEqual(toCsv(rows, ',', detectLineFormat(text, ',')), text, JSON.stringify(text));
     }
+});
+
+// ── a CR on its own ──────────────────────────────────────────────────────────
+// The parser used to drop every CR outside quotes. A classic Mac file, whose
+// rows end with a lone CR, opened as one row. Rows ending with CR CR LF, the
+// way Python's csv module writes them on Windows, lost a CR per line on the
+// first edit. A stray CR inside a value was lost from a row nobody touched.
+
+test('a file whose rows end with a lone CR reads as rows', () => {
+    assert.deepStrictEqual(parseCsv('a,b\r1,2\r3,4\r', ',', false, true), [['a', 'b'], ['1', '2'], ['3', '4']]);
+    assert.deepStrictEqual(detectLineFormat('a,b\r1,2\r3,4\r', ','), { eol: '\r', finalNewline: true });
+    // Mac Excel puts an LF inside a quoted value of such a file. It stays in
+    // the value.
+    const mac = 'a,b\r"x\ny",2\r3,4';
+    assert.deepStrictEqual(parseCsv(mac, ',', false, true), [['a', 'b'], ['x\ny', '2'], ['3', '4']]);
+    assert.deepStrictEqual(detectLineFormat(mac, ','), { eol: '\r', finalNewline: false });
+});
+
+test('rows ending with CR CR LF keep that ending', () => {
+    const text = 'a,b\r\r\n1,2\r\r\n3,4\r\r\n';
+    assert.deepStrictEqual(parseCsv(text, ',', false, true), [['a', 'b'], ['1', '2'], ['3', '4']]);
+    assert.deepStrictEqual(detectLineFormat(text, ','), { eol: '\r\r\n', finalNewline: true });
+});
+
+test('a CR inside an unquoted value is part of the value', () => {
+    assert.deepStrictEqual(parseCsv('a,b\n1,x\ry\n3,4\n', ',', false, true), [['a', 'b'], ['1', 'x\ry'], ['3', '4']]);
+    assert.deepStrictEqual(parseCsv('a,b\r\n1,x\ry\r\n', ',', false, true), [['a', 'b'], ['1', 'x\ry']]);
+    // One at the very end of the file has no LF after it either.
+    assert.deepStrictEqual(parseCsv('a,b\n1,2\n3,4\r', ',', false, true), [['a', 'b'], ['1', '2'], ['3', '4\r']]);
+});
+
+test('an edit changes only the edited cell whatever ends the rows', () => {
+    const cases = [
+        ['a,b\r1,2\r3,4\r', 'a,b\r1,2\r3,X\r'],
+        ['a,b\r\r\n1,2\r\r\n3,4\r\r\n', 'a,b\r\r\n1,2\r\r\n3,X\r\r\n'],
+        ['a,b\n1,x\ry\n3,4\n', 'a,b\n1,x\ry\n3,X\n'],
+        ['a,b\r\n1,x\ry\r\n3,4\r\n', 'a,b\r\n1,x\ry\r\n3,X\r\n'],
+        ['a,b\r"x\ny",2\r3,4\r', 'a,b\r"x\ny",2\r3,X\r'],
+    ];
+    for (const [text, want] of cases) {
+        const rows = parseCsv(text, ',', false, true);
+        rows[2][1] = 'X';
+        assert.strictEqual(toCsv(rows, ',', detectLineFormat(text, ',')), want, JSON.stringify(text));
+    }
+    const tail = parseCsv('a,b\n1,2\n3,4\r', ',', false, true);
+    tail[1][1] = 'X';
+    assert.strictEqual(toCsv(tail, ',', detectLineFormat('a,b\n1,2\n3,4\r', ',')), 'a,b\n1,X\n3,4\r');
+});
+
+test('a CR that would be read as part of a row break is quoted', () => {
+    // A value ending in CR in front of the break.
+    const rows = [['n'], ['x\r'], ['y']];
+    for (const eol of ['\n', '\r\n', '\r\r\n']) {
+        const text = toCsv(rows, ',', { eol, finalNewline: true });
+        assert.deepStrictEqual(parseCsv(text, ',', false, true), rows, JSON.stringify(text));
+    }
+    // A file of one line has no LF to tell its rows by, so a CR there would
+    // be read as the break of a Mac file.
+    assert.strictEqual(toCsv([['x\ry']], ',', { eol: '\n', finalNewline: false }), '"x\ry"');
+    // In a Mac file every CR in a value is.
+    assert.strictEqual(toCsv([['a'], ['x\ry']], ',', { eol: '\r', finalNewline: true }), 'a\r"x\ry"\r');
+    // The clipboard quotes a CR wherever it is, as it always did.
+    assert.strictEqual(toCsv([['a'], ['x\ry']], ','), 'a\n"x\ry"');
 });
 
 test('text with no row break keeps the line ending it had before', () => {
