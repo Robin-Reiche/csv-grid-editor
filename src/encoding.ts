@@ -81,7 +81,22 @@ export function startsAsUtf8(bytes: Uint8Array): boolean {
 // A file with a UTF-16 byte order mark is UTF-16. Anything else is UTF-8 when
 // it is valid UTF-8. When it is not, it is Windows-1252. The grid never sees a
 // byte order mark: kept, it would sit in front of the first header name.
-export function decodeFile(raw: Uint8Array): { text: string; encoding: FileEncoding } {
+//
+// `current` is the encoding of the document that reads its file again. Plain
+// ASCII is valid UTF-8 and Windows-1252 alike. Taken for UTF-8, a Windows-1252
+// file whose last umlaut was edited away saved the next umlaut in UTF-8, which
+// Excel reads as ANSI and garbles. So the document keeps its encoding whenever
+// that encoding gives these very bytes for the text.
+export function decodeFile(raw: Uint8Array, current?: FileEncoding): { text: string; encoding: FileEncoding } {
+    const found = detectEncoding(raw);
+    if (current && current !== found.encoding) {
+        const bytes = encodeFile(found.text, current);
+        if (bytes && asBuffer(bytes).equals(asBuffer(raw))) return { text: found.text, encoding: current };
+    }
+    return found;
+}
+
+function detectEncoding(raw: Uint8Array): { text: string; encoding: FileEncoding } {
     const bytes = asBuffer(raw);
     // UTF-16 has two bytes for every unit. With an odd count the file is not
     // UTF-16 whatever it starts with. Windows-1252 keeps all its bytes then.

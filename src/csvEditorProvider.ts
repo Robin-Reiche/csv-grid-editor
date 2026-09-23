@@ -571,17 +571,25 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
     private async reload(document: CsvDocument, fromWatcher = false): Promise<boolean> {
         try {
             const raw = await vscode.workspace.fs.readFile(document.uri);
-            const { text, encoding } = decodeFile(raw);
+            // Whether the file holds exactly what a save of this text writes.
+            const holds = (text: string): boolean => {
+                const bytes = encodeFile(text, document.encoding);
+                return !!bytes && Buffer.compare(bytes, raw) === 0;
+            };
             // Ignore our own writes. saveCustomDocument writes document.content
-            // verbatim, so a watcher event whose content equals what we already
+            // verbatim, so a watcher event whose file holds what we already
             // hold is the echo of our own save, not an external edit. Reloading
             // on it would re-parse the CSV into fresh arrays and wipe in-memory
             // view state (frozen rows, in particular). Only genuinely external
-            // changes differ from document.content. The encoding counts too,
-            // byte order mark included: the grid never sees it, so a program
-            // that only changes it leaves the text as it was, but the next
-            // save has to write the file the way it is now.
-            if (text === document.content && encoding === document.encoding) return false;
+            // changes differ from document.content. The bytes are compared,
+            // not the text read back from them: bytes that are valid UTF-8 read
+            // as UTF-8 whatever they were written in, so the save of a
+            // Windows-1252 file with its last umlaut edited away looked like
+            // another program's. The encoding counts this way too, byte order
+            // mark included: the grid never sees it, so a program that only
+            // changes it leaves the text as it was, but the next save has to
+            // write the file the way it is now.
+            if (holds(document.content)) return false;
             // The same echo, arriving late. The watcher reports a save only
             // after the write. With auto-save on the next edit can land in
             // between: the editor has moved on, the disk still holds the
@@ -591,7 +599,8 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             // of blank names like ",,,,". A disk that holds what we last knew
             // it holds has nothing new to say. Only the watcher waits like
             // this: Reload from Disk is the explicit request for the disk.
-            if (fromWatcher && text === document.diskText && encoding === document.encoding) return false;
+            if (fromWatcher && holds(document.diskText)) return false;
+            const { text, encoding } = decodeFile(raw, document.encoding);
             // Another program changed the file while the grid holds
             // unsaved edits. Loading it silently replaced those edits and
             // left the tab dirty, so the next save made the loss final.
@@ -712,7 +721,7 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         // watcher, no Reload from Disk). So the preview stays as it is.
         if (document.isPreview) return;
         const raw = await vscode.workspace.fs.readFile(document.uri);
-        ({ text: document.content, encoding: document.encoding } = decodeFile(raw));
+        ({ text: document.content, encoding: document.encoding } = decodeFile(raw, document.encoding));
         document.diskText = document.content;
 
         document.post({

@@ -574,6 +574,7 @@ async function main() {
         const t = await open(p);
         fs.writeFileSync(p, EXCEL.subarray(3));
         await t.fireWatcher();
+        // utf8 is the encoding without the mark, see above.
         assert.strictEqual(t.doc.encoding, 'utf8', 'the document kept a byte order mark the file no longer has');
         await t.edit('name,city\nJürgen,Köln\nAnna,Wien\n');
         await t.save();
@@ -585,6 +586,7 @@ async function main() {
         const t = await open(p);
         fs.writeFileSync(p, Buffer.concat([BOM, Buffer.from('a\n1\n')]));
         assert.strictEqual(await t.provider.reload(t.doc), true, 'Reload from Disk said the file was already up to date');
+        // The mark is part of the encoding, see above.
         assert.strictEqual(t.doc.encoding, 'utf8bom');
     });
 
@@ -635,6 +637,65 @@ async function main() {
         await t.edit(t.doc.content.replace(';x', ';y'));
         await t.save();
         assert.ok(fs.readFileSync(p).equals(Buffer.concat([ansi('a;b\r\n'), high, ansi(';y\r\n')])), 'saved ' + hex(p));
+    });
+
+    // Plain ASCII reads the same in UTF-8 and Windows-1252. A file without a
+    // byte above 0x7F is taken for UTF-8. Once the last umlaut of a
+    // Windows-1252 file was edited away, the echo of its save no longer looked
+    // like ours. With auto-save the next edit could land before it: the user
+    // was told the file changed on disk. Reload from Disk on that warning then
+    // threw the newest edit away.
+    await test('the echo of a Windows-1252 save without umlauts is ours, whatever edit came after it', async () => {
+        const p = file('ansi-ascii-echo.csv', ANSI);
+        const t = await open(p);
+        await t.edit('Name;Stadt\r\nAnna;Wien\r\n');
+        await t.save();
+        await t.edit('Name;Stadt\r\nAnna;Graz\r\n');   // auto-save's next edit, before the watcher reports the save
+        await t.fireWatcher();                          // the echo of that save
+        assert.deepStrictEqual(warnings.map(w => w.msg), [], 'the echo of our own save was taken for an outside change');
+        assert.strictEqual(t.updates().length, 0);
+        assert.strictEqual(t.doc.content, 'Name;Stadt\r\nAnna;Graz\r\n', 'the newest edit was lost');
+    });
+
+    await test('a Windows-1252 file stays Windows-1252 through the echo of a save without umlauts', async () => {
+        const p = file('ansi-ascii-stays.csv', ANSI);
+        const t = await open(p);
+        await t.edit('Name;Stadt\r\nAnna;Wien\r\n');
+        await t.save();
+        await t.fireWatcher();                          // the echo of that save
+        assert.strictEqual(t.doc.encoding, 'windows1252', 'the echo turned the document into UTF-8');
+        await t.edit('Name;Stadt\r\nAnna;Wien\r\nJörg;Köln\r\n');
+        await t.save();
+        assert.ok(fs.readFileSync(p).equals(ansi('Name;Stadt\r\nAnna;Wien\r\nJörg;Köln\r\n')), 'saved ' + hex(p));
+    });
+
+    await test('Revert File keeps a Windows-1252 file Windows-1252 when the disk holds no umlaut', async () => {
+        const p = file('ansi-ascii-revert.csv', ANSI);
+        const t = await open(p);
+        await t.edit('Name;Stadt\r\nAnna;Wien\r\n');
+        await t.save();
+        await t.edit('Name;Stadt\r\nAnna;Graz\r\n');
+        await t.provider.revertCustomDocument(t.doc, {});
+        assert.strictEqual(t.doc.content, 'Name;Stadt\r\nAnna;Wien\r\n');
+        assert.strictEqual(t.doc.encoding, 'windows1252', 'the revert turned the document into UTF-8');
+    });
+
+    // The two bytes of "Ã¶" in Windows-1252 are "ö" in UTF-8. A file left
+    // with nothing else above 0x7F reads back as other text than we wrote.
+    await test('the echo of a Windows-1252 save that reads as UTF-8 is still ours', async () => {
+        const p = file('ansi-mojibake.csv', ansi('Name\r\nJörg\r\nJÃ¶rg\r\n'));
+        const t = await open(p);
+        await t.edit('Name\r\nJÃ¶rg\r\n');
+        await t.save();
+        await t.fireWatcher();                          // the echo of that save
+        assert.strictEqual(t.updates().length, 0, 'the grid was handed ' + JSON.stringify((t.updates()[0] || {}).text));
+        assert.strictEqual(t.doc.content, 'Name\r\nJÃ¶rg\r\n');
+        await t.edit('Name\r\nJÃ¶rg\r\nAnna\r\n');
+        await t.save();
+        await t.edit('Name\r\nJÃ¶rg\r\nAnna\r\nEva\r\n');
+        await t.fireWatcher();                          // the echo, after the next edit
+        assert.deepStrictEqual(warnings.map(w => w.msg), [], 'the echo of our own save was taken for an outside change');
+        assert.strictEqual(t.doc.content, 'Name\r\nJÃ¶rg\r\nAnna\r\nEva\r\n', 'the newest edit was lost');
     });
 
     await test('Save As writes a Windows-1252 file in Windows-1252', async () => {

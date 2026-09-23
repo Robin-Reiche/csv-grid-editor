@@ -49,13 +49,17 @@ test('both listeners run the same reload path', () => {
 });
 
 test('reload still ignores the echo of our own save', () => {
-    // The guard compares the encoding as well. Text alone would take a
-    // program that only changes the encoding for our own echo. Adding or
-    // removing the byte order mark is such a change. The document would keep
-    // the old encoding. The next save would then write that back. The mark is
-    // part of the encoding now (utf8bom), so it has no comparison of its own.
-    assert.ok(/if \(text === document\.content && encoding === document\.encoding\) return false;/.test(src),
+    // The guard compares the file's bytes with the bytes a save of the
+    // document's text writes in the document's encoding. Comparing the text
+    // read back from the file and its detected encoding was not enough: plain
+    // ASCII reads as UTF-8 whatever it was written in, so the save of a
+    // Windows-1252 file without umlauts looked like another program's. The
+    // bytes carry the encoding and the byte order mark too, so a program that
+    // only changes those is still not taken for our own echo.
+    assert.ok(/if \(holds\(document\.content\)\) return false;/.test(src),
         'the identical-content guard is gone — saving would wipe frozen rows');
+    assert.ok(/const bytes = encodeFile\(text, document\.encoding\);\s*return !!bytes && Buffer\.compare\(bytes, raw\) === 0;/.test(src),
+        'the guard no longer compares what a save writes with the bytes on disk');
 });
 
 test('reload command is declared in package.json', () => {
