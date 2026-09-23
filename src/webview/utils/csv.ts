@@ -246,6 +246,23 @@ export function detectLineFormat(text: string, delimiter: string, previous?: Lin
     return { eol, finalNewline: !inQuotes && (last === '\n' || (crRows && last === '\r')) };
 }
 
+// Whether parseCsv would drop this row as a trailing blank line when it is the
+// last line of a file with no line break after it. Quotes would keep it then.
+// That is a row of spaces and empty values with at least one space in it. A
+// row of empty values alone is dropped with or without quotes. The only line
+// of a file is kept anyway once it has a delimiter, see parseCsv.
+function readsAsBlankLine(row: CsvRow, onlyRow: boolean): boolean {
+    if (onlyRow && row.length > 1) return false;
+    let spaces = false;
+    for (const cell of row) {
+        const s = String(cell);
+        if (s === '') continue;
+        if (trimPadding(s) !== '') return false;
+        spaces = true;
+    }
+    return spaces;
+}
+
 // Without a line format the rows are joined with LF and nothing follows the
 // last one. The clipboard wants exactly that. It also gets every value with a
 // CR in quotes, since other programs read a lone CR as a line break. The grid
@@ -263,6 +280,11 @@ export function toCsv(rows: CsvRow[], delimiter: string, format?: LineFormat): s
     // every CR outside quotes. Text with no LF between or after its rows is
     // read as a Mac file as soon as it holds a CR.
     const quoteEveryCr = !format || eol === '\r' || (last < 1 && !finalNewline);
+    // Spaces in the last row of a file are kept in quotes when nothing follows
+    // it and the row would otherwise be read as a trailing blank line. That row
+    // can only hold them because they were quoted in the file or typed in.
+    // Written bare, the next read after an edit dropped the row.
+    const quoteLastSpaces = !!format && !finalNewline && last >= 0 && readsAsBlankLine(rows[last], last === 0);
     const text = rows.map((row, r) =>
         row.map((cell, c) => {
             const s = String(cell);
@@ -272,6 +294,7 @@ export function toCsv(rows: CsvRow[], delimiter: string, format?: LineFormat): s
             if (!quote && s.includes('\r')) {
                 quote = quoteEveryCr || (s.endsWith('\r') && c === row.length - 1 && (r < last || finalNewline));
             }
+            if (!quote && quoteLastSpaces && r === last) quote = s !== '';
             return quote ? '"' + s.replace(/"/g, '""') + '"' : s;
         }).join(delimiter)
     ).join(eol);

@@ -107,4 +107,22 @@ runSuite('delimiter switch (browser)', [
                 + t.col(0) + ' / ' + t.col(1) + ')');
         `),
     },
+    {
+        // The edit wrote the last row without its quotes. The switch read the
+        // text again and took the spaces for a trailing blank line.
+        name: 'a quoted last row of spaces',
+        csv: 'name,note\nx,1\n"   ","   "',
+        steps: steps(`
+            await t.edit(0, 0, 'y');
+            t.check(t.lastEdit() === 'name,note\\ny,1\\n"   ","   "', 'the edit keeps the quotes ('
+                + JSON.stringify(t.lastEdit()) + ')');
+            await t.delim(';');
+            await t.delim(',');
+            const info = document.getElementById('info').textContent;
+            t.check(info === '2 rows × 2 columns', 'the row is still there after a switch (' + info + ')');
+            await t.edit(0, 1, '2');
+            t.check(t.lastEdit() === 'name,note\\ny,2\\n"   ","   "', 'and in the file after the next edit ('
+                + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
 ]);
