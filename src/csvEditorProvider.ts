@@ -26,6 +26,12 @@ const CANCELLED_PREVIEW_MODE = '__cancelled__';
 // How long a save waits for an editor to hand over the value being typed in
 // one of its cells (see flushTyping).
 const FLUSH_TIMEOUT_MS       = 1000;
+// How long a hot exit backup waits for it. The grid writes out the whole
+// file for its answer. On a large file or a busy machine that took longer
+// than the second a save waits. The backup then went without the value and
+// the restart lost it. Nobody waits for a backup while typing, but quitting
+// does, so it does not wait for ever either.
+const BACKUP_TIMEOUT_MS      = 5000;
 const NO_ANSWER              = Symbol('no answer');
 // How long and how often Overwrite and Reload from Disk try to bring the
 // grid to the front before they give up on running File > Save or File >
@@ -227,8 +233,9 @@ class CsvDocument implements vscode.CustomDocument {
     // the document does not have yet. The tab is marked unsaved for it. A
     // save asks each of them for the value first (see flushTyping).
     public readonly typing = new Set<vscode.WebviewPanel>();
-    // The answer a save is waiting for from an editor, see flushTyping.
-    public readonly flushes = new Map<vscode.WebviewPanel, { answer: Promise<unknown>; take(text: unknown): void }>();
+    // The answer a save or a backup is waiting for from an editor and how
+    // many of them still wait for it, see flushTyping.
+    public readonly flushes = new Map<vscode.WebviewPanel, { answer: Promise<unknown>; take(text: unknown): void; waiting: number }>();
     // The file with the value being typed in it, as each editor with such a
     // value sends it while another editor shows the file. A Source Control
     // diff closes without asking while the grid tab stays open. The value
@@ -749,8 +756,10 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             // A cell of this editor holds a value typed into it. It reaches
             // the document only when the cell is committed, but the tab has
             // to show it unsaved now: Ctrl+W or the tab's close button closed
-            // it without asking and the value was lost. Sent again after a
-            // save took the value, since that save marked the tab saved.
+            // it without asking and the value was lost. Sent with every
+            // change of the value. That marks the tab again after a save
+            // took the value. VS Code then also backs the file up and
+            // auto-saves it only once the typing pauses.
             } else if (msg.type === 'typing' && !document.isPreview) {
                 document.typing.add(webviewPanel);
                 this.fireChange(document);
@@ -775,7 +784,12 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
                 document.flushes.get(webviewPanel)?.take(msg.text);
                 // The value the save took replaces an older one kept from
                 // before, which would take it back when this editor closes.
+                // An answer without a text drops it: the value is the cell's
+                // own again. A value typed into a Source Control diff and
+                // deleted right before a backup came back in the grid tab
+                // when the diff closed.
                 if (typeof msg.text === 'string' && document.typing.has(webviewPanel)) document.typed.set(webviewPanel, msg.text);
+                else document.typed.delete(webviewPanel);
 
             // Whether this editor's page has the keyboard (see toFront).
             } else if (msg.type === 'focus') {
@@ -853,27 +867,42 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
     // without it and marked the tab saved. Each editor with such a value is
     // asked for the file with the value in it, which leaves the cell open.
     // Messages from one editor arrive in order, so an edit it sent before its
-    // answer is already in the document. An editor that does not answer in
-    // time is not waited for. Its value is then missing from the file. The
-    // result says whether that happened. The other editors get the text as
-    // they would an edit (takeText). The commit that follows brings nothing
-    // new. Without the text they kept the old one and their next edit wrote
-    // it back over the value.
-    private async flushTyping(document: CsvDocument): Promise<boolean> {
+    // answer is already in the document. An editor that does not answer
+    // within `waitMs` is not waited for. Its value is then missing from the
+    // file. The result says whether that happened. The other editors get the
+    // text as they would an edit (takeText). The commit that follows brings
+    // nothing new. Without the text they kept the old one and their next
+    // edit wrote it back over the value.
+    private async flushTyping(document: CsvDocument, waitMs = FLUSH_TIMEOUT_MS): Promise<boolean> {
         const asking = [...document.typing];
         const answers = asking.map(panel => {
-            const asked = document.flushes.get(panel);
-            if (asked) return asked.answer;
-            let take!: (text: unknown) => void;
-            const answer = new Promise<unknown>(resolve => { take = resolve; });
-            document.flushes.set(panel, { answer, take });
-            const timer = setTimeout(() => take(NO_ANSWER), FLUSH_TIMEOUT_MS);
-            void answer.then(() => {
-                clearTimeout(timer);
-                if (document.flushes.get(panel)?.answer === answer) document.flushes.delete(panel);
+            let flush = document.flushes.get(panel);
+            if (!flush) {
+                let take!: (text: unknown) => void;
+                const answer = new Promise<unknown>(resolve => { take = resolve; });
+                flush = { answer, take, waiting: 0 };
+                document.flushes.set(panel, flush);
+                void answer.then(() => {
+                    if (document.flushes.get(panel)?.answer === answer) document.flushes.delete(panel);
+                });
+                void panel.webview.postMessage({ type: 'flush' });
+            }
+            // A save and a backup share one answer, but each waits only as
+            // long as it may. A save that comes while a backup waits would
+            // otherwise wait as long as the backup. Once nobody waits any
+            // more, the next one asks again.
+            const asked = flush;
+            asked.waiting++;
+            return new Promise<unknown>(resolve => {
+                const timer = setTimeout(() => {
+                    if (--asked.waiting === 0) asked.take(NO_ANSWER);
+                    resolve(NO_ANSWER);
+                }, waitMs);
+                void asked.answer.then(text => {
+                    clearTimeout(timer);
+                    resolve(text);
+                });
             });
-            void panel.webview.postMessage({ type: 'flush' });
-            return answer;
         });
         let missed = false;
         (await Promise.all(answers)).forEach((text, i) => {
@@ -1149,6 +1178,13 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         // A save refused below does not wait for it.
         const waited = !document.conflict && document.typing.size > 0;
         const missed = waited && await this.flushTyping(document);
+        // The changes are counted right after the answer. Anything that
+        // comes in after it, during the read below or during the write,
+        // marks the tab again once the save is through. Counted after the
+        // read, a key typed during it looked written. With auto-save after
+        // a delay the tab then looked saved with only part of the value in
+        // the file. Ctrl+W threw the rest away.
+        const changes = document.changes;
         // A change on disk during that wait can also be reported only after
         // it. With a large file VS Code told of the change once the grid's
         // answer was in, when the save had written over it already. So the
@@ -1182,7 +1218,6 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         const { bytes, encoding } = document.encode();
         const before = document.encoding;
         const pending = { text: document.content, encoding };
-        const changes = document.changes;
         document.pendingSave = pending;
         try {
             await vscode.workspace.fs.writeFile(document.uri, bytes);
@@ -1193,10 +1228,11 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         document.encoding = encoding;
         if (encoding !== before) warnSavedAsUtf8(document.uri);
         // VS Code marks the tab saved once this returns, whatever came in
-        // while the file was being written: an edit or a value typed into
-        // a cell after the save took the one before. The tab then looked
-        // saved without it and closing it lost it. It is marked again once
-        // the save is through, the same for a value the save did not get.
+        // while the file was being read or written: an edit or a value
+        // typed into a cell after the save took the one before. The tab
+        // then looked saved without it and closing it lost it. It is marked
+        // again once the save is through, the same for a value the save did
+        // not get.
         if (missed || document.content !== pending.text || document.changes !== changes) {
             setTimeout(() => this.fireChange(document), 0);
         }
@@ -1262,9 +1298,17 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         // A value being typed in a cell marks the tab unsaved, so the backup
         // takes it too, the way a save does (flushTyping). Ctrl+Q with the
         // cell open brought the tab back after the restart without it. The
-        // grid tells of the next change of the value again, so VS Code then
-        // takes a newer backup.
-        if (document.typing.size > 0) await this.flushTyping(document);
+        // grid tells of every change of the value, so VS Code takes a newer
+        // backup once the typing pauses.
+        // The grid writes out the whole file for its answer. Above the size
+        // where the extension asks how to open a file, that holds the grid
+        // up for a third of a second at 35 MB and for over a second at
+        // 94 MB, each time the typing pauses. So the backup of such a file
+        // keeps what the document has. A value still being typed in it does
+        // not come back after a restart. A save still takes it.
+        if (document.typing.size > 0 && document.content.length <= LARGE_FILE_THRESHOLD) {
+            await this.flushTyping(document, BACKUP_TIMEOUT_MS);
+        }
         const utf16 = document.encoding === 'utf16le' || document.encoding === 'utf16be';
         const bytes = utf16 ? Buffer.from(document.content, 'utf16le') : new TextEncoder().encode(document.content);
         await vscode.workspace.fs.writeFile(context.destination, bytes);
