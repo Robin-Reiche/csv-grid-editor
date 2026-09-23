@@ -525,17 +525,38 @@ export function refreshProfileIfOpen(): void {
 
 type DockSide = 'right' | 'bottom' | 'left';
 
-// Panel size limits. Shared by the drag and by restoring a saved size, so a size
-// dragged out on a wide window cannot squeeze the grid away on a narrow one.
+// Panel size limits. Shared by the drag, by restoring a saved size and by the
+// stylesheet default, so a panel cannot squeeze the grid away on a narrow
+// window, whether its size was dragged out on a wide one or never set at all.
 const MIN_PANEL_W  = 180;
 const MIN_PANEL_H  = 80;
 const KEEP_GRID_W  = 250;
 const KEEP_GRID_H  = 120;
 
+// Measured against the row the grid and the panel share rather than the
+// window. The toolbar and the footer take their part of the height first.
 function clampPanel(dock: DockSide, px: number): number {
+    const room = document.getElementById('content-row');
     return dock === 'bottom'
-        ? Math.max(MIN_PANEL_H, Math.min(px, window.innerHeight - KEEP_GRID_H))
-        : Math.max(MIN_PANEL_W, Math.min(px, window.innerWidth  - KEEP_GRID_W));
+        ? Math.max(MIN_PANEL_H, Math.min(px, (room?.clientHeight ?? window.innerHeight) - KEEP_GRID_H))
+        : Math.max(MIN_PANEL_W, Math.min(px, (room?.clientWidth  ?? window.innerWidth)  - KEEP_GRID_W));
+}
+
+// Sizes the open panel for its dock to the size it was last dragged to there.
+// A panel never dragged starts from the stylesheet default, which used to be
+// left as it was, so the 295px panel left the grid 85px in a 380px editor.
+// Runs when the panel opens or changes dock and when the editor is resized,
+// so the panel gives way in a narrow editor and takes its size back in a wide
+// one. The saved size stays what the user dragged.
+function applyPanelSize(): void {
+    const dock  = state.profileDock as DockSide;
+    const panel = document.getElementById('profile-panel')!;
+    const side  = dock === 'bottom' ? 'height' : 'width';
+    const saved = dock === 'bottom' ? state.profileHeight : state.profileWidth;
+    // Cleared first, so the default can be read off the stylesheet.
+    panel.style[side] = '';
+    const px = saved || (dock === 'bottom' ? panel.offsetHeight : panel.offsetWidth);
+    panel.style[side] = clampPanel(dock, px) + 'px';
 }
 
 function persistProfileLayout(): void {
@@ -560,13 +581,7 @@ function applyDock(dock: DockSide): void {
     if (dock === 'bottom') panel.style.width  = '';
     else                   panel.style.height = '';
 
-    // Restore the size this dock was last dragged to. 0 means never resized, in
-    // which case the CSS default stays.
-    if (dock === 'bottom') {
-        panel.style.height = state.profileHeight ? clampPanel(dock, state.profileHeight) + 'px' : '';
-    } else {
-        panel.style.width  = state.profileWidth  ? clampPanel(dock, state.profileWidth)  + 'px' : '';
-    }
+    applyPanelSize();
 
     document.querySelectorAll<HTMLElement>('.profile-dock-btn').forEach(btn => {
         btn.classList.toggle('profile-dock-btn--active', btn.dataset.dock === dock);
@@ -651,6 +666,9 @@ export function setupProfile(): void {
         });
     });
     setupResizeHandle();
+    window.addEventListener('resize', () => {
+        if (state.profileOpen) applyPanelSize();
+    });
     document.addEventListener('csv-col-types-changed', () => {
         if (state.profileOpen) renderProfile();
     });
