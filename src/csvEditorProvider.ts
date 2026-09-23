@@ -51,6 +51,14 @@ function warnSavedAsUtf8(uri: vscode.Uri): void {
 // it is written into the file itself.
 const HEADERLESS_KEY = 'csvGridEditor.headerless';
 
+// The key of a document's file in that map. VS Code opens the HEAD side of a
+// Source Control diff as a grid too, under a git: URI with the file's path and
+// the ref in its query. Keyed by that URI, the two grids of the diff were one
+// row out of step and a switch made on the HEAD side stayed there.
+function headerKey(uri: vscode.Uri): string {
+    return uri.scheme === 'git' ? vscode.Uri.file(uri.fsPath).toString() : uri.toString();
+}
+
 function isHeaderless(stored: unknown, uri: string): boolean {
     return !!stored && typeof stored === 'object'
         && Object.prototype.hasOwnProperty.call(stored, uri)
@@ -200,9 +208,9 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
     // which looks the switch up by the copy's URI.
     private copyHeaderRow(from: vscode.Uri, to: vscode.Uri): void {
         const stored = this.context.globalState.get(HEADERLESS_KEY);
-        const headerless = isHeaderless(stored, from.toString());
-        if (headerless === isHeaderless(stored, to.toString())) return;
-        this.context.globalState.update(HEADERLESS_KEY, rememberHeaderRow(stored, to.toString(), !headerless));
+        const headerless = isHeaderless(stored, headerKey(from));
+        if (headerless === isHeaderless(stored, headerKey(to))) return;
+        this.context.globalState.update(HEADERLESS_KEY, rememberHeaderRow(stored, headerKey(to), !headerless));
     }
 
     // "CSV Grid: Reload from Disk". File > Revert File cannot serve as the manual
@@ -467,7 +475,7 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
 
         webviewPanel.webview.onDidReceiveMessage(async (msg) => {
             if (msg.type === 'ready') {
-                const firstRowIsHeader = !isHeaderless(this.context.globalState.get(HEADERLESS_KEY), document.uri.toString());
+                const firstRowIsHeader = !isHeaderless(this.context.globalState.get(HEADERLESS_KEY), headerKey(document.uri));
                 if (document.isChunked && document.pageIndex) {
                     const pageText = await readPage(document.uri.fsPath, document.pageIndex, 0);
                     webviewPanel.webview.postMessage({
@@ -506,9 +514,8 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             // for the same trust boundary as above.
             } else if (msg.type === 'headerRowChanged') {
                 if (typeof msg.value === 'boolean') {
-                    const uri = document.uri.toString();
                     this.context.globalState.update(HEADERLESS_KEY,
-                        rememberHeaderRow(this.context.globalState.get(HEADERLESS_KEY), uri, msg.value));
+                        rememberHeaderRow(this.context.globalState.get(HEADERLESS_KEY), headerKey(document.uri), msg.value));
                 }
 
             } else if (msg.type === 'wrapTextChanged') {

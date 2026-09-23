@@ -9,7 +9,9 @@
 //
 // A copy made with Save As and a file renamed or moved in VS Code keep the
 // switch. VS Code opens either as a new document under the new URI, which had
-// no entry, so the first data row turned back into column names.
+// no entry, so the first data row turned back into column names. The HEAD
+// side of a Source Control diff shows the same file under a git: URI and
+// looks the switch up under the file's own.
 //
 // Drives the real provider against a stubbed vscode API.
 //
@@ -78,11 +80,13 @@ function register(store) {
     });
 }
 
-// Opens `filePath` against a globalState held in `store`. Returns what the
-// grid was told at start and a way to send the provider messages.
-async function open(store, filePath, openContext = {}) {
+// Opens `file`, a path or a URI, against a globalState held in `store`.
+// Returns what the grid was told at start and a way to send the provider
+// messages.
+async function open(store, file, openContext = {}) {
     const provider = new CsvEditorProvider(contextFor(store));
-    const doc = await provider.openCustomDocument(vscodeStub.Uri.file(filePath), openContext, {});
+    const uri = typeof file === 'string' ? vscodeStub.Uri.file(file) : file;
+    const doc = await provider.openCustomDocument(uri, openContext, {});
     const posted = [];
     let onMessage = null;
     const panel = {
@@ -178,6 +182,27 @@ async function main() {
         const a = await open(store, '/data/a.csv');
         await a.saveAs('/data/b.csv');
         assert.strictEqual((await open(store, '/data/b.csv')).init.firstRowIsHeader, true);
+    });
+
+    // A Source Control diff opens the HEAD side as a grid of its own, under
+    // the file's path with the git scheme and the ref in the query.
+    const gitUri = (p, ref) => {
+        const query = JSON.stringify({ path: p, ref });
+        return { scheme: 'git', fsPath: p, toString: () => 'git:' + p + '?' + encodeURIComponent(query) };
+    };
+
+    await test('both sides of a Source Control diff show the file the same way', async () => {
+        const store = new Map([[KEY, { 'file:///data/a.csv': true }]]);
+        const head = await open(store, gitUri('/data/a.csv', 'HEAD'));
+        assert.strictEqual(head.init.firstRowIsHeader, false, 'the HEAD side took its first row for the header');
+    });
+
+    await test('the switch on the HEAD side of a diff is stored for the file', async () => {
+        const store = new Map();
+        const head = await open(store, gitUri('/data/a.csv', '~'));
+        await head.send({ type: 'headerRowChanged', value: false });
+        assert.deepStrictEqual(store.get(KEY), { 'file:///data/a.csv': true });
+        assert.strictEqual((await open(store, '/data/a.csv')).init.firstRowIsHeader, false);
     });
 
     await test('a renamed or moved file keeps the switch', async () => {
