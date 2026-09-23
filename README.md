@@ -3,6 +3,7 @@
 [![Version](https://badgen.net/vs-marketplace/v/RobinReiche.csv-grid-editor)](https://marketplace.visualstudio.com/items?itemName=RobinReiche.csv-grid-editor)
 [![Installs](https://badgen.net/vs-marketplace/i/RobinReiche.csv-grid-editor)](https://marketplace.visualstudio.com/items?itemName=RobinReiche.csv-grid-editor)
 [![Rating](https://badgen.net/vs-marketplace/rating/RobinReiche.csv-grid-editor)](https://marketplace.visualstudio.com/items?itemName=RobinReiche.csv-grid-editor&ssr=false#review-details)
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-buy%20me%20a%20coffee-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/robinreiche)
 
 A fast, feature-rich CSV/TSV editor for Visual Studio Code. Opens CSV files in a sortable, filterable, editable grid, right inside your editor, no external tools needed.
 
