@@ -50,6 +50,12 @@ const FIND = `
     item.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await t.wait(400);
   }
+  // Picks an entry of the column menu as if it was opened on the column.
+  async function colMenu(t, colId, itemId) {
+    document.getElementById('col-context-menu').dataset.colId = colId;
+    document.getElementById(itemId).dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await t.wait(400);
+  }
   // The rows of the grid that hold the active mark, as the cells there read.
   const activeAt = () => [...document.querySelectorAll('#grid-container .ag-center-cols-container .cell-find-active')]
     .map(el => el.closest('.ag-row').getAttribute('row-index') + ':' + el.textContent).join(',');
@@ -844,6 +850,112 @@ runSuite('find and replace (browser)', [
             t.check(count() === '3 / 5' && activeAt() === '2:x3', 'x3 keeps the active match after Undo (' + count() + ', ' + activeAt() + ')');
             await press(t, 'replace-one');
             t.check(t.lastEdit() === 'k,v\\nx1,b\\nx2,z\\nY3,c\\nx4,d\\nx5,a\\n', 'Replace takes x3 (' + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
+    {
+        // A match remembers its column by its place. With a column to its
+        // left gone, that place named the column to its right. The active
+        // match jumped to the next row and Replace changed that row.
+        name: 'deleting a column left of the active match keeps it',
+        csv: 'a,k,v\nq,x1,a\nq,x2,b\nq,x3,c\nq,x4,d\n',
+        steps: steps(`
+            await t.init(csv);
+            await find(t, 'x', 'Y');
+            await press(t, 'find-next');
+            await press(t, 'find-next');
+            t.check(count() === '3 / 4' && activeAt() === '2:x3', 'Next moved to x3 (' + count() + ', ' + activeAt() + ')');
+            await colMenu(t, 'col_0', 'col-ctx-delete');
+            t.check(t.lastEdit() === 'k,v\\nx1,a\\nx2,b\\nx3,c\\nx4,d\\n', 'column a is deleted (' + JSON.stringify(t.lastEdit()) + ')');
+            t.check(count() === '3 / 4' && activeAt() === '2:x3', 'x3 keeps the active match (' + count() + ', ' + activeAt() + ')');
+            await press(t, 'replace-one');
+            t.check(t.lastEdit() === 'k,v\\nx1,a\\nx2,b\\nY3,c\\nx4,d\\n', 'Replace takes x3 (' + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
+    {
+        // The match right of it in the same row took its place.
+        name: 'undo of a column deleted left of the active match keeps it',
+        csv: 'a,k,m\nq,x1,p\nq,x2,p\nq,x3,x3b\nq,x4,p\n',
+        steps: steps(`
+            await t.init(csv);
+            await find(t, 'x', 'Y');
+            await press(t, 'find-next');
+            await press(t, 'find-next');
+            t.check(count() === '3 / 5' && activeAt() === '2:x3', 'Next moved to x3 (' + count() + ', ' + activeAt() + ')');
+            await colMenu(t, 'col_0', 'col-ctx-delete');
+            t.check(count() === '3 / 5' && activeAt() === '2:x3', 'x3 keeps the active match after the delete (' + count() + ', ' + activeAt() + ')');
+            await press(t, 'btn-undo');
+            t.check(t.lastEdit() === csv, 'undo brings column a back (' + JSON.stringify(t.lastEdit()) + ')');
+            t.check(count() === '3 / 5' && activeAt() === '2:x3', 'x3 keeps the active match after Undo (' + count() + ', ' + activeAt() + ')');
+            await press(t, 'replace-one');
+            t.check(t.lastEdit() === 'a,k,m\\nq,x1,p\\nq,x2,p\\nq,Y3,x3b\\nq,x4,p\\n', 'Replace takes x3 (' + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
+    {
+        // The next match after it is where Next would have gone, the same
+        // as when the row of the active match is deleted.
+        name: 'deleting the column of the active match moves on to the next match',
+        csv: 'k,v\nx1,xa\nx2,xb\nx3,xc\n',
+        steps: steps(`
+            await t.init(csv);
+            await find(t, 'x', 'Y');
+            await press(t, 'find-next');
+            t.check(count() === '2 / 6' && activeAt() === '0:xa', 'Next moved to xa (' + count() + ', ' + activeAt() + ')');
+            await colMenu(t, 'col_1', 'col-ctx-delete');
+            t.check(t.lastEdit() === 'k\\nx1\\nx2\\nx3\\n', 'column v is deleted (' + JSON.stringify(t.lastEdit()) + ')');
+            t.check(count() === '2 / 3' && activeAt() === '1:x2', 'x2 has the active match (' + count() + ', ' + activeAt() + ')');
+            await press(t, 'replace-one');
+            t.check(t.lastEdit() === 'k\\nx1\\nY2\\nx3\\n', 'Replace takes x2 (' + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
+    {
+        // Undo put back a copy of the columns, so the search that ran again
+        // looked for the active match at its place in the wider table.
+        name: 'undo and redo of a column inserted left of the active match keep it',
+        csv: 'k,v\nx1,a\nx2,b\nx3,c\nx4,d\n',
+        steps: steps(`
+            await t.init(csv);
+            await find(t, 'x', 'Y');
+            await press(t, 'find-next');
+            await press(t, 'find-next');
+            t.check(count() === '3 / 4' && activeAt() === '2:x3', 'Next moved to x3 (' + count() + ', ' + activeAt() + ')');
+            await colMenu(t, 'col_0', 'col-ctx-insert-left');
+            t.check(t.lastEdit() === ',k,v\\n,x1,a\\n,x2,b\\n,x3,c\\n,x4,d\\n', 'a column is added on the left (' + JSON.stringify(t.lastEdit()) + ')');
+            t.check(count() === '3 / 4' && activeAt() === '2:x3', 'x3 keeps the active match after the insert (' + count() + ', ' + activeAt() + ')');
+            await press(t, 'btn-undo');
+            t.check(t.lastEdit() === csv, 'undo takes the column away (' + JSON.stringify(t.lastEdit()) + ')');
+            t.check(count() === '3 / 4' && activeAt() === '2:x3', 'x3 keeps the active match after Undo (' + count() + ', ' + activeAt() + ')');
+            await press(t, 'btn-redo');
+            t.check(count() === '3 / 4' && activeAt() === '2:x3', 'and after Redo (' + count() + ', ' + activeAt() + ')');
+            await press(t, 'btn-undo');
+            t.check(count() === '3 / 4' && activeAt() === '2:x3', 'and after Undo again (' + count() + ', ' + activeAt() + ')');
+            await press(t, 'replace-one');
+            t.check(t.lastEdit() === 'k,v\\nx1,a\\nx2,b\\nY3,c\\nx4,d\\n', 'Replace takes x3 (' + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
+    {
+        // Without a header row the grid's first row holds the column
+        // letters, which read the same before and after a column step.
+        name: 'column steps in a file without a header keep the active match',
+        csv: 'q,x1,a\nq,x2,b\nq,x3,c\nq,x4,d\n',
+        steps: steps(`
+            window.postMessage({ type: 'init', text: csv, delimiter: ',', firstRowIsHeader: false }, '*');
+            await t.wait(900);
+            await find(t, 'x', 'Y');
+            await press(t, 'find-next');
+            await press(t, 'find-next');
+            t.check(count() === '3 / 4' && activeAt() === '2:x3', 'Next moved to x3 (' + count() + ', ' + activeAt() + ')');
+            await colMenu(t, 'col_0', 'col-ctx-delete');
+            t.check(t.lastEdit() === 'x1,a\\nx2,b\\nx3,c\\nx4,d\\n', 'the first column is deleted (' + JSON.stringify(t.lastEdit()) + ')');
+            t.check(count() === '3 / 4' && activeAt() === '2:x3', 'x3 keeps the active match after the delete (' + count() + ', ' + activeAt() + ')');
+            await press(t, 'btn-undo');
+            t.check(count() === '3 / 4' && activeAt() === '2:x3', 'and after Undo (' + count() + ', ' + activeAt() + ')');
+            await colMenu(t, 'col_0', 'col-ctx-insert-left');
+            t.check(count() === '3 / 4' && activeAt() === '2:x3', 'and after an insert on the left (' + count() + ', ' + activeAt() + ')');
+            await press(t, 'btn-undo');
+            t.check(t.lastEdit() === csv, 'undo writes the file as it was (' + JSON.stringify(t.lastEdit()) + ')');
+            t.check(count() === '3 / 4' && activeAt() === '2:x3', 'and after its Undo (' + count() + ', ' + activeAt() + ')');
+            await press(t, 'replace-one');
+            t.check(t.lastEdit() === 'q,x1,a\\nq,x2,b\\nq,Y3,c\\nq,x4,d\\n', 'Replace takes x3 (' + JSON.stringify(t.lastEdit()) + ')');
         `),
     },
     {

@@ -261,4 +261,64 @@ runSuite('delimiter switch (browser)', [
                 'the header line is written as it was (' + JSON.stringify(t.lastEdit()) + ')');
         }`,
     },
+    {
+        // A save while a cell is being typed in asks the grid for the file
+        // with the value in it. That answer was written without the file's
+        // name, so the header gained the quotes a .tsv header never gets.
+        // The commit right after took them off again and marked the tab
+        // unsaved with nothing changed.
+        name: 'a save while typing in a .tsv file writes the header as it stands',
+        csv: 'Name, Vorname\tStadt\nMüller, Jörg\tKöln\n',
+        fileName: 'names.tsv',
+        steps: `async (t, csv) => { ${HELPERS}
+            await t.init(csv, '\\t');
+            await t.focusCell(0, 1);
+            await t.pressEnter();
+            const ta = document.querySelector('#grid-container textarea');
+            if (!ta) { t.check(false, 'Enter opens the editor'); return; }
+            ta.value = 'Bonn';
+            ta.dispatchEvent(new Event('input', { bubbles: true }));
+            window.postMessage({ type: 'flush' }, '*');
+            await t.wait(150);
+            const f = t.sent('flushed')[0];
+            t.check(!!f && f.text === 'Name, Vorname\\tStadt\\nMüller, Jörg\\tBonn\\n',
+                'the save takes the header as it was (' + JSON.stringify(f) + ')');
+            await t.pressEnter();
+            t.check(!!f && t.lastEdit() === f.text, 'the commit writes the same text (' + JSON.stringify(t.lastEdit()) + ')');
+        }`,
+    },
+    {
+        // The header kept quotes that point back to the delimiter in use.
+        // After a delimiter picked by mistake that put quotes into a header
+        // split in the wrong places. Once the right delimiter was picked
+        // again, they sat in the middle of the names. The saved file opened
+        // with the wrong delimiter.
+        name: 'a delimiter picked by mistake leaves the header as it was',
+        csv: 'Name, Vorname;Stadt;PLZ\n1;2;3\n4;5;6\n',
+        steps: `async (t, csv) => { ${HELPERS}
+            await t.init(csv, ';');
+            t.check(t.names() === 'Name, Vorname|Stadt|PLZ|-', 'the file opens on the semicolon (' + t.names() + ')');
+            await t.delim(',');
+            await t.edit(1, 0, 'X');
+            t.check(t.lastEdit() === 'Name, Vorname;Stadt;PLZ\\n1;2;3\\nX\\n',
+                'the edit leaves the header line as it was (' + JSON.stringify(t.lastEdit()) + ')');
+            await t.delim(';');
+            t.check(t.names() === 'Name, Vorname|Stadt|PLZ|-', 'the semicolon splits the names again (' + t.names() + ')');
+            await t.edit(0, 1, '9');
+            t.check(t.lastEdit() === 'Name, Vorname;Stadt;PLZ\\n1;9;3\\nX\\n',
+                'and the next edit keeps the header too (' + JSON.stringify(t.lastEdit()) + ')');
+        }`,
+    },
+    {
+        name: 'a delimiter picked by mistake leaves the header of a comma file as it was',
+        csv: 'a,b;c,d\n1,2,3\n',
+        steps: steps(`
+            await t.delim(';');
+            await t.edit(0, 0, 'X');
+            t.check(t.lastEdit() === 'a,b;c,d\\nX\\n', 'the edit leaves the header line as it was ('
+                + JSON.stringify(t.lastEdit()) + ')');
+            await t.delim(',');
+            t.check(t.names() === 'a|b;c|d|-', 'the comma splits the names again (' + t.names() + ')');
+        `),
+    },
 ]);

@@ -1,7 +1,7 @@
 import { state, withVirtualHeader, fileRows, snapshotInHeaderMode } from '../state';
 import type { CsvRow } from '../types';
 import { parseCsv } from '../utils/csv';
-import { buildGrid } from '../grid/builder';
+import { buildGrid, commitOpenEditor } from '../grid/builder';
 import { updatePreviewBanner } from '../messaging';
 import { updatePageBanner } from './pagination';
 import { clearRangeSelection } from './range-select';
@@ -51,10 +51,10 @@ export function setFirstRowIsHeader(on: boolean): void {
     // The switch sits behind the gear, and clicking the gear takes the focus out
     // of the grid, which saves a value being typed right there
     // (stopEditingWhenCellsLoseFocus in grid/builder.ts). So no editor is open
-    // here in practice. Should one be, it is closed before the rows move under
-    // it. What it holds is not kept: the grid reports the value after this
-    // function has already rebuilt it.
-    if (state.isCellEditing) state.gridApi?.stopEditing();
+    // here in practice. Should one be, its value is written before the rows
+    // move under it. The grid reports a commit on a timer, after this function
+    // has already rebuilt the grid. That report never reached the file.
+    if (state.isCellEditing) commitOpenEditor(false);
     // Both hold rows by the place they are shown at, which is about to change.
     clearRangeSelection();
     resetDuplicatesState();

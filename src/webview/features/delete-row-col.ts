@@ -2,7 +2,7 @@ import { state, getNumCols, emptyTableKind } from '../state';
 import { pushUndo, notifyChange } from './undo-redo';
 import { refreshGrid, focusCell, revealAddedRow } from '../grid/refresh';
 import { recomputeColTypes } from '../grid/column-type';
-import { buildGrid } from '../grid/builder';
+import { buildGrid, commitOpenEditor } from '../grid/builder';
 import {
     deleteColumnsFromData,
     deleteRowsFromData,
@@ -23,7 +23,7 @@ import { closeAllPopups } from './popups';
 import { addFirstRow, addFirstColumn } from './empty-state';
 import { resetDuplicatesState } from './duplicates';
 import { shownValue } from '../grid/control-char-cell';
-import { followMovedRows } from './find-replace';
+import { followMovedRows, followMovedColumns } from './find-replace';
 
 // ── Data mutations ────────────────────────────────────────────────────────────
 
@@ -46,6 +46,8 @@ function deleteColumns(colIndices: number[]): void {
     state.data = deleteColumnsFromData(state.data, indices);
     state.frozenRowRefs = frozenIdxs.map(i => state.data[i]);
     state.pinnedCols = shiftIndicesAfterDelete(state.pinnedCols, indices); // keep frozen columns frozen
+    // The find matches move with their columns before buildGrid searches again.
+    followMovedColumns(c => [...shiftIndicesAfterDelete([c], indices)][0]);
     state.hiddenCols.clear(); // column indices shifted — drop index-based hide state
     state.isAutoFitted = false;
     state.autoFitCache = null;
@@ -216,15 +218,26 @@ export function insertRowAtFocus(position: 'above' | 'below'): void {
         return;
     }
 
-    // Commit the half-typed value first. refreshGrid() further down replaces the
-    // row data under the open editor, and an uncommitted edit would go with it.
-    if (state.isCellEditing) state.gridApi.stopEditing();
-
     const rows = shortcutRows(rowIndex);
-    const anchor = position === 'above' ? Math.min(...rows) : Math.max(...rows);
+    let anchor = position === 'above' ? Math.min(...rows) : Math.max(...rows);
     // Read the column before inserting too. Clearing a filter in insertRows
     // resets the grid's focus. The tracked column goes with it.
     const colId = state.focusedCellColId;
+
+    // Commit the half-typed value first. refreshGrid() further down replaces the
+    // row data under the open editor, and an uncommitted edit would go with it.
+    // It is written here, while the rows are still in place. The grid reports
+    // a commit on a timer, after the insert had moved the rows. The value
+    // then went to the row that had taken that place, under a sort another
+    // row's value. The grid did not show it. Writing it ends the "Show only
+    // duplicates" view, as every edit does, which shows the rows in the order
+    // of the file. The anchor is then found again by its row.
+    if (state.isCellEditing) {
+        const id = state.gridApi.getDisplayedRowAtIndex(anchor)?.id;
+        commitOpenEditor(false);
+        const shown = id != null ? state.gridApi.getRowNode(id)?.rowIndex : null;
+        if (shown != null) anchor = shown;
+    }
     const first = insertRows(anchor, position, rows.length);
 
     // Land on the first row that was just inserted, the way VS Code leaves the
@@ -261,6 +274,8 @@ function insertColumns(baseIndex: number, position: 'left' | 'right', count: num
     state.data = insertColumnsIntoData(state.data, insertAt, count);
     state.frozenRowRefs = frozenIdxs.map(i => state.data[i]);
     state.pinnedCols = shiftIndicesAfterInsert(state.pinnedCols, insertAt, count); // keep frozen columns frozen
+    // The find matches move with their columns before buildGrid searches again.
+    followMovedColumns(c => c >= insertAt ? c + count : c);
     state.hiddenCols.clear(); // column indices shifted — drop index-based hide state
     state.isAutoFitted = false;
     state.autoFitCache = null;

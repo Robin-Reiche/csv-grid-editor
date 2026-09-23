@@ -198,6 +198,34 @@ runSuite('first row is the header (browser)', [
         `),
     },
     {
+        // The switch builds the grid again. The grid reported a value still
+        // being typed only after that, when nothing listened any more, and
+        // the value never reached the file.
+        name: 'switching while a value is being typed keeps it',
+        csv: 'name,city\nAnna,Berlin\nBen,Oslo\n',
+        steps: steps(`
+            const type = async (row, col, value) => {
+                await t.focusCell(row, col);
+                await t.pressEnter();
+                const ta = document.querySelector('#grid-container textarea');
+                if (!ta) { t.check(false, 'Enter opens the editor on ' + row + ',' + col); return false; }
+                ta.value = value;
+                ta.dispatchEvent(new Event('input', { bubbles: true }));
+                return true;
+            };
+            if (!await type(0, 1, 'X')) return;
+            await t.header1(false);
+            t.check(t.lastEdit() === 'name,city\\nAnna,X\\nBen,Oslo\\n', 'the value is written ('
+                + JSON.stringify(t.lastEdit()) + ')');
+            t.check(t.col(1) === 'city,X,Oslo', 'and shown in its row (' + t.col(1) + ')');
+            if (!await type(1, 1, 'Y')) return;
+            await t.header1(true);
+            t.check(t.lastEdit() === 'name,city\\nAnna,Y\\nBen,Oslo\\n', 'switching back writes the next one ('
+                + JSON.stringify(t.lastEdit()) + ')');
+            t.check(t.col(1) === 'Y,Oslo', 'and shows it in its row (' + t.col(1) + ')');
+        `),
+    },
+    {
         // Only the first line has a third field. Deleting it takes the third
         // column away, and the letters have to follow the rows that are left.
         name: 'deleting the only wide row',

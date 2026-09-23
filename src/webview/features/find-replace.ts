@@ -1,4 +1,4 @@
-import { state } from '../state';
+import { state, getNumCols } from '../state';
 import { pushUndo, notifyChange } from './undo-redo';
 import { scheduleRecomputeColTypes } from '../grid/column-type';
 import { markValueListsStale } from '../grid/filter';
@@ -321,16 +321,63 @@ export function followRestoredRows(before: CsvRow[]): void {
     moveMatches(i => i < above ? i : i >= firstBelow ? i + added : between(i));
 }
 
+// Public: an insert or a delete moved the columns. A match remembers its
+// column by its place, col_N. With a column to its left deleted, that place
+// named the column to its right. The search that runs again next found the
+// active match there or found none in its row and moved on. Replace then
+// changed that cell. Each match is moved to the place `to` gives for its
+// column's old place, undefined for a column that is gone.
+export function followMovedColumns(to: (col: number) => number | undefined): void {
+    if (!state.findMatches.length) return;
+    moveMatches(to, true);
+}
+
+// Public: undo or redo put back the columns of a step. state.data held
+// `before` until then. Undoing a column inserted left of the active match
+// left its place naming the column to its right, so the mark jumped and
+// Replace changed that cell. A step that inserts or deletes columns keeps
+// every row, so the columns are told apart by what they hold from top to
+// bottom. The letters of a file without a header are left out: they read
+// A, B, C whatever the columns hold. A step changes columns in one direction
+// only. Going along both tables, a column that differs is one the step added
+// or took away. A step that keeps the number of columns changed them where
+// they are. So does one that changes the number of rows as well: deleting
+// the only row that reaches past the others takes a column away at the right
+// end.
+export function followRestoredColumns(before: CsvRow[]): void {
+    if (!state.findMatches.length) return;
+    const after = state.data;
+    const fromCols = getNumCols(before);
+    const toCols = getNumCols(after);
+    if (fromCols === toCols || before.length !== after.length) return;
+    const top = state.firstRowIsHeader ? 0 : 1;
+    const same = (i: number, j: number): boolean => {
+        for (let r = top; r < after.length; r++) {
+            if ((before[r][i] ?? '') !== (after[r][j] ?? '')) return false;
+        }
+        return true;
+    };
+    const place = new Map<number, number>();
+    for (let i = 0, j = 0; i < fromCols && j < toCols;) {
+        if (same(i, j)) place.set(i++, j++);
+        else if (toCols > fromCols) j++;
+        else i++;
+    }
+    moveMatches(i => place.get(i), true);
+}
+
 // Moves each match to the place `to` gives for its row's old place in
-// state.data, undefined for a row that is gone. When the row of the active
-// match is gone, the next match whose row is still there becomes the active
-// one, the match Next would have gone to.
-function moveMatches(to: (origIndex: number) => number | undefined): void {
+// state.data, undefined for a row that is gone. With `columns` set it moves
+// each match's column the same way. When the row or the column of the active
+// match is gone, the next match that is still there becomes the active one,
+// the match Next would have gone to.
+function moveMatches(to: (from: number) => number | undefined, columns = false): void {
     const matches = state.findMatches;
     const kept = matches.map(m => {
-        const at = to(m.origIndex);
+        const at = to(columns ? parseInt(m.colField.slice(4), 10) : m.origIndex);
         if (at === undefined) return false;
-        m.origIndex = at;
+        if (columns) m.colField = 'col_' + at;
+        else m.origIndex = at;
         return true;
     });
     const from = state.findMatchIndex;

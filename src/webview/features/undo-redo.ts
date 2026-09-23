@@ -1,13 +1,13 @@
 import { state, fileRows } from '../state';
-import { toCsv } from '../utils/csv';
+import { toCsv, delimiterOfFile } from '../utils/csv';
 import { refreshGrid } from '../grid/refresh';
 import { buildGrid } from '../grid/builder';
 import { recomputeColTypes } from '../grid/column-type';
 import { resetDuplicatesState } from './duplicates';
 import { refreshProfileIfOpen } from './profile';
 import { updateDelimiterBadge } from './delimiter';
-import { followRestoredRows } from './find-replace';
-import type { UndoSnapshot } from '../types';
+import { followRestoredRows, followRestoredColumns } from './find-replace';
+import type { CsvRow, UndoSnapshot } from '../types';
 
 // Captures the undoable view state: a deep clone of the data plus the freeze
 // state. The freeze is stored by POSITION (frozen-row indices, pinned-column
@@ -40,8 +40,10 @@ function restore(snap: UndoSnapshot): void {
     state.data = snap.data;
     // The grid searches again once it shows these rows and looks for the
     // active match at its old place, so the matches move with their rows
-    // first.
+    // first. And with their columns, unless the step splits the rows on
+    // another delimiter, which makes other columns altogether.
     followRestoredRows(before);
+    if (!resplit) followRestoredColumns(before);
     state.currentDelimiter = snap.delimiter;
     state.lineFormat = snap.lineFormat;
     // Re-anchor frozen rows to the restored (cloned) arrays at their saved
@@ -125,6 +127,19 @@ export function updateButtons(): void {
     if (r) r.disabled = editor ? !editor.canRedo() : state.redoStack.length === 0;
 }
 
+// The text the file gets for the grid's table `data`. An edit (notifyChange)
+// and a save that takes a value still being typed (flushOpenEditor in
+// grid/builder.ts) both write it from here. Written in two places they drifted
+// apart: the save left out the file's name, so a .tsv header with a comma
+// gained quotes that the commit right after took off again. The header keeps
+// the quotes that tell its delimiter only while the file reads as the
+// delimiter in use (toCsv). After a delimiter picked by mistake it is written
+// as it stands.
+export function fileText(data: CsvRow[]): string {
+    const headerQuotes = delimiterOfFile(FILENAME, state.rawCsvText) === state.currentDelimiter;
+    return toCsv(fileRows(data, !state.firstRowIsHeader), state.currentDelimiter, state.lineFormat, FILENAME, headerQuotes);
+}
+
 // `known` is the file's text when the caller has it already: undo and redo
 // pass the text their step was taken at.
 export function notifyChange(known?: string): void {
@@ -147,7 +162,7 @@ export function notifyChange(known?: string): void {
     // again from the rows, a step taken after a delimiter switch lost the
     // quotes the file needed: its rows were split on a delimiter the file
     // was not written with.
-    const text = known ?? toCsv(fileRows(state.data, !state.firstRowIsHeader), state.currentDelimiter, state.lineFormat, FILENAME);
+    const text = known ?? fileText(state.data);
     // The file already holds this text when it is the one last sent or
     // received. The extension marks the file unsaved for every edit it gets,
     // so a Replace on a cell that no longer held the search text made the tab
