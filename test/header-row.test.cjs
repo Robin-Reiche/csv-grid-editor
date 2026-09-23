@@ -118,7 +118,7 @@ test('an undo step moves to the other mode and back unchanged', () => {
     // with. The switch leaves both as they are.
     const snap = {
         data: [['h1', 'h2'], ['1', '2']], frozenRowIdx: [1], pinnedCols: [0],
-        delimiter: ';', lineFormat: { eol: '\r\n', finalNewline: true },
+        delimiter: ';', lineFormat: { eol: '\r\n', finalNewline: true }, text: 'h1;h2\r\n1;2\r\n',
     };
     const off = snapshotInHeaderMode(snap, true);
     assert.deepStrictEqual(off.data, [['A', 'B'], ['h1', 'h2'], ['1', '2']]);
@@ -126,6 +126,8 @@ test('an undo step moves to the other mode and back unchanged', () => {
     assert.deepStrictEqual(off.pinnedCols, [0]);
     assert.strictEqual(off.delimiter, ';');
     assert.deepStrictEqual(off.lineFormat, { eol: '\r\n', finalNewline: true });
+    // The file's text too, which is what undo writes back.
+    assert.strictEqual(off.text, 'h1;h2\r\n1;2\r\n');
     assert.deepStrictEqual(snapshotInHeaderMode(off, false), snap);
 });
 

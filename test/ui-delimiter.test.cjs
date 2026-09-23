@@ -154,6 +154,45 @@ runSuite('delimiter switch (browser)', [
         `),
     },
     {
+        // An undo step held only rows, written back with toCsv. After a switch
+        // those rows are the file split on a delimiter it was not written
+        // with. Writing them again drops the quotes the file needed. Undo
+        // wrote 'Smith, John,Berlin', which the comma splits into three.
+        name: 'undo of an edit made after a switch writes the file back',
+        csv: 'name,city\n"Smith, John",Berlin\nAnna,Rome\n',
+        steps: steps(`
+            await t.delim(';');
+            t.check(t.sent('edit').length === 0, 'the switch writes nothing');
+            await t.edit(1, 0, 'Anna,Paris');
+            await t.button('btn-undo');
+            t.check(t.lastEdit() === csv, 'undo writes the file as it was (' + JSON.stringify(t.lastEdit()) + ')');
+            await t.delim(',');
+            t.check(t.names() === 'name|city|-|-', 'split on the comma (' + t.names() + ')');
+            t.check(t.col(0) === 'Smith, John,Anna', 'the quoted value is one value again (' + t.col(0) + ')');
+        `),
+    },
+    {
+        // Redo wrote the step taken after the switch the same way, although
+        // nothing was ever edited under the semicolon.
+        name: 'redo past a switch writes the file back',
+        csv: 'name,city\n"Smith, John",Berlin\nAnna,Rome\n',
+        steps: steps(`
+            const badge = () => document.getElementById('delim-badge').textContent;
+            await t.edit(1, 1, 'Paris');
+            const edited = 'name,city\\n"Smith, John",Berlin\\nAnna,Paris\\n';
+            t.check(t.lastEdit() === edited, 'the edit is written (' + JSON.stringify(t.lastEdit()) + ')');
+            await t.delim(';');
+            await t.button('btn-undo');
+            t.check(t.lastEdit() === csv, 'undo writes the file as it was (' + JSON.stringify(t.lastEdit()) + ')');
+            await t.button('btn-redo');
+            t.check(t.lastEdit() === edited, 'redo writes the edited file with its quotes (' + JSON.stringify(t.lastEdit()) + ')');
+            t.check(badge() === 'Delim: ;', 'with the semicolon on the badge (' + badge() + ')');
+            await t.delim(',');
+            t.check(t.col(0) === 'Smith, John,Anna', 'the quoted value is one value (' + t.col(0) + ')');
+            t.check(t.col(1) === 'Berlin,Paris', 'next to its city (' + t.col(1) + ')');
+        `),
+    },
+    {
         // The edit wrote the last row without its quotes. The switch read the
         // text again and took the spaces for a trailing blank line.
         name: 'a quoted last row of spaces',

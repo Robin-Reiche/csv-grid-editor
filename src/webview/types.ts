@@ -17,6 +17,11 @@ export interface UndoSnapshot {
     // delimiter with another (features/undo-redo.ts).
     delimiter: string;
     lineFormat: LineFormat;
+    // The text the file held when the step was taken (state.rawCsvText).
+    // Undo and redo write this text back as it is. The rows alone do not
+    // always give it back: split on a delimiter the file was not written
+    // with, they lose the quotes the file needed when written again.
+    text: string;
 }
 
 export type ColType =

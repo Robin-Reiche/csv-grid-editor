@@ -15,6 +15,7 @@ import type { UndoSnapshot } from '../types';
 // Captured together with the data so positions and data are always consistent.
 // The delimiter and the line format go along, since the rows are only what the
 // file says when they are written back with the delimiter they were split on.
+// So does the text the file held, which is what undo and redo write back.
 export function snapshot(): UndoSnapshot {
     return {
         data: JSON.parse(JSON.stringify(state.data)),
@@ -22,6 +23,7 @@ export function snapshot(): UndoSnapshot {
         pinnedCols: [...state.pinnedCols],
         delimiter: state.currentDelimiter,
         lineFormat: { ...state.lineFormat },
+        text: state.rawCsvText,
     };
 }
 
@@ -87,8 +89,9 @@ export function undo(): void {
     if (editor) { editor.undoText(); return; }
     if (state.undoStack.length === 0) return;
     state.redoStack.push(snapshot());
-    restore(state.undoStack.pop()!);
-    notifyChange();
+    const step = state.undoStack.pop()!;
+    restore(step);
+    notifyChange(step.text);
     updateButtons();
     recomputeColTypes();
 }
@@ -98,8 +101,9 @@ export function redo(): void {
     if (editor) { editor.redoText(); return; }
     if (state.redoStack.length === 0) return;
     state.undoStack.push(snapshot());
-    restore(state.redoStack.pop()!);
-    notifyChange();
+    const step = state.redoStack.pop()!;
+    restore(step);
+    notifyChange(step.text);
     updateButtons();
     recomputeColTypes();
 }
@@ -115,7 +119,9 @@ export function updateButtons(): void {
     if (r) r.disabled = editor ? !editor.canRedo() : state.redoStack.length === 0;
 }
 
-export function notifyChange(): void {
+// `known` is the file's text when the caller has it already: undo and redo
+// pass the text their step was taken at.
+export function notifyChange(known?: string): void {
     // Edits invalidate duplicate-detection results (rows may have been added,
     // deleted, or modified into / out of being a duplicate). Clearing here
     // covers cell edits, undo/redo, find-replace, and row/column deletions.
@@ -131,7 +137,11 @@ export function notifyChange(): void {
     // them, so an edit leaves the line breaks between the rows as they were.
     // A file without a header row gets its rows only, never the column
     // letters the grid shows in its place (state.firstRowIsHeader).
-    const text = toCsv(fileRows(state.data, !state.firstRowIsHeader), state.currentDelimiter, state.lineFormat);
+    // Undo and redo write back the text of their step as it was. Written
+    // again from the rows, a step taken after a delimiter switch lost the
+    // quotes the file needed: its rows were split on a delimiter the file
+    // was not written with.
+    const text = known ?? toCsv(fileRows(state.data, !state.firstRowIsHeader), state.currentDelimiter, state.lineFormat);
     // The file already holds this text when it is the one last sent or
     // received. The extension marks the file unsaved for every edit it gets,
     // so a Replace on a cell that no longer held the search text made the tab
