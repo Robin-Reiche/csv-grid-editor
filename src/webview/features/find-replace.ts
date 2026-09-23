@@ -162,7 +162,10 @@ function execFind(anchor?: { rowIndex: number; origIndex?: number; colField: str
             if (raw == null) continue;
             const val = String(raw);
             if (!has(val)) continue;
-            const shown = shownValue(val);
+            // Most values have no space at either end and show as they
+            // stand. trim() tells so in about a third of the time the
+            // pattern in shownValue takes.
+            const shown = val.trim() === val ? val : shownValue(val);
             if (shown === val || has(shown)) {
                 // Capture _origIndex now so a later replace writes to the right
                 // state.data row even if the user changes sort/filter meanwhile.
