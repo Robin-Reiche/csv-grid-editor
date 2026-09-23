@@ -497,6 +497,27 @@ async function main() {
         assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\nmine\nmore\n', 'Overwrite did not write the edits');
     });
 
+    // The file held the edits already when VS Code started again, after a
+    // git checkout while it was closed for one. The restored tab still shows
+    // them unsaved. A change on disk after that was loaded over them.
+    await test('a change on disk after a restore onto a file that holds the edits is warned about', async () => {
+        const p = file('hot-held.csv', 'h\n1\n');
+        const before = await open(p);
+        await before.edit('h\nmine\n');
+        const backup = await before.quit();
+        fs.writeFileSync(p, 'h\nmine\n');
+        warnings.length = 0;
+        const after = await open(p, { backupId: backup.id });
+        assert.strictEqual(warnings.length, 0, 'a file that holds the edits was reported as changed');
+        fs.writeFileSync(p, 'h\ntheirs\n');
+        await after.fireWatcher();
+        assert.strictEqual(after.updates().length, 0, 'the change on disk was loaded over the edits');
+        assert.strictEqual(after.doc.content, 'h\nmine\n');
+        assert.strictEqual(warnings.length, 1, 'the change on disk was not reported');
+        await assert.rejects(after.save(), /changed on disk/, 'the save went through');
+        assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\ntheirs\n', 'the save wrote over the change on disk');
+    });
+
     // 1.22.0 wrote a backup as UTF-8 without the byte order mark and gave it
     // the bare URI for its id. Restored as plain UTF-8, the next save dropped
     // the mark and Excel showed the umlauts wrong again.

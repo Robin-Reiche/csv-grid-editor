@@ -563,6 +563,12 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             // made VS Code take a new backup, whose fingerprint is that of the
             // changed file. Then only the mark the id carries tells of it.
             if ((changed || conflict) && doc.diskText !== doc.content) this.warnChangedOnDisk(doc);
+            // A file that already holds the restored edits, after a git
+            // checkout while VS Code was closed for one. The tab still shows
+            // them unsaved, so a change on disk after this is one under
+            // unsaved edits (see recordContentOnDisk). Taken for a clean
+            // file, the grid loaded it over them without a word.
+            if (doc.diskText === doc.content) doc.editsOnDisk = true;
         } catch {
             doc.diskText = '';
         }
