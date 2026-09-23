@@ -819,11 +819,16 @@ body.spaces-shown :is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-cell:not(.ag-
 }
 /* A name or a listed value can hold a line break of its own, which pre turns
    into a second line. The header is one line high, so a name keeps to its
-   first line there. */
+   first line there and ends in an ellipsis. Cut off without one, '  top' read
+   as the whole of '  top\nbottom'. The name takes the width of its widest
+   line. Where that is the first line, the ellipsis takes the room of its last
+   letters. Giving the name the rest of the header for it, as the lists below
+   do, would move the sort arrow away from the name in every column. */
 body.spaces-shown :is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-header-cell-text {
     white-space: pre !important;
-    line-height: 1.3 !important;
-    max-height: 1.3em;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 1;
 }
 /* In the name and value lists the first line ends in an ellipsis, so '  Ber'
    and a value going on after it on a second line do not look alike. A clamped

@@ -200,6 +200,15 @@ runSuite('settings menu (browser)', [
             t.check(multi.getBoundingClientRect().height < size * 1.8 && t.xOf(multi, 't') > 4,
                 'a header with a line break keeps to one line and shows its spaces ('
                 + multi.getBoundingClientRect().height + 'px high, t at ' + t.xOf(multi, 't') + ')');
+            // The ellipsis is drawn by the line clamp and a page cannot see it
+            // drawn. A name clamped to one line with more of it below is one
+            // that ends in an ellipsis.
+            const clamp = getComputedStyle(multi).webkitLineClamp;
+            t.check(clamp === '1' && multi.scrollHeight > multi.clientHeight + 4,
+                'and its first line ends in an ellipsis, since the name goes on (clamp ' + clamp + ', '
+                + multi.scrollHeight + 'px of text in ' + multi.clientHeight + ')');
+            const plainName = () => t.header(1).querySelector('.ag-header-cell-text').getBoundingClientRect();
+            const shownBox = plainName();
 
             const cell = t.cell(3, 0);
             t.check(Math.abs(t.yOf(cell, 'l') - t.yOf(cell, 'B')) < 2 && t.xOf(cell, 'B') - plain > 4,
@@ -251,6 +260,10 @@ runSuite('settings menu (browser)', [
             await t.setSetting('trimDisplay', true);
             t.check(Math.abs(t.xOf(t.cell(0, 0), 'B') - t.xOf(t.cell(1, 0), 'B')) < 1, 'switched back on, the spaces are gone');
             t.check(t.xOf(t.header(0).querySelector('.ag-header-cell-text'), 'c') < 2, 'from the header too');
+            const hiddenBox = plainName();
+            t.check(Math.abs(shownBox.height - hiddenBox.height) < 0.5 && Math.abs(shownBox.top - hiddenBox.top) < 0.5,
+                'a name without spaces sits in the same place either way (' + shownBox.height + 'px at ' + shownBox.top
+                + ' against ' + hiddenBox.height + 'px at ' + hiddenBox.top + ')');
         }`,
     },
     {
