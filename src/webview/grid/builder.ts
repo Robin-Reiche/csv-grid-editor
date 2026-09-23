@@ -1,4 +1,4 @@
-import { state, getNumCols, emptyTableKind, relabelVirtualHeader, fileRows } from '../state';
+import { state, getNumCols, emptyTableKind, relabelVirtualHeader } from '../state';
 import { getColumnType, scheduleRecomputeColTypes, TYPE_LABELS } from './column-type';
 import { NoRowsOverlay, renderNoColumns } from '../features/empty-state';
 import { createCombinedFilter, markValueListsStale } from './filter';
@@ -6,9 +6,8 @@ import { dataRowIndexForNode } from './row-mapping';
 import { partitionFrozenRows, updateCountsDisplay } from './refresh';
 import { ControlCharCellRenderer, shownName, shownValue } from './control-char-cell';
 import { MultilineCellEditor, editorClosed, handOver, handedOverBefore } from './multiline-cell-editor';
-import { toCsv } from '../utils/csv';
 import { refreshProfileIfOpen } from '../features/profile';
-import { pushUndo, notifyChange, updateButtons } from '../features/undo-redo';
+import { pushUndo, notifyChange, updateButtons, fileText } from '../features/undo-redo';
 import { getFindCellClassRules, refreshFindIfOpen, refreshFindInPlace } from '../features/find-replace';
 import { getCellMarkClassRules } from '../features/cell-marks';
 import { attachHeaderContextMenus } from '../features/freeze-columns';
@@ -159,7 +158,9 @@ function writeCellValue(node: any, colField: string | undefined, newValue: unkno
 // AG Grid reports a committed value on a timer, so the typed value reached the
 // file after the save. The file was saved without it and the tab showed it as
 // saved. The value is committed and written here, while the key is still on
-// its way. The edit message then reaches VS Code before the key does.
+// its way. The edit message then reaches VS Code before the key does. The
+// row keys and the header switch commit here too, before they move the rows
+// (features/delete-row-col.ts, features/header-row.ts).
 export function commitOpenEditor(keepFocus = true): void {
     const api = state.gridApi;
     const cell = api?.getEditingCells()[0];
@@ -209,7 +210,7 @@ export function flushOpenEditor(): string | null {
             edited[colIndex] = value;
             const rows = state.data.slice();
             rows[dataIndex] = edited;
-            text = toCsv(fileRows(rows, !state.firstRowIsHeader), state.currentDelimiter, state.lineFormat);
+            text = fileText(rows);
         }
     }
     handOver(editor, text);
@@ -543,7 +544,24 @@ export function buildGrid(): void {
             refreshFindInPlace();
         },
 
-        onCellValueChanged: (event: any) => writeCellValue(event.node, event.colDef.field, event.newValue),
+        // AG Grid reports a committed value on a timer. The rows can have been
+        // swapped by then. A row id is a place (getRowId above), so the node
+        // may hold another row. Written through it, the value went to that
+        // row, under a sort into another row's cell. The grid did not show it.
+        // A caller that commits and then moves rows writes the value first
+        // (commitOpenEditor). A report on a node that no longer holds the row
+        // the change was made on has nothing left to write. Nor has one on a
+        // node the grid has taken out. Such a node keeps its row. That row's
+        // place can name another row by then. An insert under a sort writes
+        // a frozen row on top of the file, so the value went to the frozen
+        // row while the band went on showing the old value. A row a filter
+        // hides is still in the grid and its value still counts.
+        onCellValueChanged: (event: any) => {
+            const node = event.node;
+            const inGrid = node.rowPinned ? node.rowIndex != null : state.gridApi?.getRowNode(node.id) === node;
+            if (event.data !== node.data || !inGrid) return;
+            writeCellValue(node, event.colDef.field, event.newValue);
+        },
     };
 
     state.gridApi = agGrid.createGrid(container, gridOptions);

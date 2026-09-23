@@ -33,6 +33,25 @@ const PRESS = `async (t, key, mods) => {
     await t.wait(400);
 }`;
 
+// Runs inside the page: opens a cell and types into it without committing.
+// It also reads the rows on screen as name|value pairs.
+const TYPE = `
+    t.type = async (row, col, value) => {
+        await t.focusCell(row, col);
+        await t.pressEnter();
+        const ta = document.querySelector('#grid-container textarea');
+        if (!ta) { t.check(false, 'Enter opens the editor on ' + row + ',' + col); return null; }
+        ta.value = value;
+        ta.dispatchEvent(new Event('input', { bubbles: true }));
+        return ta;
+    };
+    t.rows = () => {
+        const out = [];
+        for (let r = 0; t.cell(r, 0); r++) out.push(t.cell(r, 0).textContent + '|' + t.cell(r, 1).textContent);
+        return out.join(',');
+    };
+`;
+
 runSuite('rows (browser)', [
     {
         name: 'insert with a filter on',
@@ -266,6 +285,175 @@ runSuite('rows (browser)', [
             t.check(shown() === 'Berlin,,Paris,Berlin,-', 'the new row is shown and Rome stays filtered out (' + shown() + ')');
             t.check(document.getElementById('btn-clear-filters').style.display !== 'none', 'the filter is still on');
             t.check(t.focusedRow() === 1, 'the focus is on the new row (row ' + t.focusedRow() + ')');
+        }`,
+    },
+    {
+        // The key committed the value being typed, but the grid reported it
+        // only after the rows had moved. By then the row in that place was
+        // another one. Under a sort the value overwrote another row's value
+        // in the file while the grid went on showing both rows as they were.
+        name: 'Ctrl+Enter while typing under a sort',
+        csv: 'name,city\nAnna,Oslo\nBen,Berlin\nCleo,Paris\nDan,Athens\n',
+        steps: `async (t, csv) => {
+            ${FRAMES}
+            ${TYPE}
+            await t.init(csv);
+            t.header(1).querySelector('.ag-header-cell-label').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(400);
+            t.check(t.rows() === 'Dan|Athens,Ben|Berlin,Anna|Oslo,Cleo|Paris', 'sorted by city (' + t.rows() + ')');
+            const ta = await t.type(2, 1, 'X');
+            if (!ta) return;
+            ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true, cancelable: true }));
+            await t.wait(400);
+            t.check(t.lastEdit() === 'name,city\\nDan,Athens\\nBen,Berlin\\nAnna,X\\n,\\nCleo,Paris\\n',
+                'Anna gets the value and the new row goes under her (' + JSON.stringify(t.lastEdit()) + ')');
+            t.check(t.sent('edit').length === 2, 'the value and the row are written once each (' + t.sent('edit').length + ' edits)');
+            t.check(t.rows() === 'Dan|Athens,Ben|Berlin,Anna|X,|,Cleo|Paris', 'the grid shows the file (' + t.rows() + ')');
+        }`,
+    },
+    {
+        // The insert writes the frozen row on top of the file, so Ben takes
+        // the first place, the one Anna had. Anna's old row left the grid.
+        // The grid reported the value on it later all the same. Written
+        // through that row's place, it went to Ben while the frozen band
+        // went on showing Berlin.
+        name: 'Ctrl+Enter while typing under a sort with a frozen row',
+        csv: 'name,city\nAnna,Oslo\nBen,Berlin\nCleo,Paris\nDan,Athens\n',
+        steps: `async (t, csv) => {
+            ${FRAMES}
+            ${TYPE}
+            await t.init(csv);
+            const c = t.cell(1, 0);
+            const r = c.getBoundingClientRect();
+            c.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 5, clientY: r.top + 5 }));
+            await t.wait(200);
+            const item = [...document.querySelectorAll('#row-context-menu .row-ctx-item')].find(i => i.textContent === 'Freeze row');
+            if (!item) { t.check(false, 'the row menu offers Freeze row'); return; }
+            item.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(300);
+            t.header(1).querySelector('.ag-header-cell-label').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(400);
+            t.check(t.rows() === 'Dan|Athens,Anna|Oslo,Cleo|Paris', 'Ben is frozen and the rest sorted by city (' + t.rows() + ')');
+            const ta = await t.type(1, 1, 'X');
+            if (!ta) return;
+            ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true, cancelable: true }));
+            await t.wait(400);
+            t.check(t.lastEdit() === 'name,city\\nBen,Berlin\\nDan,Athens\\nAnna,X\\n,\\nCleo,Paris\\n',
+                'Anna keeps the value and Ben keeps Berlin (' + JSON.stringify(t.lastEdit()) + ')');
+            t.check(t.sent('edit').length === 2, 'the value and the row are written once each (' + t.sent('edit').length + ' edits)');
+            // A value committed in the frozen row still reaches the file.
+            const frozen = document.querySelector('#grid-container .ag-floating-top .ag-cell[col-id="col_1"]');
+            ['mousedown', 'mouseup', 'click'].forEach(ty => frozen.dispatchEvent(new MouseEvent(ty, { bubbles: true, button: 0 })));
+            await t.wait(200);
+            await t.pressEnter();
+            const fta = document.querySelector('#grid-container textarea');
+            if (!fta) { t.check(false, 'Enter opens the editor on the frozen cell'); return; }
+            fta.value = 'Rome';
+            fta.dispatchEvent(new Event('input', { bubbles: true }));
+            await t.pressEnter();
+            t.check(t.lastEdit() === 'name,city\\nBen,Rome\\nDan,Athens\\nAnna,X\\n,\\nCleo,Paris\\n',
+                'Enter in the frozen row writes into Ben (' + JSON.stringify(t.lastEdit()) + ')');
+        }`,
+    },
+    {
+        name: 'Ctrl+Enter while typing',
+        csv: 'name,city\nAnna,Berlin\nBen,Oslo\nCleo,Paris\n',
+        steps: `async (t, csv) => {
+            ${FRAMES}
+            ${TYPE}
+            await t.init(csv);
+            const ta = await t.type(1, 1, 'X');
+            if (!ta) return;
+            ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true, cancelable: true }));
+            await t.wait(400);
+            t.check(t.lastEdit() === 'name,city\\nAnna,Berlin\\nBen,X\\n,\\nCleo,Paris\\n',
+                'Ben gets the value and the new row goes under him (' + JSON.stringify(t.lastEdit()) + ')');
+            t.check(t.rows() === 'Anna|Berlin,Ben|X,|,Cleo|Paris', 'the grid shows the file (' + t.rows() + ')');
+        }`,
+    },
+    {
+        name: 'Ctrl+Shift+Enter while typing',
+        csv: 'name,city\nAnna,Berlin\nBen,Oslo\nCleo,Paris\n',
+        steps: `async (t, csv) => {
+            ${FRAMES}
+            ${TYPE}
+            await t.init(csv);
+            const ta = await t.type(1, 1, 'X');
+            if (!ta) return;
+            ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }));
+            await t.wait(400);
+            t.check(t.lastEdit() === 'name,city\\nAnna,Berlin\\n,\\nBen,X\\nCleo,Paris\\n',
+                'the new row goes above Ben and Ben gets the value (' + JSON.stringify(t.lastEdit()) + ')');
+            t.check(t.sent('edit').length === 2, 'the value and the row are written once each (' + t.sent('edit').length + ' edits)');
+            t.check(t.rows() === 'Anna|Berlin,|,Ben|X,Cleo|Paris', 'the grid shows the file (' + t.rows() + ')');
+        }`,
+    },
+    {
+        // The new blank row takes the place of the row being typed in. Its
+        // cell is empty just like the one typed into. Only the row itself
+        // tells the two apart.
+        name: 'Ctrl+Shift+Enter while typing into an empty cell',
+        csv: 'name,note\nAnna,\nBen,\nCleo,\n',
+        steps: `async (t, csv) => {
+            ${FRAMES}
+            ${TYPE}
+            await t.init(csv);
+            const ta = await t.type(1, 1, 'X');
+            if (!ta) return;
+            ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }));
+            await t.wait(400);
+            t.check(t.lastEdit() === 'name,note\\nAnna,\\n,\\nBen,X\\nCleo,\\n',
+                'only Ben gets the value (' + JSON.stringify(t.lastEdit()) + ')');
+            t.check(t.rows() === 'Anna|,|,Ben|X,Cleo|', 'the grid shows the file (' + t.rows() + ')');
+        }`,
+    },
+    {
+        // Writing the value ends the "Show only duplicates" view, as every
+        // edit does. The rows come back in the order of the file. The row to
+        // insert next to is the one typed in, not the one that now sits in
+        // its place.
+        name: 'Ctrl+Enter while typing in the duplicates view',
+        csv: 'city,n\nBerlin,1\nParis,\nBerlin,1\nRome,4',
+        steps: `async (t, csv) => {
+            ${FRAMES}
+            ${TYPE}
+            await t.init(csv);
+            document.getElementById('btn-duplicates').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(300);
+            document.getElementById('dup-only-toggle').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(300);
+            t.check(t.rows() === 'Berlin|1,Berlin|1', 'the view shows the two duplicates (' + t.rows() + ')');
+            const ta = await t.type(1, 1, 'X');
+            if (!ta) return;
+            ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true, cancelable: true }));
+            await t.wait(400);
+            t.check(t.lastEdit() === 'city,n\\nBerlin,1\\nParis,\\nBerlin,X\\n,\\nRome,4',
+                'the second Berlin gets the value and the new row goes under it (' + JSON.stringify(t.lastEdit()) + ')');
+            t.check(t.rows() === 'Berlin|1,Paris|,Berlin|X,|,Rome|4', 'the grid shows the file (' + t.rows() + ')');
+            t.check(t.focusedRow() === 3, 'the focus is on the new row (row ' + t.focusedRow() + ')');
+        }`,
+    },
+    {
+        // The commits that move no row still write the value once.
+        name: 'Enter and Ctrl+S under a sort write once',
+        csv: 'name,city\nAnna,Oslo\nBen,Berlin\nCleo,Paris\n',
+        steps: `async (t, csv) => {
+            ${FRAMES}
+            ${TYPE}
+            await t.init(csv);
+            t.header(1).querySelector('.ag-header-cell-label').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(400);
+            let ta = await t.type(1, 1, 'X');
+            if (!ta) return;
+            await t.pressEnter();
+            t.check(t.sent('edit').length === 1 && t.lastEdit() === 'name,city\\nAnna,X\\nBen,Berlin\\nCleo,Paris\\n',
+                'Enter writes the value into Anna once (' + JSON.stringify(t.sent('edit')) + ')');
+            ta = await t.type(0, 1, 'Y');
+            if (!ta) return;
+            ta.dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', keyCode: 83, ctrlKey: true, bubbles: true, cancelable: true }));
+            await t.wait(400);
+            t.check(t.sent('edit').length === 2 && t.lastEdit() === 'name,city\\nAnna,X\\nBen,Y\\nCleo,Paris\\n',
+                'Ctrl+S writes the value into Ben once (' + JSON.stringify(t.sent('edit')) + ')');
         }`,
     },
 ]);

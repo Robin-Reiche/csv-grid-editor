@@ -36,8 +36,12 @@ export function readText(text: string): void {
     // same columns the grid only swaps the rows. The editor then stayed open
     // at its row position, which showed another row by now. Enter wrote the
     // typed value into that row. buildGrid cancels an editor for the same
-    // reason, but only a change of columns rebuilds the grid. What was typed
-    // is dropped, since the file changed under it.
+    // reason, but only a change of columns rebuilds the grid. A change on
+    // disk does not come here while a value is being typed: the extension
+    // keeps that value as an unsaved edit. A text still replaces the rows
+    // under an open editor on Reload from Disk, on a revert, with an edit
+    // made in another editor of the same file and with a change on disk
+    // while nothing was typed yet. What the editor holds is dropped then.
     if (state.isCellEditing) state.gridApi?.stopEditing(true);
     // The row menu, the column menu and the Rename popover act on the row or
     // column they were opened on, kept by its place. Left open, Delete row

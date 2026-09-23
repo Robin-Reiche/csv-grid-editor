@@ -22,6 +22,14 @@ export interface UndoSnapshot {
     // always give it back: split on a delimiter the file was not written
     // with, they lose the quotes the file needed when written again.
     text: string;
+    // The columns the change after this step took away and the ones it
+    // added. Those taken away count by their places in this step's table,
+    // those added by their places in the table the change made. Only an
+    // insert or a delete of columns sets them. Undo and redo move the find
+    // matches with their columns by these. Found again by what they held,
+    // two columns that hold the same could not be told apart and the active
+    // match went to the wrong one (features/undo-redo.ts).
+    columns?: { removed: number[]; added: number[] };
 }
 
 export type ColType =

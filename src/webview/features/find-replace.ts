@@ -321,16 +321,30 @@ export function followRestoredRows(before: CsvRow[]): void {
     moveMatches(i => i < above ? i : i >= firstBelow ? i + added : between(i));
 }
 
+// Public: an insert or a delete moved the columns. Undo and redo move them
+// back (features/undo-redo.ts). A match remembers its column by its place,
+// col_N. With a column to its left deleted, that place named the column to
+// its right. The search that runs again next found the active match there or
+// found none in its row and moved on. Replace then changed that cell. Each
+// match is moved to the place `to` gives for its column's old place,
+// undefined for a column that is gone.
+export function followMovedColumns(to: (col: number) => number | undefined): void {
+    if (!state.findMatches.length) return;
+    moveMatches(to, true);
+}
+
 // Moves each match to the place `to` gives for its row's old place in
-// state.data, undefined for a row that is gone. When the row of the active
-// match is gone, the next match whose row is still there becomes the active
-// one, the match Next would have gone to.
-function moveMatches(to: (origIndex: number) => number | undefined): void {
+// state.data, undefined for a row that is gone. With `columns` set it moves
+// each match's column the same way. When the row or the column of the active
+// match is gone, the next match that is still there becomes the active one,
+// the match Next would have gone to.
+function moveMatches(to: (from: number) => number | undefined, columns = false): void {
     const matches = state.findMatches;
     const kept = matches.map(m => {
-        const at = to(m.origIndex);
+        const at = to(columns ? parseInt(m.colField.slice(4), 10) : m.origIndex);
         if (at === undefined) return false;
-        m.origIndex = at;
+        if (columns) m.colField = 'col_' + at;
+        else m.origIndex = at;
         return true;
     });
     const from = state.findMatchIndex;

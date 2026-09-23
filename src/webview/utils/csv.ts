@@ -370,8 +370,9 @@ function readsAsEmptyLine(row: CsvRow, onlyRow: boolean): boolean {
 // nothing.
 //
 // fileName is the name of the file written, which decides its delimiter
-// before its first line does (delimiterOfFile).
-export function toCsv(rows: CsvRow[], delimiter: string, format?: LineFormat, fileName = ''): string {
+// before its first line does (delimiterOfFile). headerQuotes is off when the
+// file does not read as the delimiter in use, see the header rule below.
+export function toCsv(rows: CsvRow[], delimiter: string, format?: LineFormat, fileName = '', headerQuotes = true): string {
     const eol = format ? format.eol : '\n';
     // An empty table stays empty. A lone break would read back as a blank row.
     const finalNewline = !!format && format.finalNewline && rows.length > 0;
@@ -406,9 +407,12 @@ export function toCsv(rows: CsvRow[], delimiter: string, format?: LineFormat, fi
     // was picked. The clipboard passes no format and gets none of this. A
     // .tsv file opens with tabs by its name alone, so its header is written
     // as it stands. Tools that read tab files without quote rules took the
-    // quotes it gained for part of the name.
+    // quotes it gained for part of the name. So is the header of a file that
+    // does not read as the delimiter in use, most often one picked by mistake
+    // (fileText in features/undo-redo.ts). Quotes placed for that delimiter
+    // sat in the middle of the names once the right one was picked again.
     let first = last >= 0 ? line(rows[0], 0, false) : '';
-    if (format && last >= 0 && rows[0].length > 1 && delimiterOfFile(fileName, first) !== delimiter) {
+    if (format && headerQuotes && last >= 0 && rows[0].length > 1 && delimiterOfFile(fileName, first) !== delimiter) {
         const quoted = line(rows[0], 0, true);
         if (delimiterOfFile(fileName, quoted) === delimiter) first = quoted;
     }

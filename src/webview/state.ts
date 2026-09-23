@@ -18,8 +18,9 @@ export const state = {
     // letters (A, B, C) that the grid makes up and relabelVirtualHeader keeps
     // in step with the columns. That row is not in the file and must never get
     // there. The one place that writes the file leaves it out (fileRows in
-    // notifyChange). Nothing may write a name into it either, which is why
-    // Rename column is not offered. See features/header-row.ts.
+    // fileText, features/undo-redo.ts). Nothing may write a name into it
+    // either, which is why Rename column is not offered. See
+    // features/header-row.ts.
     firstRowIsHeader: true,
     data: [] as CsvRow[],
     undoStack: [] as UndoSnapshot[],

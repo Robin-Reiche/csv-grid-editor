@@ -18,6 +18,7 @@ const {
     insertColumnsIntoData,
     shiftIndicesAfterDelete,
     shiftIndicesAfterInsert,
+    indexAfterChange,
 } = require('../out/webview/grid/mutations.js');
 
 const sorted = (set) => [...set].sort((a, b) => a - b);
@@ -183,6 +184,23 @@ test('shiftIndicesAfterInsert: inserting after leaves earlier frozen columns put
 
 test('shiftIndicesAfterInsert: only indices at/after the insertion point move', () => {
     assert.deepStrictEqual(sorted(shiftIndicesAfterInsert([1, 3], 2, 1)), [1, 4]);
+});
+
+test('indexAfterChange: a deleted column is gone and the ones right of it move left', () => {
+    // delete cols 1 and 3 of five: 0 stays, 2 -> 1, 4 -> 2
+    assert.deepStrictEqual([0, 1, 2, 3, 4].map(i => indexAfterChange(i, [3, 1], [])), [0, undefined, 1, undefined, 2]);
+});
+
+test('indexAfterChange: with removed and added swapped it gives the columns of a delete back', () => {
+    assert.deepStrictEqual([0, 1, 2].map(i => indexAfterChange(i, [], [3, 1])), [0, 2, 4]);
+});
+
+test('indexAfterChange: inserted columns push the ones at and after them right', () => {
+    assert.deepStrictEqual([0, 1, 2].map(i => indexAfterChange(i, [], [1, 2])), [0, 3, 4]);
+});
+
+test('indexAfterChange: undoing an insert takes the inserted columns away again', () => {
+    assert.deepStrictEqual([0, 1, 2, 3, 4].map(i => indexAfterChange(i, [1, 2], [])), [0, undefined, undefined, 1, 2]);
 });
 
 if (failures) { console.error('\n' + failures + ' test(s) failed'); process.exit(1); }

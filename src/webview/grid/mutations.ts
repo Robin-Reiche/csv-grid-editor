@@ -72,3 +72,17 @@ export function shiftIndicesAfterInsert(indices: Iterable<number>, at: number, c
     for (const i of indices) out.add(i >= at ? i + count : i);
     return out;
 }
+
+// Where index `i` lands when the indices `removed` are taken out and the ones
+// `added` are put in, `added` counted in the result. undefined for an index
+// that is taken out. With removed and added swapped it gives the index back.
+// Undo and redo move the find matches with the columns of a step this way
+// (features/undo-redo.ts).
+export function indexAfterChange(i: number, removed: Iterable<number>, added: Iterable<number>): number | undefined {
+    const gone = new Set(removed);
+    if (gone.has(i)) return undefined;
+    let at = i;
+    for (const r of gone) if (r < i) at--;
+    for (const a of [...new Set(added)].sort((x, y) => x - y)) if (a <= at) at++;
+    return at;
+}

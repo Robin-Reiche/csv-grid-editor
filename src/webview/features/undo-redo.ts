@@ -1,13 +1,14 @@
 import { state, fileRows } from '../state';
-import { toCsv } from '../utils/csv';
+import { toCsv, delimiterOfFile } from '../utils/csv';
 import { refreshGrid } from '../grid/refresh';
 import { buildGrid } from '../grid/builder';
 import { recomputeColTypes } from '../grid/column-type';
 import { resetDuplicatesState } from './duplicates';
 import { refreshProfileIfOpen } from './profile';
 import { updateDelimiterBadge } from './delimiter';
-import { followRestoredRows } from './find-replace';
-import type { UndoSnapshot } from '../types';
+import { followRestoredRows, followMovedColumns } from './find-replace';
+import { indexAfterChange } from '../grid/mutations';
+import type { CsvRow, UndoSnapshot } from '../types';
 
 // Captures the undoable view state: a deep clone of the data plus the freeze
 // state. The freeze is stored by POSITION (frozen-row indices, pinned-column
@@ -40,8 +41,13 @@ function restore(snap: UndoSnapshot): void {
     state.data = snap.data;
     // The grid searches again once it shows these rows and looks for the
     // active match at its old place, so the matches move with their rows
-    // first.
+    // first. And with their columns, unless the step splits the rows on
+    // another delimiter, which makes other columns altogether. The table on
+    // screen came out of the step's table by the columns the step records,
+    // so the matches go back through them the other way round.
     followRestoredRows(before);
+    const cols = snap.columns;
+    if (!resplit && cols) followMovedColumns(c => indexAfterChange(c, cols.added, cols.removed));
     state.currentDelimiter = snap.delimiter;
     state.lineFormat = snap.lineFormat;
     // Re-anchor frozen rows to the restored (cloned) arrays at their saved
@@ -63,13 +69,24 @@ function restore(snap: UndoSnapshot): void {
 // change left the table as it was (see there).
 let lastPushed: { step: UndoSnapshot; redo: UndoSnapshot[] } | null = null;
 
-export function pushUndo(): void {
+// Returns the step, so an insert or a delete of columns can note on it which
+// columns it changes.
+export function pushUndo(): UndoSnapshot {
     const step = snapshot();
     lastPushed = { step, redo: state.redoStack };
     state.undoStack.push(step);
     state.redoStack = [];
     state.autoFitCache = null;
     updateButtons();
+    return step;
+}
+
+// The step that takes back what putting `step` back does: the table on
+// screen, with the columns `step` records the other way round.
+function counterpart(step: UndoSnapshot): UndoSnapshot {
+    const snap = snapshot();
+    if (step.columns) snap.columns = { removed: step.columns.added, added: step.columns.removed };
+    return snap;
 }
 
 // While a cell is open for editing, undo and redo belong to that cell: they take
@@ -94,8 +111,8 @@ export function undo(): void {
     const editor = openCellEditor();
     if (editor) { editor.undoText(); return; }
     if (state.undoStack.length === 0) return;
-    state.redoStack.push(snapshot());
     const step = state.undoStack.pop()!;
+    state.redoStack.push(counterpart(step));
     restore(step);
     notifyChange(step.text);
     updateButtons();
@@ -106,8 +123,8 @@ export function redo(): void {
     const editor = openCellEditor();
     if (editor) { editor.redoText(); return; }
     if (state.redoStack.length === 0) return;
-    state.undoStack.push(snapshot());
     const step = state.redoStack.pop()!;
+    state.undoStack.push(counterpart(step));
     restore(step);
     notifyChange(step.text);
     updateButtons();
@@ -123,6 +140,19 @@ export function updateButtons(): void {
     const editor = openCellEditor();
     if (u) u.disabled = editor ? !editor.canUndo() : state.undoStack.length === 0;
     if (r) r.disabled = editor ? !editor.canRedo() : state.redoStack.length === 0;
+}
+
+// The text the file gets for the grid's table `data`. An edit (notifyChange)
+// and a save that takes a value still being typed (flushOpenEditor in
+// grid/builder.ts) both write it from here. Written in two places they drifted
+// apart: the save left out the file's name, so a .tsv header with a comma
+// gained quotes that the commit right after took off again. The header keeps
+// the quotes that tell its delimiter only while the file reads as the
+// delimiter in use (toCsv). After a delimiter picked by mistake it is written
+// as it stands.
+export function fileText(data: CsvRow[]): string {
+    const headerQuotes = delimiterOfFile(FILENAME, state.rawCsvText) === state.currentDelimiter;
+    return toCsv(fileRows(data, !state.firstRowIsHeader), state.currentDelimiter, state.lineFormat, FILENAME, headerQuotes);
 }
 
 // `known` is the file's text when the caller has it already: undo and redo
@@ -147,7 +177,7 @@ export function notifyChange(known?: string): void {
     // again from the rows, a step taken after a delimiter switch lost the
     // quotes the file needed: its rows were split on a delimiter the file
     // was not written with.
-    const text = known ?? toCsv(fileRows(state.data, !state.firstRowIsHeader), state.currentDelimiter, state.lineFormat, FILENAME);
+    const text = known ?? fileText(state.data);
     // The file already holds this text when it is the one last sent or
     // received. The extension marks the file unsaved for every edit it gets,
     // so a Replace on a cell that no longer held the search text made the tab
