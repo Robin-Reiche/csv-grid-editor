@@ -72,6 +72,21 @@ export function rememberHeaderRow(stored: unknown, uri: string, firstRowIsHeader
     return map;
 }
 
+// The map to store after the file or folder at `from` was renamed or moved to
+// `to`. Null when that changes nothing in it. A folder takes the files in it
+// along. What was stored for `to` belonged to a file the move replaced.
+export function moveHeaderRows(stored: unknown, from: string, to: string): Record<string, true> | null {
+    if (!stored || typeof stored !== 'object') return null;
+    const within = (key: string, base: string) => key === base || key.startsWith(base + '/');
+    if (!Object.keys(stored).some(key => within(key, from) || within(key, to))) return null;
+    const map: Record<string, true> = {};
+    for (const [key, value] of Object.entries(stored)) {
+        if (value !== true || within(key, to)) continue;
+        map[within(key, from) ? to + key.slice(from.length) : key] = true;
+    }
+    return map;
+}
+
 // The watcher's pattern for a file of this name. VS Code reads the pattern as
 // a glob. The bare name made data[1].csv match data1.csv and never itself
 // ([1] is a character class), the same with the braces in report{2024}.csv.
@@ -158,8 +173,36 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
                 provider,
                 { webviewOptions: { retainContextWhenHidden: true } }
             ),
-            vscode.commands.registerCommand('csvViewer.reloadFromDisk', () => provider.reloadActiveFromDisk())
+            vscode.commands.registerCommand('csvViewer.reloadFromDisk', () => provider.reloadActiveFromDisk()),
+            vscode.workspace.onDidRenameFiles(e => provider.followRenames(e.files))
         );
+    }
+
+    // "First row is the header" is kept by URI. A file renamed or moved in VS
+    // Code takes it along, the same as the files in a renamed folder. VS Code
+    // opens the file again as a new document, which looks the switch up by
+    // the new URI.
+    private followRenames(files: readonly { readonly oldUri: vscode.Uri; readonly newUri: vscode.Uri }[]): void {
+        let stored: unknown = this.context.globalState.get(HEADERLESS_KEY);
+        let changed = false;
+        for (const { oldUri, newUri } of files) {
+            const moved = moveHeaderRows(stored, oldUri.toString(), newUri.toString());
+            if (moved) {
+                stored = moved;
+                changed = true;
+            }
+        }
+        if (changed) this.context.globalState.update(HEADERLESS_KEY, stored);
+    }
+
+    // A copy made by Save As holds the same rows, so it keeps the file's
+    // "First row is the header". VS Code opens the copy as a new document,
+    // which looks the switch up by the copy's URI.
+    private copyHeaderRow(from: vscode.Uri, to: vscode.Uri): void {
+        const stored = this.context.globalState.get(HEADERLESS_KEY);
+        const headerless = isHeaderless(stored, from.toString());
+        if (headerless === isHeaderless(stored, to.toString())) return;
+        this.context.globalState.update(HEADERLESS_KEY, rememberHeaderRow(stored, to.toString(), !headerless));
     }
 
     // "CSV Grid: Reload from Disk". File > Revert File cannot serve as the manual
@@ -650,12 +693,14 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         if (document.isPreview) {
             if (destination.toString() !== document.uri.toString()) {
                 await vscode.workspace.fs.copy(document.uri, destination, { overwrite: true });
+                this.copyHeaderRow(document.uri, destination);
             }
             return;
         }
         const { bytes, encoding } = document.encode();
         await vscode.workspace.fs.writeFile(destination, bytes);
         if (encoding !== document.encoding) warnSavedAsUtf8(destination);
+        this.copyHeaderRow(document.uri, destination);
     }
 
     async revertCustomDocument(document: CsvDocument, _cancellation: vscode.CancellationToken): Promise<void> {
