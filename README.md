@@ -169,7 +169,7 @@ Opening a file larger than **10 MB** shows a Quick Pick with these options:
 - **Plain Text View** - Displays the raw file content in a monospace editor-style view without any grid features
 
 ### Auto-Reload
-When a file is open in full (non-preview) mode, the editor watches the file on disk and **automatically reloads** the grid when the file is modified externally. This covers a plain rewrite as well as a script that replaces the file, for example one that deletes the output folder and regenerates the CSVs into it. Unsaved edits in the grid are never replaced: if the file changes while you have some, they stay and a warning offers **Reload from Disk**.
+When a file is open in full (non-preview) mode, the editor watches the file on disk and **automatically reloads** the grid when the file is modified externally. This covers a plain rewrite as well as a script that replaces the file, for example one that deletes the output folder and regenerates the CSVs into it. Unsaved edits in the grid are never replaced: if the file changes while you have some, they stay and a warning offers **Reload from Disk** or **Overwrite**. Until you pick one, no save writes over the change, auto-save included. A value you are still typing in a cell counts as an unsaved edit.
 
 If you ever need to pull in the file on disk by hand, run **CSV Grid: Reload from Disk** from the Command Palette. Use that rather than **File: Revert File**, which VS Code only forwards to an editor when the document has unsaved changes and which therefore does nothing on a file you only changed on disk.
 
