@@ -588,6 +588,58 @@ runSuite('find and replace (browser)', [
         `),
     },
     {
+        // "Hide spaces around values" is on by default. Find went by the
+        // value in the file, so two spaces found cells that show no space at
+        // all and Replace All rewrote padding nobody could see.
+        name: 'spaces hidden: find sees what the grid shows',
+        csv: 'k,v\na,  Berlin  \nb,New York\nc,   \nd,plain',
+        steps: steps(`
+            await t.init(csv);
+            await find(t, '  ', 'X');
+            t.check(count() === '0 matches', 'two spaces match nothing on screen (' + count() + ')');
+            await find(t, 'n  ', 'X');
+            t.check(count() === '0 matches', 'nor does n and two spaces (' + count() + ')');
+            await find(t, ' ', '_');
+            t.check(count() === '1 / 1' && activeAt() === '1:New York', 'one space finds New York only (' + count() + ', ' + activeAt() + ')');
+            await press(t, 'replace-all');
+            t.check(t.lastEdit() === 'k,v\\na,  Berlin  \\nb,New_York\\nc,   \\nd,plain',
+                'Replace All leaves the hidden spaces alone (' + JSON.stringify(t.lastEdit()) + ')');
+            await find(t, 'berlin', 'Rome');
+            t.check(count() === '1 / 1', 'Berlin is found (' + count() + ')');
+            await press(t, 'replace-one');
+            t.check(t.lastEdit() === 'k,v\\na,  Rome  \\nb,New_York\\nc,   \\nd,plain',
+                'Replace changes what is shown and keeps the spaces around it (' + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
+    {
+        name: 'spaces hidden: replace steps through a padded cell',
+        csv: 'k,v\nx, abab ',
+        steps: steps(`
+            await t.init(csv);
+            await find(t, 'b', 'bb');
+            await press(t, 'replace-one');
+            t.check(t.lastEdit() === 'k,v\\nx, abbab ', 'the first b is replaced (' + JSON.stringify(t.lastEdit()) + ')');
+            await press(t, 'replace-one');
+            t.check(t.lastEdit() === 'k,v\\nx, abbabb ', 'the second press takes the second b (' + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
+    {
+        // With the spaces shown they are part of what the user sees, so find
+        // goes on matching them.
+        name: 'spaces shown: find sees the spaces',
+        csv: 'k,v\na,  Berlin  \nb,New York\nc,   \nd,plain',
+        settings: { trimDisplay: false },
+        steps: steps(`
+            await t.init(csv);
+            await find(t, '  ', '');
+            t.check(count() === '1 / 2', 'two spaces are found around Berlin and in the blank cell (' + count() + ')');
+            await find(t, ' ', '_');
+            await press(t, 'replace-all');
+            t.check(t.lastEdit() === 'k,v\\na,__Berlin__\\nb,New_York\\nc,___\\nd,plain',
+                'Replace All replaces every space (' + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
+    {
         // With no rows left there is no grid to search, and the search used to
         // stop before it touched the counter.
         name: 'an outside change that empties the file',

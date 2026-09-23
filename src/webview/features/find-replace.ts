@@ -4,6 +4,7 @@ import { scheduleRecomputeColTypes } from '../grid/column-type';
 import { markValueListsStale } from '../grid/filter';
 import { dataRowIndexForFindMatch } from '../grid/row-mapping';
 import { focusCell } from '../grid/refresh';
+import { shownValue } from '../grid/control-char-cell';
 import type { CsvRow, FindMatch } from '../types';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -149,12 +150,20 @@ function execFind(anchor?: { rowIndex: number; origIndex?: number; colField: str
 
     const lowerNeedle = cs ? '' : needle.toLowerCase();
 
+    // Find goes by what a cell shows. With "Hide spaces around values" on the
+    // spaces around a value are not on screen. A search that saw them found
+    // cells that show no space at all. The shown value is a part of the whole
+    // one, so it is only made for a cell that holds the text at all.
+    const has = (s: string): boolean => cs ? s.includes(needle) : s.toLowerCase().includes(lowerNeedle);
+
     const search = (node: any, rowIndex: number, pinned: boolean): void => {
         for (const col of cols) {
             const raw = node.data[col.field];
             if (raw == null) continue;
-            const val = cs ? String(raw) : String(raw).toLowerCase();
-            if (val.includes(cs ? needle : lowerNeedle)) {
+            const val = String(raw);
+            if (!has(val)) continue;
+            const shown = shownValue(val);
+            if (shown === val || has(shown)) {
                 // Capture _origIndex now so a later replace writes to the right
                 // state.data row even if the user changes sort/filter meanwhile.
                 state.findMatches.push({
@@ -312,10 +321,17 @@ export function closeFindBar(): void {
 // to both, otherwise the grid kept showing the old value and the next search
 // found it again. The grid is not told of the write, so the column filters'
 // value lists are marked stale here.
+// `edit` gets the part of the value the cell shows, the part find searched.
+// The spaces the grid hides around it stay as the file has them. The shown
+// part cannot start inside those spaces, so its first place in the value is
+// where it starts.
 function replaceInCell(m: FindMatch, edit: (old: string) => string): any {
     const colIdx = parseInt(m.colField.replace('col_', ''));
     const dataIndex = dataRowIndexForFindMatch(m);
-    const newVal = edit(String(state.data[dataIndex][colIdx] ?? ''));
+    const old = String(state.data[dataIndex][colIdx] ?? '');
+    const shown = shownValue(old);
+    const lead = shown === old ? 0 : old.indexOf(shown);
+    const newVal = old.slice(0, lead) + edit(shown) + old.slice(lead + shown.length);
     state.data[dataIndex][colIdx] = newVal;
     markValueListsStale();
     const node = rowNodeFor(dataIndex);
