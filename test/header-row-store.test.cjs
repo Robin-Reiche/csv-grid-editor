@@ -71,6 +71,8 @@ function contextFor(store) {
 function register(store) {
     let onRename = null;
     vscodeStub.workspace.onDidRenameFiles = listener => { onRename = listener; return { dispose() {} }; };
+    vscodeStub.workspace.onWillRenameFiles = () => ({ dispose() {} });
+    vscodeStub.window.tabGroups = { all: [], onDidChangeTabs: () => ({ dispose() {} }) };
     vscodeStub.window.registerCustomEditorProvider = () => ({ dispose() {} });
     vscodeStub.commands.registerCommand = () => ({ dispose() {} });
     CsvEditorProvider.register(contextFor(store));

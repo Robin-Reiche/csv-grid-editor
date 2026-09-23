@@ -32,6 +32,10 @@ const NO_ANSWER              = Symbol('no answer');
 // Revert File on it (see toFront).
 const FRONT_TIMEOUT_MS       = 1500;
 const FRONT_RETRY_MS         = 300;
+// How long the unsaved edits of a renamed file wait for VS Code to open it
+// under its new name when no grid tab of that name is open (see carryEdits).
+// A move to another drive copies the file first.
+const CARRY_MS               = 60000;
 
 // A hot exit backup is written as UTF-8, which holds any edit whatever the
 // file's encoding, but for one thing: a lone surrogate, which it turns into
@@ -130,6 +134,16 @@ export function moveHeaderRows(stored: unknown, from: string, to: string): Recor
         map[within(key, from) ? to + key.slice(from.length) : key] = true;
     }
     return map;
+}
+
+// The URI of the file `key` names after VS Code renamed or moved `files`,
+// the file itself or a folder it lies in. Undefined when none of them is it.
+function renamedTo(key: string, files: readonly { readonly oldUri: vscode.Uri; readonly newUri: vscode.Uri }[]): string | undefined {
+    for (const { oldUri, newUri } of files) {
+        const from = oldUri.toString();
+        if (key === from || key.startsWith(from + '/')) return newUri.toString() + key.slice(from.length);
+    }
+    return undefined;
 }
 
 // The watcher's pattern for a file of this name. VS Code reads the pattern as
@@ -314,6 +328,15 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
     // and not by editor: an editor closing must not take the document out
     // while another editor still shows it.
     private readonly _documents = new Map<string, CsvDocument>();
+    // The documents whose unsaved edits wait for VS Code to open their file
+    // under its new name, by the URI of that name (see carryEdits).
+    private readonly _carried = new Map<string, CsvDocument>();
+    // The documents with unsaved edits whose last editor just closed without
+    // a save or a revert, by URI (see keepClosed).
+    private readonly _closed = new Map<string, CsvDocument>();
+    // The documents that took the edits of a renamed file and wait for their
+    // first editor to mark the tab unsaved (see takeEdits).
+    private readonly _unsaved = new WeakSet<CsvDocument>();
 
     public static register(context: vscode.ExtensionContext): vscode.Disposable {
         const provider = new CsvEditorProvider(context);
@@ -324,8 +347,121 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
                 { webviewOptions: { retainContextWhenHidden: true } }
             ),
             vscode.commands.registerCommand('csvViewer.reloadFromDisk', () => provider.reloadActiveFromDisk()),
-            vscode.workspace.onDidRenameFiles(e => provider.followRenames(e.files))
+            vscode.workspace.onWillRenameFiles(e => e.waitUntil(provider.carryEdits(e.files))),
+            vscode.workspace.onDidRenameFiles(e => {
+                provider.followRenames(e.files);
+                provider.followCarried(e.files);
+            }),
+            vscode.window.tabGroups.onDidChangeTabs(e => {
+                for (const tab of e.closed) {
+                    if (tab.input instanceof vscode.TabInputCustom) provider.tabClosed(tab.input.uri.toString());
+                }
+            })
         );
+    }
+
+    // VS Code renames or moves a file (F2 in the Explorer, a drag, a
+    // WorkspaceEdit of an extension) and backs up its unsaved edits. It then
+    // opens the file under the new name as a new document without that
+    // backup, read from disk. The tab came back saved with the file's old
+    // text and closing it asked nothing, so the edits were gone without a
+    // word. With a change on disk that still waited for Overwrite or Reload
+    // from Disk, the other program's text took their place. VS Code's own
+    // text editor keeps them. So a document with unsaved edits hands them to
+    // the new name here, a value being typed in a cell included. The new
+    // name takes them when it opens (see openCustomDocument). A tab behind
+    // another opens only once it is shown. A preview has no edits.
+    private async carryEdits(files: readonly { readonly oldUri: vscode.Uri; readonly newUri: vscode.Uri }[]): Promise<void> {
+        this.followCarried(files);
+        await Promise.all([...this._documents].map(async ([key, document]) => {
+            const to = renamedTo(key, files);
+            if (to === undefined || document.isPreview) return;
+            if (document.typing.size > 0) await this.flushTyping(document);
+            if (document.hasUnsavedEdits()) this.carry(to, document);
+        }));
+    }
+
+    private carry(key: string, document: CsvDocument): void {
+        this._carried.set(key, document);
+        setTimeout(() => { if (this._carried.get(key) === document) this.dropCarried(key); }, CARRY_MS);
+    }
+
+    // Edits carried to a file that no grid tab shows are dropped: a rename
+    // that failed, a name that opens in another editor. A grid tab VS Code
+    // has not shown since the rename keeps them until it is shown or closed.
+    private dropCarried(key: string): void {
+        const shown = vscode.window.tabGroups.all.some(group => group.tabs.some(tab => tab.input instanceof vscode.TabInputCustom
+            && tab.input.viewType === CsvEditorProvider.viewType && tab.input.uri.toString() === key));
+        if (!shown) this._carried.delete(key);
+    }
+
+    // A grid tab was closed. Edits carried to it before VS Code showed it go
+    // with it. VS Code tells of a rename before it closes the tab of the old
+    // name, so the file of a document kept by keepClosed was not renamed.
+    private tabClosed(key: string): void {
+        this._closed.delete(key);
+        this.dropCarried(key);
+    }
+
+    // The last editor of a document with unsaved edits closed without a save
+    // or a revert. VS Code renamed, moved or deleted its file. Ctrl+Z in the
+    // Explorer undoes a rename without telling the extension beforehand (see
+    // carryEdits), so the document is kept until VS Code tells of the rename
+    // afterwards (see followCarried) or closes its tab.
+    private keepClosed(document: CsvDocument): void {
+        if (document.panels.size > 0 || document.isPreview || !document.hasUnsavedEdits()) return;
+        if ([...this._carried.values()].includes(document)) return;
+        this._closed.set(document.uri.toString(), document);
+    }
+
+    // Edits carried to a file that VS Code has not shown yet go along when
+    // it is renamed again, the same as those of a document kept by
+    // keepClosed. VS Code tells of an undone rename once it opened the file
+    // under its old name again but before it gives it its grid, which then
+    // takes them (see resolveCustomEditor).
+    private followCarried(files: readonly { readonly oldUri: vscode.Uri; readonly newUri: vscode.Uri }[]): void {
+        for (const kept of [this._carried, this._closed]) {
+            for (const [key, document] of [...kept]) {
+                const to = renamedTo(key, files);
+                if (to === undefined) continue;
+                kept.delete(key);
+                if (!this._carried.has(to)) this.carry(to, document);
+            }
+        }
+    }
+
+    // Gives `doc`, the file under its new name, the unsaved edits `from` held
+    // under the old one and their encoding. The file is read for what it
+    // holds now. When that is not what `from` knew it held, another program
+    // changed it before the watcher of the new name was there to tell, which
+    // is warned about the way the watcher does it. So is a change on disk
+    // that still waited for Overwrite or Reload from Disk. VS Code only knows
+    // the document once it has an editor, so the tab is marked unsaved then.
+    private async takeEdits(doc: CsvDocument, from: CsvDocument): Promise<void> {
+        doc.content = from.content;
+        doc.encoding = from.encoding;
+        let changed = false;
+        try {
+            const raw = await vscode.workspace.fs.readFile(doc.uri);
+            const known = encodeFile(from.diskText, from.encoding);
+            if (known && Buffer.compare(known, raw) === 0) {
+                doc.diskText = from.diskText;
+            } else {
+                const onDisk = decodeFile(raw, from.encoding);
+                doc.diskText = onDisk.text;
+                if (onDisk.text !== from.diskText || onDisk.encoding !== from.encoding) {
+                    doc.encoding = onDisk.encoding;
+                    changed = true;
+                }
+            }
+        } catch {
+            doc.diskText = '';
+        }
+        // The file holds the very edits: the tab still shows them unsaved
+        // (see recordContentOnDisk).
+        if (doc.diskText === doc.content) doc.editsOnDisk = true;
+        if ((changed || from.conflict) && doc.diskText !== doc.content) this.warnChangedOnDisk(doc);
+        this._unsaved.add(doc);
     }
 
     // "First row is the header" is kept by URI. A file renamed or moved in VS
@@ -401,11 +537,23 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         openContext: vscode.CustomDocumentOpenContext,
         _token: vscode.CancellationToken
     ): Promise<CsvDocument> {
+        // The unsaved edits of a file VS Code renamed or moved to this one
+        // (see carryEdits). They are taken once, whatever this open does.
+        const from = this._carried.get(uri.toString());
+        this._carried.delete(uri.toString());
+
         // Hot exit: VS Code saved the unsaved edits with backupCustomDocument
         // and now hands them back. Reading the file instead brought the tab
         // back dirty but with the old content. The edits were gone.
         if (openContext.backupId) {
             return this.restoreBackup(uri, openContext.backupId);
+        }
+
+        // All of the file's text, so the size question is not asked.
+        if (from) {
+            const doc = new CsvDocument(uri, from.content, from.delimiter, false, 'full', 0, false);
+            await this.takeEdits(doc, from);
+            return doc;
         }
 
         const stat = await vscode.workspace.fs.stat(uri);
@@ -613,6 +761,14 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         };
 
         const key = document.uri.toString();
+        // The edits of an undone rename, which VS Code tells of only after it
+        // opened this document from disk (see followCarried). Its grid is
+        // not there yet, so it gets them before it shows anything.
+        const from = document.panels.size === 0 ? this._carried.get(key) : undefined;
+        if (from) {
+            this._carried.delete(key);
+            if (!document.isPreview && !document.hasUnsavedEdits() && from.delimiter === document.delimiter) await this.takeEdits(document, from);
+        }
         document.panels.add(webviewPanel);
         if (document.panels.size === 2) this.tellShared(document, webviewPanel);
         this._documents.set(key, document);
@@ -636,6 +792,7 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             document.watcher = undefined;
             if (this._documents.get(key) === document) this._documents.delete(key);
         });
+        webviewPanel.onDidDispose(() => this.keepClosed(document));
 
         const fileName  = path.basename(document.uri.fsPath);
         const zoomIndex = this.context.globalState.get<number>('csvGridEditor.zoomIndex', 4);
@@ -818,6 +975,9 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
                 });
             }
         });
+
+        // A document that took the edits of a renamed file (see takeEdits).
+        if (this._unsaved.delete(document)) this.fireChange(document);
     }
 
     // Marks the tab unsaved.
