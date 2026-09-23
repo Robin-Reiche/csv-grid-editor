@@ -31,6 +31,34 @@ function decodeFile(raw: Uint8Array): { text: string; hasBom: boolean } {
     return { text: new TextDecoder().decode(raw), hasBom };
 }
 
+// The files whose first row is data, not a header ("First row is the header"
+// switched off in the grid's settings menu). A property of one file, so it is
+// kept per file: one globalState map from the file's URI to true. Only those
+// files are in it, a file switched back on is taken out again. Nothing about
+// it is written into the file itself.
+const HEADERLESS_KEY = 'csvGridEditor.headerless';
+
+function isHeaderless(stored: unknown, uri: string): boolean {
+    return !!stored && typeof stored === 'object'
+        && Object.prototype.hasOwnProperty.call(stored, uri)
+        && (stored as Record<string, unknown>)[uri] === true;
+}
+
+// The map to store after the switch was set for `uri`. Only true survives
+// from what was stored before, so whatever else ended up in there is dropped
+// rather than carried along.
+export function rememberHeaderRow(stored: unknown, uri: string, firstRowIsHeader: boolean): Record<string, true> {
+    const map: Record<string, true> = {};
+    if (stored && typeof stored === 'object') {
+        for (const [key, value] of Object.entries(stored)) {
+            if (value === true) map[key] = true;
+        }
+    }
+    if (firstRowIsHeader) delete map[uri];
+    else map[uri] = true;
+    return map;
+}
+
 class CsvDocument implements vscode.CustomDocument {
     public content: string;
     public pageIndex: RowPageIndex | null = null;
@@ -400,12 +428,14 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
 
         webviewPanel.webview.onDidReceiveMessage(async (msg) => {
             if (msg.type === 'ready') {
+                const firstRowIsHeader = !isHeaderless(this.context.globalState.get(HEADERLESS_KEY), document.uri.toString());
                 if (document.isChunked && document.pageIndex) {
                     const pageText = await readPage(document.uri.fsPath, document.pageIndex, 0);
                     webviewPanel.webview.postMessage({
                         type: 'init',
                         text: pageText,
-                        delimiter: document.delimiter
+                        delimiter: document.delimiter,
+                        firstRowIsHeader
                     });
                     webviewPanel.webview.postMessage({
                         type: 'pageData',
@@ -417,7 +447,8 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
                     webviewPanel.webview.postMessage({
                         type: 'init',
                         text: document.content,
-                        delimiter: document.delimiter
+                        delimiter: document.delimiter,
+                        firstRowIsHeader
                     });
                 }
             } else if (msg.type === 'zoomChanged') {
@@ -429,6 +460,16 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             } else if (msg.type === 'settingChanged') {
                 if (isSettingKey(msg.key) && typeof msg.value === 'boolean') {
                     this.context.globalState.update('csvGridEditor.' + msg.key, msg.value);
+                }
+
+            // "First row is the header", for this file only. The file is the
+            // document this webview belongs to, never one the message names,
+            // for the same trust boundary as above.
+            } else if (msg.type === 'headerRowChanged') {
+                if (typeof msg.value === 'boolean') {
+                    const uri = document.uri.toString();
+                    this.context.globalState.update(HEADERLESS_KEY,
+                        rememberHeaderRow(this.context.globalState.get(HEADERLESS_KEY), uri, msg.value));
                 }
 
             } else if (msg.type === 'wrapTextChanged') {

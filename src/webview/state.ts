@@ -1,5 +1,6 @@
 import type { CsvRow, ColType, FindMatch, UndoSnapshot } from './types';
 import { SETTING_DEFAULTS, type Settings } from './settings';
+import { colLetter, type LineFormat } from './utils/csv';
 
 export const state = {
     currentDelimiter: ',',
@@ -7,6 +8,19 @@ export const state = {
     // outside change or the last edit it wrote. In the paged view it is the page
     // on display. A delimiter switch re-splits this (features/delimiter.ts).
     rawCsvText: '',
+    // How that text ends its rows, read every time it is split into state.data.
+    // Every edit writes the file back the same way (utils/csv.ts toCsv).
+    lineFormat: { eol: '\n', finalNewline: false } as LineFormat,
+    // Whether the file's first row is its header ("First row is the header" in
+    // the settings menu, remembered per file by the extension). Off, the grid
+    // still keeps a header in state.data[0], so every part of it that reads
+    // the names there and the rows below works the same: a row of column
+    // letters (A, B, C) that the grid makes up and relabelVirtualHeader keeps
+    // in step with the columns. That row is not in the file and must never get
+    // there. The one place that writes the file leaves it out (fileRows in
+    // notifyChange). Nothing may write a name into it either, which is why
+    // Rename column is not offered. See features/header-row.ts.
+    firstRowIsHeader: true,
     data: [] as CsvRow[],
     undoStack: [] as UndoSnapshot[],
     redoStack: [] as UndoSnapshot[],
@@ -56,6 +70,7 @@ export const state = {
     findMatchIndex: -1,
 
     currentPage: 0,
+    totalPages: 1,
 
     // Freeze rows — the data rows pinned to the top of the grid as always-visible
     // references. Tracked by their array references within state.data (NOT by
@@ -109,4 +124,61 @@ export function emptyTableKind(rows: CsvRow[]): 'no-columns' | 'no-rows' | null 
     if (getNumCols(rows) === 0) return 'no-columns';
     if (rows.length <= 1) return 'no-rows';
     return null;
+}
+
+// ── A file without a header row ──────────────────────────────────────────────
+// Apart from relabelVirtualHeader the helpers below take the mode as an
+// argument rather than reading state.firstRowIsHeader, so the tests can run
+// them outside the page.
+
+// The names of n columns in a file without a header: A, B, C and on past Z
+// the way a spreadsheet goes, AA, AB.
+export function letterRow(n: number): string[] {
+    return Array.from({ length: n }, (_, i) => colLetter(i));
+}
+
+// The grid's table for the rows of a file. Without a header the letters go
+// on top, so the file's first row is row 1 like all the others.
+export function withVirtualHeader(rows: CsvRow[], headerless: boolean): CsvRow[] {
+    return headerless ? [letterRow(getNumCols(rows)), ...rows] : rows;
+}
+
+// The rows that make up the file: the grid's table without the letters.
+export function fileRows(data: CsvRow[], headerless: boolean): CsvRow[] {
+    return headerless ? data.slice(1) : data;
+}
+
+// Puts fresh letters on top of the grid's table. Inserting or deleting a
+// column changes the letter row like any other row, which leaves it reading
+// A, (blank), B after an insert. There are as many columns as the widest row
+// has cells, the same as with a header, where a column past the header goes
+// away with the last row that reaches it. With no rows left the letters are
+// all there is to count by, so they keep their number. The grid calls this
+// before it reads the names (grid/builder.ts, grid/refresh.ts).
+export function relabelVirtualHeader(): void {
+    const data = state.data;
+    if (state.firstRowIsHeader || data.length === 0) return;
+    let n = data.length > 1 ? 0 : data[0].length;
+    for (let i = 1; i < data.length; i++) {
+        if (data[i].length > n) n = data[i].length;
+    }
+    data[0] = letterRow(n);
+}
+
+// An undo step moved into the other mode, the way the switch moves the grid's
+// table (features/header-row.ts), so undo keeps working across a switch. The
+// frozen rows are kept by position and move along. A row that would become
+// the header is no longer frozen, the header never is.
+export function snapshotInHeaderMode(snap: UndoSnapshot, headerless: boolean): UndoSnapshot {
+    return headerless
+        ? {
+            data: withVirtualHeader(snap.data, true),
+            frozenRowIdx: snap.frozenRowIdx.map(i => i + 1),
+            pinnedCols: snap.pinnedCols,
+        }
+        : {
+            data: fileRows(snap.data, true),
+            frozenRowIdx: snap.frozenRowIdx.map(i => i - 1).filter(i => i >= 1),
+            pinnedCols: snap.pinnedCols,
+        };
 }

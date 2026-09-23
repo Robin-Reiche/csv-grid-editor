@@ -1,4 +1,4 @@
-import { state, getNumCols, emptyTableKind } from '../state';
+import { state, getNumCols, emptyTableKind, relabelVirtualHeader } from '../state';
 import { buildGrid, makeComparator } from './builder';
 import { recomputeColTypes, TYPE_LABELS } from './column-type';
 import { shownValue } from './control-char-cell';
@@ -50,6 +50,9 @@ export function partitionFrozenRows<T extends { _origIndex?: number }>(
 // def still holding the type it was built with would bring the old badge back.
 export function syncColumnHeaders(): void {
     if (!state.gridApi) return;
+    // Undo of a column insert or delete lands here. The letters that name the
+    // columns of a file without a header follow the columns.
+    relabelVirtualHeader();
     const header = state.data[0] ?? [];
     const defs = state.gridApi.getColumnDefs() as any[] | undefined;
     if (!defs) return;
@@ -160,6 +163,10 @@ function gridDataColCount(): number {
 }
 
 export function refreshGrid(): void {
+    // In a file without a header row the letters count the columns too, so
+    // they have to match the rows before anything below counts. A delete that
+    // took the only wide row away takes its column along.
+    relabelVirtualHeader();
     // No grid to refresh (the file was empty, then content arrived by undo, redo
     // or an edit in another editor), or no columns left to show (undo back to an
     // empty file). Swapping rows cannot fix either, the column set itself has to

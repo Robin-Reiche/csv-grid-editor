@@ -5,6 +5,7 @@ import { applyColorMode } from './color-mode';
 import { applyBoolCheckboxes } from './bool-checkbox';
 import { syncColumnHeaders } from '../grid/refresh';
 import { reapplySortAndFilter } from '../grid/builder';
+import { setFirstRowIsHeader } from './header-row';
 
 /**
  * Settings menu (issue #41).
@@ -96,16 +97,57 @@ const ITEMS: SettingItem[] = [
 
 // The gear carries a marker while anything in here differs from its default,
 // so a grid that does not look like the default says why without being opened.
-function updateButton(): void {
-    const changed = ITEMS.some(item => state.settings[item.key] !== SETTING_DEFAULTS[item.key]);
+// A file read without its header row counts too, it changes what the grid
+// shows more than any of the switches below.
+export function updateSettingsButton(): void {
+    const changed = !state.firstRowIsHeader
+        || ITEMS.some(item => state.settings[item.key] !== SETTING_DEFAULTS[item.key]);
     document.getElementById('btn-settings')?.classList.toggle('btn-active', changed);
 }
 
 function setSetting(item: SettingItem, on: boolean): void {
     state.settings[item.key] = on;
     item.apply();
-    updateButton();
+    updateSettingsButton();
     vscodeApi.postMessage({ type: 'settingChanged', key: item.key, value: on });
+}
+
+function appendGroup(list: HTMLElement, name: string): void {
+    const head = document.createElement('div');
+    head.className = 'settings-group';
+    head.textContent = name;
+    list.appendChild(head);
+}
+
+function appendSwitch(
+    list: HTMLElement, key: string, labelText: string, hintText: string,
+    checked: boolean, onChange: (on: boolean) => void,
+): void {
+    const row = document.createElement('label');
+    row.className = 'settings-item';
+    row.dataset.key = key;
+
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = checked;
+    cb.addEventListener('change', () => onChange(cb.checked));
+
+    const text = document.createElement('span');
+    text.className = 'settings-item-text';
+
+    const label = document.createElement('span');
+    label.className = 'settings-item-label';
+    label.textContent = labelText;
+
+    const hint = document.createElement('span');
+    hint.className = 'settings-item-hint';
+    hint.textContent = hintText;
+
+    text.appendChild(label);
+    text.appendChild(hint);
+    row.appendChild(cb);
+    row.appendChild(text);
+    list.appendChild(row);
 }
 
 function buildList(): void {
@@ -113,41 +155,23 @@ function buildList(): void {
     if (!list) return;
     list.innerHTML = '';
 
+    // Whether the first row is the header is a fact about one file, not a
+    // taste, so it is not one of the ITEMS every file shares. The extension
+    // remembers it for this file only (features/header-row.ts). Unlike the
+    // switches below it changes what the rows are, yet like them it writes
+    // nothing: the file stays as it is either way.
+    appendGroup(list, 'This file');
+    appendSwitch(list, 'firstRowIsHeader', 'First row is the header',
+        'Off: the first row is data and the columns are named A, B, C. Remembered for this file only.',
+        state.firstRowIsHeader, on => { setFirstRowIsHeader(on); updateSettingsButton(); });
+
     let group = '';
     for (const item of ITEMS) {
         if (item.group !== group) {
             group = item.group;
-            const head = document.createElement('div');
-            head.className = 'settings-group';
-            head.textContent = group;
-            list.appendChild(head);
+            appendGroup(list, group);
         }
-
-        const row = document.createElement('label');
-        row.className = 'settings-item';
-        row.dataset.key = item.key;
-
-        const cb = document.createElement('input');
-        cb.type = 'checkbox';
-        cb.checked = state.settings[item.key];
-        cb.addEventListener('change', () => setSetting(item, cb.checked));
-
-        const text = document.createElement('span');
-        text.className = 'settings-item-text';
-
-        const label = document.createElement('span');
-        label.className = 'settings-item-label';
-        label.textContent = item.label;
-
-        const hint = document.createElement('span');
-        hint.className = 'settings-item-hint';
-        hint.textContent = item.hint;
-
-        text.appendChild(label);
-        text.appendChild(hint);
-        row.appendChild(cb);
-        row.appendChild(text);
-        list.appendChild(row);
+        appendSwitch(list, item.key, item.label, item.hint, state.settings[item.key], on => setSetting(item, on));
     }
 }
 
@@ -177,7 +201,7 @@ export function setupSettingsMenu(): void {
     // through the grid find no grid yet and are picked up when it is built
     // (builder.ts reads state.settings), the ones on the container apply now.
     for (const item of ITEMS) item.apply();
-    updateButton();
+    updateSettingsButton();
 
     const btn = document.getElementById('btn-settings');
     btn?.addEventListener('click', (e) => {

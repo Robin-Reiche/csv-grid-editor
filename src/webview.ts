@@ -243,7 +243,7 @@ export function getWebviewContent(
         <div id="col-ctx-insert-right" class="col-ctx-item"${isPreview ? ' style="display:none;"' : ''}><i class="codicon codicon-arrow-right"></i><span class="col-ctx-label">Insert column right</span></div>
         <div class="col-ctx-separator"${isPreview ? ' style="display:none;"' : ''}></div>
         <div id="col-ctx-rename"   class="col-ctx-item"${isPreview ? ' style="display:none;"' : ''}><i class="codicon codicon-edit"></i><span class="col-ctx-label">Rename column</span></div>
-        <div class="col-ctx-separator"${isPreview ? ' style="display:none;"' : ''}></div>
+        <div id="col-ctx-rename-sep" class="col-ctx-separator"${isPreview ? ' style="display:none;"' : ''}></div>
         <div id="col-ctx-select"   class="col-ctx-item"><i class="codicon codicon-list-selection"></i><span class="col-ctx-label">Select column</span></div>
         <div class="col-ctx-separator"></div>
         <div id="col-ctx-freeze"   class="col-ctx-item"><i class="codicon codicon-pinned"></i><span class="col-ctx-label">Freeze column</span></div>

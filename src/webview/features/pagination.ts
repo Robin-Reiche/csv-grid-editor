@@ -1,14 +1,25 @@
 import { state } from '../state';
-import { parseCsv } from '../utils/csv';
+import { parseCsv, detectLineFormat } from '../utils/csv';
 import { buildGrid } from '../grid/builder';
 import { hideLoader } from '../utils/loader';
+import { loadRows, rowsInFile } from './header-row';
 
 export function requestPage(pageNum: number): void {
     vscodeApi.postMessage({ type: 'requestPage', pageNumber: pageNum });
 }
 
+// The paged view's banner: the page on display and how many rows the whole
+// file has.
+export function updatePageBanner(): void {
+    const previewEl = document.getElementById('preview-text');
+    if (!previewEl || !IS_CHUNKED) return;
+    previewEl.textContent = `Page ${(state.currentPage + 1).toLocaleString()} of ${state.totalPages.toLocaleString()}, `
+        + `${rowsInFile().toLocaleString()} rows in total (read-only preview)`;
+}
+
 export function handlePageData(msg: { pageNumber: number; totalPages: number; text: string }): void {
     state.currentPage = msg.pageNumber;
+    state.totalPages  = msg.totalPages;
 
     const pi   = document.getElementById('page-info');
     if (pi) pi.textContent = 'Page ' + (msg.pageNumber + 1) + ' / ' + msg.totalPages;
@@ -16,11 +27,7 @@ export function handlePageData(msg: { pageNumber: number; totalPages: number; te
     // Head and tail say how much of the file is on screen, the paged view used to
     // say nothing at all: the banner rendered empty because only those two modes
     // ever filled it.
-    const previewEl = document.getElementById('preview-text');
-    if (previewEl) {
-        previewEl.textContent = `Page ${(msg.pageNumber + 1).toLocaleString()} of ${msg.totalPages.toLocaleString()}, `
-            + `${Math.max(0, TOTAL_LINE_COUNT - 1).toLocaleString()} rows in total (read-only preview)`;
-    }
+    updatePageBanner();
 
     const btnPrev  = document.getElementById('btn-page-prev')  as HTMLButtonElement | null;
     const btnFirst = document.getElementById('btn-page-first') as HTMLButtonElement | null;
@@ -36,7 +43,8 @@ export function handlePageData(msg: { pageNumber: number; totalPages: number; te
     // so it has to be the page on display. It used to keep whatever the first page
     // held, which sent you back to page 1 while the bar still said page 6 (#34).
     state.rawCsvText = msg.text;
-    state.data = parseCsv(msg.text, state.currentDelimiter, false, true);
+    state.data = loadRows(parseCsv(msg.text, state.currentDelimiter, false, true));
+    state.lineFormat = detectLineFormat(msg.text, state.currentDelimiter);
     buildGrid();
     hideLoader();
 }

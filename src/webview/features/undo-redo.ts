@@ -1,4 +1,4 @@
-import { state } from '../state';
+import { state, fileRows } from '../state';
 import { toCsv } from '../utils/csv';
 import { refreshGrid } from '../grid/refresh';
 import { recomputeColTypes } from '../grid/column-type';
@@ -99,8 +99,11 @@ export function notifyChange(): void {
     // This text becomes the file, so it is also what the next delimiter switch
     // re-splits (features/delimiter.ts). A switch that re-split the text the file
     // was opened with would bring back every value edited since. The next edit
-    // would then write them into the file.
-    const text = toCsv(state.data, state.currentDelimiter);
+    // would then write them into the file. The rows end the way the file ends
+    // them, so an edit leaves the line breaks between the rows as they were.
+    // A file without a header row gets its rows only, never the column
+    // letters the grid shows in its place (state.firstRowIsHeader).
+    const text = toCsv(fileRows(state.data, !state.firstRowIsHeader), state.currentDelimiter, state.lineFormat);
     state.rawCsvText = text;
     vscodeApi.postMessage({ type: 'edit', text });
 }

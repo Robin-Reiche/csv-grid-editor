@@ -99,6 +99,18 @@ export function setupFreezeColumns(): void {
             unfreezeAllEl.style.display = state.pinnedCols.size > 1 ? 'flex' : 'none';
         }
 
+        // A file without a header row has no names to rename. What its header
+        // shows are column letters the grid makes up. A name typed over one
+        // would never reach the file. Switching "First row is the header" on
+        // is how such a file gets names.
+        if (!IS_PREVIEW) {
+            const named = state.firstRowIsHeader;
+            const renameEl = document.getElementById('col-ctx-rename');
+            if (renameEl) renameEl.style.display = named ? 'flex' : 'none';
+            const sepEl = document.getElementById('col-ctx-rename-sep');
+            if (sepEl) sepEl.style.display = named ? '' : 'none';
+        }
+
         setLabel(document.getElementById('col-ctx-delete'), n > 1 ? `Delete ${n} columns` : 'Delete column');
         setLabel(document.getElementById('col-ctx-insert-left'), n > 1 ? `Insert ${n} columns left` : 'Insert column left');
         setLabel(document.getElementById('col-ctx-insert-right'), n > 1 ? `Insert ${n} columns right` : 'Insert column right');

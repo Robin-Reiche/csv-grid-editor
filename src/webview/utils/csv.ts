@@ -52,7 +52,7 @@ export function parseCsv(text: string, delimiter: string, trimFields: boolean = 
             // quoted "" closes, but a quote there would have made it an escaped
             // "" inside the field, so this cannot reopen one by mistake.
             // largeFileReader.ts makes the same call byte by byte and has to
-            // stay in step with this one.
+            // stay in step with this one, as does detectLineFormat below.
             inQuotes = true;
             lineQuoted = true;
         } else if (ch === delimiter) {
@@ -86,8 +86,66 @@ export function parseCsv(text: string, delimiter: string, trimFields: boolean = 
     return rows;
 }
 
-export function toCsv(rows: CsvRow[], delimiter: string): string {
-    return rows.map(row =>
+// How a file ends its rows: the line break it puts between two rows and
+// whether one follows the last row too. The grid writes the whole file on every
+// edit, so without this the first edit would rewrite every line of a CRLF file
+// and take the break off the end of the file.
+export type LineFormat = { eol: '\n' | '\r\n'; finalNewline: boolean };
+
+const LF_NO_FINAL_BREAK: LineFormat = { eol: '\n', finalNewline: false };
+
+// Reads the line format from the text parseCsv is about to split into rows. It
+// counts only the breaks that end a row, so it tracks quotes exactly the way
+// parseCsv does and has to stay in step with it. A break inside a quoted value
+// belongs to the value and is written back as it is, CRLF or LF (issue #31).
+// A file that mixes both gets the one most of its rows end with, so the
+// fewest bytes change on the next edit. A tie and a file with no row break at
+// all get LF with nothing at the end.
+export function detectLineFormat(text: string, delimiter: string): LineFormat {
+    let crlf = 0;
+    let lf = 0;
+    let inQuotes = false;
+    // Whether the field so far holds only spaces and tabs. That is all parseCsv
+    // looks at to decide whether a quote opens a quoted field.
+    let blank = true;
+    for (let i = 0; i < text.length; i++) {
+        const ch = text[i];
+        if (inQuotes) {
+            if (ch === '"') {
+                if (i + 1 < text.length && text[i + 1] === '"') {
+                    blank = false;
+                    i++;
+                } else {
+                    inQuotes = false;
+                }
+            } else if (ch !== ' ' && ch !== '\t') {
+                blank = false;
+            }
+        } else if (ch === '"' && blank) {
+            inQuotes = true;
+        } else if (ch === delimiter) {
+            blank = true;
+        } else if (ch === '\n') {
+            // A CR right before this break is outside quotes as well. A quote
+            // that closed in between would sit between the two.
+            if (i > 0 && text[i - 1] === '\r') crlf++;
+            else lf++;
+            blank = true;
+        } else if (ch !== '\r' && ch !== ' ' && ch !== '\t') {
+            blank = false;
+        }
+    }
+    return {
+        eol: crlf > lf ? '\r\n' : '\n',
+        finalNewline: !inQuotes && text.endsWith('\n'),
+    };
+}
+
+// Without a line format the rows are joined with LF and nothing follows the
+// last one. The clipboard wants exactly that. The grid writes the file with
+// the format it was read with (state.lineFormat).
+export function toCsv(rows: CsvRow[], delimiter: string, format: LineFormat = LF_NO_FINAL_BREAK): string {
+    const text = rows.map(row =>
         row.map(cell => {
             const s = String(cell);
             if (s.includes(delimiter) || s.includes('"') || s.includes('\n') || s.includes('\r')) {
@@ -95,7 +153,9 @@ export function toCsv(rows: CsvRow[], delimiter: string): string {
             }
             return s;
         }).join(delimiter)
-    ).join('\n');
+    ).join(format.eol);
+    // An empty table stays empty. A lone break would read back as a blank row.
+    return format.finalNewline && rows.length > 0 ? text + format.eol : text;
 }
 
 // TSV-quote a single cell — matches Excel's clipboard format. Wraps the value

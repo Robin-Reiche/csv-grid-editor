@@ -150,7 +150,12 @@ window.__t = {
 
 // Builds the page for one test and runs it. Returns the lines the test
 // reported, each starting with PASS or FAIL.
-function runPage({ csv, delimiter = ',', settings = {}, steps, budget = 30000 }) {
+//
+// `preview` opens the page the way Show Head, Show Tail or the Paged View
+// does: { mode: 'head' | 'tail' | 'chunked', total }, where total is the
+// number of records in the whole file, header included, as the extension
+// counts them. The test then sends the text those modes would send.
+function runPage({ csv, delimiter = ',', settings = {}, steps, budget = 30000, preview = null }) {
     const chrome = findChrome();
     if (!chrome) throw new Error('no Chrome found');
 
@@ -158,7 +163,8 @@ function runPage({ csv, delimiter = ',', settings = {}, steps, budget = 30000 })
     const { readSettings } = require(path.join(ROOT, 'out', 'webview', 'settings.js'));
     let html = getWebviewContent(
         { asWebviewUri: u => u, cspSource: '*' }, ROOT, delimiter,
-        false, 'full', 0, 'test.csv', false, false, 4, readSettings(settings), false,
+        !!preview, preview ? preview.mode : 'full', preview ? preview.total : 0, 'test.csv',
+        !!preview && preview.mode === 'chunked', false, 4, readSettings(settings), false,
     );
     html = html.replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/, '');
     html = html.replace(/ASSET:([\w.-]+)/g, (_m, name) => 'file://' + assetPath(name).replace(/\\/g, '/'));
