@@ -1,6 +1,14 @@
-import { state } from '../state';
+import { state, getNumCols } from '../state';
 import type { CsvRow, ColType } from '../types';
 import { BOOL_PAIRS, boolPairIndex } from '../utils/bool-values';
+import { syncColumnHeaders } from './refresh';
+
+// What the header tooltip calls each type. The badge is the short form, drawn
+// from the header class col-type-<type> (media/webview.css).
+export const TYPE_LABELS: Record<string, string> = {
+    integer: 'Integer', float: 'Float / Decimal', string: 'Text',
+    boolean: 'Boolean', date: 'Date', datetime: 'Date & Time', time: 'Time'
+};
 
 export function getColumnType(bodyRows: CsvRow[], colIndex: number): ColType {
     const sampleSize = Math.min(bodyRows.length, 100);
@@ -45,15 +53,6 @@ export function getColumnType(bodyRows: CsvRow[], colIndex: number): ColType {
 
 // ── dynamic re-evaluation after mutations ─────────────────────────────────────
 
-function applyHeaderClass(colId: string, type: ColType): void {
-    const cell = document.querySelector<HTMLElement>(`.ag-header-cell[col-id="${colId}"]`);
-    if (!cell) return;
-    Array.from(cell.classList)
-        .filter(c => c.startsWith('col-type-'))
-        .forEach(c => cell.classList.remove(c));
-    cell.classList.add('col-type-' + type);
-}
-
 let typeRecomputeTimer: ReturnType<typeof setTimeout> | null = null;
 
 export function scheduleRecomputeColTypes(): void {
@@ -65,17 +64,23 @@ export function recomputeColTypes(): void {
     typeRecomputeTimer = null;
     if (!state.data || state.data.length < 2) return;
     const bodyRows = state.data.slice(1);
-    const numCols  = state.data[0]?.length ?? 0;
+    // A row can be wider than the header row. The columns past the header have
+    // no name but hold values like any other. buildGrid gives them a type too.
+    const numCols  = getNumCols(state.data);
     const changed: string[] = [];
     for (let c = 0; c < numCols; c++) {
         const newType = getColumnType(bodyRows, c);
         if (newType !== state.colTypes[c]) {
             state.colTypes[c] = newType;
-            applyHeaderClass('col_' + c, newType);
             changed.push('col_' + c);
         }
     }
     if (changed.length === 0) return;
+    // The badge and the tooltip are part of the column defs. The grid draws the
+    // header from them whenever it redraws it, which a rename, an undo or the
+    // spaces switch all cause. A class set on the header element alone is gone
+    // at that point. The tooltip lives in the defs only.
+    syncColumnHeaders();
     // A cell can be DRAWN from its column's type and not only from its own
     // value: a true/false column is drawn as checkboxes when that mode is on
     // (features/bool-checkbox.ts). refreshGrid drops the types and has them

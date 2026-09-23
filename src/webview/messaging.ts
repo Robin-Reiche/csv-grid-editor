@@ -46,8 +46,14 @@ export function setupMessaging(): void {
             // External file change → re-parse. Re-anchor frozen rows by position so
             // they survive the reload (best effort: positions past the new row count
             // are dropped if the external edit removed rows).
+            // Split with the delimiter on the badge, not the one the host found
+            // when the file was opened. A delimiter picked by hand is the one the
+            // grid shows and writes with, so the change has to be read with it
+            // too. The text is kept for the next delimiter switch, which re-splits
+            // it (features/delimiter.ts).
             const frozen = frozenRowPositions();
-            state.data = parseCsv(msg.text, msg.delimiter, false, true);
+            state.rawCsvText = msg.text;
+            state.data = parseCsv(msg.text, state.currentDelimiter, false, true);
             reanchorFrozenRows(frozen);
             // Existing dup highlights now point at stale rows. Leaving the
             // "Show only duplicates" view already rebuilds the rows from

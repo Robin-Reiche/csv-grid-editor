@@ -1,5 +1,5 @@
 import { state, getNumCols, emptyTableKind } from '../state';
-import { getColumnType, scheduleRecomputeColTypes } from './column-type';
+import { getColumnType, scheduleRecomputeColTypes, TYPE_LABELS } from './column-type';
 import { NoRowsOverlay, renderNoColumns } from '../features/empty-state';
 import { createCombinedFilter } from './filter';
 import { dataRowIndexForNode } from './row-mapping';
@@ -20,11 +20,6 @@ import {
     onCellMouseOverHandler,
     clearRangeSelection,
 } from '../features/range-select';
-
-const TYPE_LABELS: Record<string, string> = {
-    integer: 'Integer', float: 'Float / Decimal', string: 'Text',
-    boolean: 'Boolean', date: 'Date', datetime: 'Date & Time', time: 'Time'
-};
 
 // ── Grid icons ───────────────────────────────────────────────────────────
 // AG Grid header icons are rendered as inline SVG built from the official
@@ -135,7 +130,29 @@ function makeComparator(colType: string): (a: string, b: string) => number {
 // listener must be attached once — not re-added on every buildGrid call.
 let dblclickWired = false;
 
+// The toolbar's Clear filters button is up while any filter is on. A grid built
+// fresh has no column filters but raises no filter change to say so. buildGrid
+// calls this itself for that reason. Otherwise the button would stay up after a
+// rebuild dropped the filters: insert or delete column, a delimiter switch, an
+// outside change or an undo that alters the columns.
+function syncClearFiltersButton(): void {
+    const on  = !!state.gridApi?.isAnyFilterPresent();
+    const btn = document.getElementById('btn-clear-filters');
+    const sep = document.getElementById('sep-filters');
+    if (btn) btn.style.display = on ? '' : 'none';
+    if (sep) sep.style.display = on ? '' : 'none';
+}
+
 export function buildGrid(): void {
+    // An open cell editor belongs to the grid that is about to go, while
+    // state.data already holds the table that replaces it. The teardown takes
+    // the focus from the editor, which then commits into that new table at the
+    // row it was opened on. That row may now hold other data, even a row an
+    // outside change just added. The screen would show the file's value while
+    // the typed one was written. Cancel it instead. A caller that wants the
+    // typed value kept commits it before it changes state.data.
+    if (state.isCellEditing) state.gridApi?.stopEditing(true);
+
     // No columns to build: an empty file, or every column deleted. This used to
     // return and leave a blank area with nothing to click (issue #40). Tear down
     // any grid still standing, since undoing back to an empty file arrives here
@@ -147,6 +164,7 @@ export function buildGrid(): void {
         state.focusedCellRowIndex = null;
         renderNoColumns(document.getElementById('grid-container')!);
         updateCountsDisplay();
+        syncClearFiltersButton();
         updateButtons();
         return;
     }
@@ -378,11 +396,7 @@ export function buildGrid(): void {
         onFilterChanged: () => {
             clearRangeSelection();
             state.gridApi?.refreshCells({ columns: ['row-index'], force: true });
-            const isAnyFilter = state.gridApi?.isAnyFilterPresent();
-            const cfBtn = document.getElementById('btn-clear-filters') as HTMLButtonElement | null;
-            const sepBtn = document.getElementById('sep-filters') as HTMLElement | null;
-            if (cfBtn) cfBtn.style.display = isAnyFilter ? '' : 'none';
-            if (sepBtn) sepBtn.style.display = isAnyFilter ? '' : 'none';
+            syncClearFiltersButton();
 
             updateCountsDisplay();
         },
@@ -427,6 +441,7 @@ export function buildGrid(): void {
     }
 
     updateCountsDisplay();
+    syncClearFiltersButton();
     refreshProfileIfOpen(); // column add/delete changes the column set the profile shows
 
     setTimeout(attachHeaderContextMenus, 80);

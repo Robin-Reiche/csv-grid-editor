@@ -5,7 +5,12 @@
 // next row the filter let through, so whatever was typed next replaced that
 // row. The first row of an emptied table was hidden the same way. And after
 // the last row had been deleted, Ctrl+Enter did nothing, because the focus the
-// deleted row left behind still looked like a row to insert next to.
+// deleted row left behind still looked like a row to insert next to. That same
+// focus made a second Ctrl+Shift+K record an empty undo step and write the
+// file again. So did Ctrl+Shift+K with a filter that hid every row. A paste
+// went into the column that focus was in and dropped whatever did not fit to
+// its right. In the "Show only duplicates" view Ctrl+Enter cleared the column
+// filters although the view itself was what hid the new row.
 //
 // Run after `tsc -p ./`:  node test/ui-rows.test.cjs
 
@@ -85,6 +90,74 @@ runSuite('rows (browser)', [
         }`,
     },
     {
+        name: 'delete again after deleting the last row',
+        csv: 'a,b\n1,2',
+        steps: `async (t, csv) => {
+            ${FRAMES}
+            const press = ${PRESS};
+            await t.init(csv);
+            await t.focusCell(0, 0);
+            await press(t, 'K', { ctrlKey: true, shiftKey: true });
+            t.check(t.lastEdit() === 'a,b', 'Ctrl+Shift+K deletes the only row (' + JSON.stringify(t.lastEdit()) + ')');
+            await press(t, 'K', { ctrlKey: true, shiftKey: true });
+            t.check(t.sent('edit').length === 1, 'a second one has nothing to delete and writes nothing ('
+                + t.sent('edit').length + ' edits)');
+            document.getElementById('btn-undo').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(400);
+            t.check(t.lastEdit() === 'a,b\\n1,2', 'one undo brings the row back (' + JSON.stringify(t.lastEdit()) + ')');
+        }`,
+    },
+    {
+        // The focus stays on the row a filter hides, so the key still names a
+        // row that is not on screen.
+        name: 'delete with every row filtered out',
+        csv: 'a,b\n1,2\n3,4',
+        steps: `async (t, csv) => {
+            ${FRAMES}
+            const press = ${PRESS};
+            await t.init(csv);
+            await t.focusCell(0, 0);
+            for (const v of ['2', '4']) {
+                t.click(t.header(1).querySelector('.ag-header-cell-filter-button, .ag-header-cell-menu-button'));
+                await t.wait(300);
+                const row = [...document.querySelectorAll('.csv-filter-value-row')].find(r => r.textContent === v);
+                if (!row) { t.check(false, 'the filter lists ' + v); return; }
+                const cb = row.querySelector('input');
+                cb.checked = false;
+                cb.dispatchEvent(new Event('change'));
+                await t.wait(300);
+                document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+                await t.wait(200);
+            }
+            t.check(!t.cell(0, 0), 'the filter hides every row');
+            await press(t, 'K', { ctrlKey: true, shiftKey: true });
+            t.check(t.sent('edit').length === 0, 'Ctrl+Shift+K has nothing to delete and writes nothing ('
+                + JSON.stringify(t.lastEdit()) + ')');
+            t.check(document.getElementById('btn-undo').disabled, 'and leaves no undo step');
+        }`,
+    },
+    {
+        // The row shortcuts ask the table itself as well, so only a paste
+        // still shows where the focus of a deleted last row went. A table with
+        // only a header takes no paste, the same as a file opened that way.
+        name: 'paste after deleting the last row',
+        csv: 'a,b\n1,2',
+        steps: `async (t, csv) => {
+            ${FRAMES}
+            const press = ${PRESS};
+            await t.init(csv);
+            await t.focusCell(0, 1);
+            await press(t, 'K', { ctrlKey: true, shiftKey: true });
+            t.check(t.lastEdit() === 'a,b', 'Ctrl+Shift+K deletes the only row (' + JSON.stringify(t.lastEdit()) + ')');
+            const data = new DataTransfer();
+            data.setData('text/plain', 'x\\ty');
+            document.body.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+            await t.wait(300);
+            t.check(t.sent('edit').length === 1, 'a paste does not land in the column of the deleted row ('
+                + JSON.stringify(t.lastEdit()) + ')');
+        }`,
+    },
+    {
         name: 'start the first row with a filter on',
         csv: 'city,n\nBerlin,1',
         steps: `async (t, csv) => {
@@ -111,6 +184,43 @@ runSuite('rows (browser)', [
             const status = document.getElementById('status').textContent;
             t.check(!!t.cell(0, 0) && status === '1 records', 'the new row is shown (status "' + status + '")');
             t.check(t.focusedRow() === 0, 'the focus is on it (row ' + t.focusedRow() + ')');
+        }`,
+    },
+    {
+        name: 'insert in the duplicates view with a filter on',
+        csv: 'city,n\nBerlin,1\nParis,\nBerlin,1\nRome,4',
+        steps: `async (t, csv) => {
+            ${FRAMES}
+            const press = ${PRESS};
+            await t.init(csv);
+            const shown = () => [0, 1, 2, 3, 4].map(i => t.cell(i, 0) ? t.cell(i, 0).textContent : '-').join(',');
+            // Untick 4 in the n column. (Blank) stays ticked, so a blank row
+            // passes this filter.
+            t.click(t.header(1).querySelector('.ag-header-cell-filter-button, .ag-header-cell-menu-button'));
+            await t.wait(300);
+            const four = [...document.querySelectorAll('.csv-filter-value-row')].find(r => r.textContent === '4');
+            t.check(!!four, 'the filter lists 4');
+            const cb = four.querySelector('input');
+            cb.checked = false;
+            cb.dispatchEvent(new Event('change'));
+            await t.wait(300);
+            document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+            await t.wait(200);
+            t.check(shown() === 'Berlin,Paris,Berlin,-,-', 'Rome is filtered out (' + shown() + ')');
+
+            document.getElementById('btn-duplicates').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(300);
+            document.getElementById('dup-only-toggle').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(300);
+            t.check(shown() === 'Berlin,Berlin,-,-,-', 'the view shows the two duplicates (' + shown() + ')');
+
+            await t.focusCell(0, 0);
+            await press(t, 'Enter', { ctrlKey: true });
+            t.check(t.lastEdit() === 'city,n\\nBerlin,1\\n,\\nParis,\\nBerlin,1\\nRome,4',
+                'Ctrl+Enter adds the row under the first Berlin (' + JSON.stringify(t.lastEdit()) + ')');
+            t.check(shown() === 'Berlin,,Paris,Berlin,-', 'the new row is shown and Rome stays filtered out (' + shown() + ')');
+            t.check(document.getElementById('btn-clear-filters').style.display !== 'none', 'the filter is still on');
+            t.check(t.focusedRow() === 1, 'the focus is on the new row (row ' + t.focusedRow() + ')');
         }`,
     },
 ]);

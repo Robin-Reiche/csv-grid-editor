@@ -1,6 +1,6 @@
 import { state } from '../state';
 import { toCsv } from '../utils/csv';
-import { refreshGrid, syncColumnHeaders } from '../grid/refresh';
+import { refreshGrid } from '../grid/refresh';
 import { recomputeColTypes } from '../grid/column-type';
 import { resetDuplicatesState } from './duplicates';
 import { refreshProfileIfOpen } from './profile';
@@ -59,7 +59,6 @@ export function undo(): void {
     state.redoStack.push(snapshot());
     restore(state.undoStack.pop()!);
     refreshGrid();
-    syncColumnHeaders(); // header row may have changed (rename column)
     notifyChange();
     updateButtons();
     recomputeColTypes();
@@ -72,7 +71,6 @@ export function redo(): void {
     state.undoStack.push(snapshot());
     restore(state.redoStack.pop()!);
     refreshGrid();
-    syncColumnHeaders(); // header row may have changed (rename column)
     notifyChange();
     updateButtons();
     recomputeColTypes();
@@ -98,7 +96,13 @@ export function notifyChange(): void {
     // guarantees the analysis panel reflects the current data (row counts,
     // nulls, stats, and the column set) after a delete/insert/paste/edit/undo.
     refreshProfileIfOpen();
-    vscodeApi.postMessage({ type: 'edit', text: toCsv(state.data, state.currentDelimiter) });
+    // This text becomes the file, so it is also what the next delimiter switch
+    // re-splits (features/delimiter.ts). A switch that re-split the text the file
+    // was opened with would bring back every value edited since. The next edit
+    // would then write them into the file.
+    const text = toCsv(state.data, state.currentDelimiter);
+    state.rawCsvText = text;
+    vscodeApi.postMessage({ type: 'edit', text });
 }
 
 export function setupUndoRedo(): void {

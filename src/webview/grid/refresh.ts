@@ -1,7 +1,6 @@
 import { state, getNumCols, emptyTableKind } from '../state';
-import { applyColorMode } from '../features/color-mode';
 import { buildGrid } from './builder';
-import { recomputeColTypes } from './column-type';
+import { recomputeColTypes, TYPE_LABELS } from './column-type';
 import { shownValue } from './control-char-cell';
 
 // Splits a freshly-built rowData array into the scrollable body and the frozen
@@ -46,6 +45,9 @@ export function partitionFrozenRows<T extends { _origIndex?: number }>(
 // header row is editable data (rename column), but refreshGrid only swaps
 // rowData — so after undo/redo restores state.data[0] the header labels must be
 // re-synced WITHOUT a full buildGrid (which would drop widths/sort/freeze).
+// The type badge (the col-type-<type> header class) and the tooltip come from
+// state.colTypes here too. Every def this pushes is drawn as it stands, so a
+// def still holding the type it was built with would bring the old badge back.
 export function syncColumnHeaders(): void {
     if (!state.gridApi) return;
     const header = state.data[0] ?? [];
@@ -56,7 +58,12 @@ export function syncColumnHeaders(): void {
         if (typeof d.field === 'string' && d.field.indexOf('col_') === 0) {
             const ci   = parseInt(d.field.slice(4), 10);
             const name = shownValue(header[ci] ?? '');
-            if (d.headerName !== name) { d.headerName = name; changed = true; }
+            const type = state.colTypes[ci] ?? 'string';
+            const cls  = 'col-type-' + type;
+            const tip  = TYPE_LABELS[type] ?? 'Text';
+            if (d.headerName !== name)   { d.headerName = name;   changed = true; }
+            if (d.headerClass !== cls)   { d.headerClass = cls;   changed = true; }
+            if (d.headerTooltip !== tip) { d.headerTooltip = tip; changed = true; }
         }
     }
     if (changed) {
@@ -118,11 +125,14 @@ export function clampRow(rowIndex: number, rowCount: number): number | null {
 // worse surprise. A filter that lets blank rows through is left alone. Both
 // ways of adding a blank row come through here: inserting next to a row
 // (features/delete-row-col.ts) and starting the first row of an empty table
-// (features/empty-state.ts).
+// (features/empty-state.ts). Only column filters count. The "Show only
+// duplicates" view hides rows too, but clearing the column filters cannot
+// bring back a row that view hides. An insert ends that view before it gets
+// here.
 export function revealAddedRow(dataIndex: number): number | null {
     if (!state.gridApi) return null;
     const shown = displayIndexOfDataRow(dataIndex);
-    if (shown !== null || !state.gridApi.isAnyFilterPresent()) return shown;
+    if (shown !== null || !state.gridApi.isColumnFilterPresent()) return shown;
     state.gridApi.setFilterModel(null);
     return displayIndexOfDataRow(dataIndex);
 }
@@ -138,6 +148,12 @@ function displayIndexOfDataRow(dataIndex: number): number | null {
     return null;
 }
 
+// How many data columns the grid has, the '#' gutter not counted.
+function gridDataColCount(): number {
+    const defs = state.gridApi?.getColumnDefs() as any[] | undefined;
+    return (defs ?? []).filter(d => typeof d.field === 'string' && d.field.indexOf('col_') === 0).length;
+}
+
 export function refreshGrid(): void {
     // No grid to refresh (the file was empty, then content arrived by undo, redo
     // or an edit in another editor), or no columns left to show (undo back to an
@@ -149,11 +165,46 @@ export function refreshGrid(): void {
     // the tracked coordinates — so after the swap there is nothing left to read.
     const focusRow   = state.focusedCellRowIndex;
     const focusColId = state.focusedCellColId;
+    const numCols    = getNumCols(state.data);
+    // With no row left there is no cell to stand on. The tracked focus would
+    // still name the row that was deleted last. The row shortcuts would then act
+    // on that row: a second Ctrl+Shift+K would record an empty undo step.
+    if (emptyTableKind(state.data) === 'no-rows') {
+        state.focusedCellRowIndex = null;
+        state.focusedCellColId    = null;
+    }
+
+    // A row swap fills the columns the grid already has. It cannot add or remove
+    // one, so a restored column would stay invisible and a removed one would
+    // stay on screen. An outside change to the file and undo or redo of a column
+    // insert or delete can change how many columns there are. The columns are
+    // built again then. Frozen rows follow their row on their own
+    // (partitionFrozenRows). Frozen and hidden columns keep every place that
+    // still exists. The focus goes back to its cell. Widths, sort and filters
+    // start over, as they do when a column is inserted or deleted: they belong
+    // to a position, which may now hold other data. Deleting the only row that
+    // is wider than the header takes its unnamed column along, so that delete
+    // starts them over too. Such a row is most often a broken line, which is
+    // why it gets deleted. From here that case looks the same as a change that
+    // moved the columns.
+    if (gridDataColCount() !== numCols) {
+        for (const set of [state.hiddenCols, state.pinnedCols]) {
+            for (const c of [...set]) if (c >= numCols) set.delete(c);
+        }
+        state.isAutoFitted = false;
+        state.autoFitCache = null;
+        state.colTypes = [];
+        buildGrid();
+        // A focus on a column that is gone goes to the last one left.
+        const focusCol = focusColId !== null && parseInt(focusColId.slice(4), 10) >= numCols
+            ? 'col_' + (numCols - 1) : focusColId;
+        focusCell(focusRow, focusCol);
+        return;
+    }
 
     state.autoFitCache = null;
     state.colTypes = [];
 
-    const numCols  = getNumCols(state.data);
     const bodyRows = state.data.slice(1);
     // _origIndex must match the convention in builder.ts so duplicate detection
     // and the row-index column keep working after refresh (undo/redo, delete row).
@@ -176,16 +227,15 @@ export function refreshGrid(): void {
     // refreshGrid only swaps rowData, so the row/column counters in the toolbar
     // and status bar would otherwise go stale after a delete/insert/paste/undo.
     updateCountsDisplay();
-    // Keep the per-column color hues in sync with the live column count. Undo/redo
-    // of a column insert/delete reaches here (not buildGrid), so the hue rules must
-    // be regenerated for the current numCols, not left at the pre-undo count.
-    applyColorMode();
     // The types were dropped above and the rows have been swapped, so work them
     // out again here rather than leaving it to each caller. Most callers already
     // ask for it, but the ones arriving from an external file change or from
     // freezing a row do not, and a column whose type is unknown is drawn as
     // plain text even where it should be drawn as checkboxes.
     recomputeColTypes();
+    // The header row is data like any other. An outside change or an undo can
+    // rename a column without changing how many there are.
+    syncColumnHeaders();
 }
 
 // Recomputes the "<n> rows × <n> columns" toolbar text and the "<n> records"
