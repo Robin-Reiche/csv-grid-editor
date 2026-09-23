@@ -109,13 +109,31 @@ const vscodeStub = {
 class TabInputCustom { constructor(uri, viewType) { this.uri = uri; this.viewType = viewType; } }
 const group = { tabs: [], activeTab: null, viewColumn: 1, isActive: true };
 vscodeStub.TabInputCustom = TabInputCustom;
-vscodeStub.window.tabGroups = { all: [group], activeTabGroup: group };
+vscodeStub.window.tabGroups = {
+    all: [group], activeTabGroup: group,
+    close: async tab => {
+        group.tabs.splice(group.tabs.indexOf(tab), 1);
+        if (group.activeTab === tab) group.activeTab = group.tabs[group.tabs.length - 1] || null;
+        return true;
+    },
+};
 // Lets a test pretend VS Code could not bring a tab to the front.
 let openWithFails = false;
 vscodeStub.commands.executeCommand = async (id, ...args) => {
     if (id === 'vscode.openWith') {
         const [uri, viewType] = args;
-        const tab = group.tabs.find(t => t.input.uri.toString() === uri.toString() && t.input.viewType === viewType);
+        let tab = group.tabs.find(t => t.input && t.input.uri.toString() === uri.toString() && t.input.viewType === viewType);
+        // A document that only a Source Control diff shows opens in a tab of
+        // its own. The two tabs share the document, so its unsaved mark and
+        // its revert.
+        const diff = group.tabs.find(t => !t.input && t.uri.toString() === uri.toString());
+        if (!tab && diff && !openWithFails) {
+            tab = {
+                input: new TabInputCustom(uri, viewType), group, isActive: true, revert: diff.revert,
+                get isDirty() { return diff.isDirty; }, set isDirty(v) { diff.isDirty = v; },
+            };
+            group.tabs.push(tab);
+        }
         if (tab && !openWithFails) group.activeTab = tab;
     } else if (id === 'workbench.action.files.revert') {
         // File > Revert File reverts the active editor if it has unsaved
@@ -170,6 +188,8 @@ async function attach(provider, doc) {
             onDidReceiveMessage: f => { onMessage = f; },
         },
         onDidDispose(f) { disposeListeners.push(f); },
+        // In the one editor group, in front.
+        visible: true, viewColumn: 1,
     };
     await provider.resolveCustomEditor(doc, panel, {});
     return {
@@ -467,6 +487,43 @@ async function main() {
         assert.strictEqual(front.doc.content, 'x\nFRONT UNSAVED\n', 'the tab in front lost its unsaved edits');
         assert.strictEqual(front.tab.isDirty, true);
         assert.strictEqual(t.doc.content, 'h\ntheirs\n', 'the action did not load the disk');
+    });
+
+    // Only the Source Control diff shows the file, no grid tab of its own.
+    // VS Code tells an extension nothing about such a tab: its input is
+    // unknown. Reload from Disk loaded the file but left the diff marked
+    // unsaved, and the command refused to work there at all.
+    const diffOnly = async name => {
+        const p = file(name, 'h\n1\n');
+        const t = await open(p);
+        t.tab.input = undefined;
+        t.tab.uri = t.uri;
+        await t.edit('h\nmine\n');
+        assert.strictEqual(t.tab.isDirty, true, 'the test did not reach a diff with unsaved edits');
+        fs.writeFileSync(p, 'h\ntheirs\n');
+        return t;
+    };
+
+    await test('Reload from Disk on the warning takes the unsaved mark off a diff with no grid tab', async () => {
+        const t = await diffOnly('diff-only.csv');
+        await t.fireWatcher();
+        warnings[0].pick('Reload from Disk');
+        await tick();
+        assert.strictEqual(t.doc.content, 'h\ntheirs\n', 'the action did not load the disk');
+        assert.deepStrictEqual(t.updates().map(m => m.text), ['h\ntheirs\n']);
+        assert.strictEqual(t.tab.isDirty, false, 'the diff is still marked unsaved');
+        assert.deepStrictEqual(group.tabs, [t.tab], 'the tab opened for the revert is still open');
+        assert.strictEqual(group.activeTab, t.tab, 'the diff is not in front again');
+    });
+
+    await test('the Reload from Disk command works on a diff with no grid tab', async () => {
+        const t = await diffOnly('diff-only-command.csv');
+        await t.provider.reloadActiveFromDisk();
+        await tick();
+        assert.deepStrictEqual(warnings.map(w => w.msg), [], 'the command refused the diff');
+        assert.strictEqual(t.doc.content, 'h\ntheirs\n', 'the command did not load the disk');
+        assert.strictEqual(t.tab.isDirty, false, 'the diff is still marked unsaved');
+        assert.deepStrictEqual(group.tabs, [t.tab], 'the tab opened for the revert is still open');
     });
 
     await test('saving after the warning keeps the edits', async () => {

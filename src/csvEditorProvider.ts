@@ -247,22 +247,36 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
     // unless the document has unsaved changes, so on a file only changed on disk
     // it does nothing at all (issue #25).
     private async reloadActiveFromDisk(): Promise<void> {
-        const tab = vscode.window.tabGroups.activeTabGroup.activeTab;
-        const input = tab?.input;
-        if (!(input instanceof vscode.TabInputCustom) || input.viewType !== CsvEditorProvider.viewType) {
-            vscode.window.showWarningMessage('Reload from Disk works on an open CSV Grid Editor tab.');
-            return;
+        const group = vscode.window.tabGroups.activeTabGroup;
+        const input = group.activeTab?.input;
+        let documents: CsvDocument[];
+        if (input instanceof vscode.TabInputCustom && input.viewType === CsvEditorProvider.viewType) {
+            const document = this._documents.get(input.uri.toString());
+            documents = document ? [document] : [];
+        } else {
+            // A Source Control diff whose sides are grids. VS Code tells an
+            // extension nothing about the tab of such a diff, not even its
+            // files. Its grids are the ones in front in the group, though.
+            documents = [...this._documents.values()].filter(document =>
+                [...document.panels].some(panel => panel.visible && panel.viewColumn === group.viewColumn));
+            if (!documents.length) {
+                vscode.window.showWarningMessage('Reload from Disk works on an open CSV Grid Editor tab.');
+                return;
+            }
         }
 
-        const document = this._documents.get(input.uri.toString());
-        if (!document || document.isPreview) {
+        documents = documents.filter(document => !document.isPreview);
+        if (!documents.length) {
             vscode.window.showWarningMessage('This grid cannot be reloaded (preview mode).');
             return;
         }
 
         // Without this the command looks broken whenever the file is already in
         // sync, which is exactly the confusion that made #25 hard to report.
-        const changed = await this.reloadFromDisk(document);
+        let changed = false;
+        for (const document of documents) {
+            if (await this.reloadFromDisk(document)) changed = true;
+        }
         if (!changed) {
             vscode.window.setStatusBarMessage('CSV Grid: already up to date', 3000);
         }
@@ -717,7 +731,24 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             tab?.input instanceof vscode.TabInputCustom
             && tab.input.viewType === CsvEditorProvider.viewType
             && tab.input.uri.toString() === document.uri.toString();
-        const tab = vscode.window.tabGroups.all.flatMap(group => group.tabs).find(isOwnTab);
+        const ownTab = () => vscode.window.tabGroups.all.flatMap(group => group.tabs).find(isOwnTab);
+        const tab = ownTab();
+        // A document that only a Source Control diff shows has no tab of its
+        // own. The unsaved mark sits on the diff's tab, which VS Code tells an
+        // extension nothing about. So the document is opened in a tab of its
+        // own for the revert, which takes the mark off the diff as well. That
+        // tab is closed again afterwards, so the editor that was in front
+        // comes back.
+        if (!tab && document.panels.size > 0 && document.content !== document.diskText) {
+            await vscode.commands.executeCommand('vscode.openWith', document.uri, CsvEditorProvider.viewType,
+                { viewColumn: vscode.window.tabGroups.activeTabGroup.viewColumn, preserveFocus: false, preview: false });
+            if (isOwnTab(vscode.window.tabGroups.activeTabGroup.activeTab)) {
+                await vscode.commands.executeCommand('workbench.action.files.revert');
+                const opened = ownTab();
+                if (opened && !opened.isDirty) await vscode.window.tabGroups.close(opened);
+                return true;
+            }
+        }
         if (tab?.isDirty) {
             // The revert command works on the editor in front, so the tab
             // comes to the front first. This also takes the focus from the
