@@ -301,6 +301,74 @@ async function main() {
         assert.strictEqual(await readPreviewEncoding(cut), 'utf8');
     });
 
+    // ── line endings ────────────────────────────────────────────────────────
+
+    // A classic Mac file ends its rows with a lone CR. The grid reads it that
+    // way (rowsEndWithCr in webview/utils/csv.ts), the scanner ended records
+    // only at LF. Head and tail read the whole file as one record, the count
+    // was 1 and the paged view glued every row into the header. The files
+    // below put a row break astride the 64 KB chunk boundary. They also hold a
+    // value with a line break of its own, in quotes, the way Mac Excel writes
+    // one.
+    const EOLS = { LF: '\n', CRLF: '\r\n', 'CR CR LF': '\r\r\n', CR: '\r' };
+    function eolText(eol, breakAt, rows = 3000) {
+        let text = ['id,name,note', '1,"two\nlines",a', '2,"say ""hi""' + eol + 'then",b'].join(eol) + eol;
+        // A filler row whose line break starts at byte `breakAt`.
+        const pad = breakAt - Buffer.byteLength(text) - '3,,c'.length;
+        assert.ok(pad > 0, 'filler does not fit');
+        text += '3,' + 'x'.repeat(pad) + ',c' + eol;
+        for (let i = 4; i < rows; i++) text += `${i},name ${i},${i % 7 ? 'plain' : '"q' + eol + 'v"'}` + eol;
+        return text;
+    }
+
+    for (const [name, eol] of Object.entries(EOLS)) {
+        for (const breakAt of [CHUNK - 2, CHUNK - 1, CHUNK]) {
+            await test(`${name} rows split the way the grid splits them, with a break at byte ${breakAt}`, async () => {
+                const { readFirstLine } = require('../out/largeFileReader.js');
+                const text = eolText(eol, breakAt);
+                const f = fixture(`eol-${name.replace(/ /g, '')}-${breakAt}.csv`, text);
+                const want = gridParse(text);
+                assert.strictEqual(want.length, 3000, 'the fixture no longer parses to 3000 records');
+                assert.strictEqual(await readFirstLine(f), 'id,name,note', 'the first line');
+                assert.strictEqual(await countRecords(f, ','), want.length, 'the total');
+                const head = await readFirstRecords(f, 1001, ',');
+                assert.ok(text.startsWith(head) && head.length < text.length, `head read ${head.length} of ${text.length} characters`);
+                assert.deepStrictEqual(gridParse(head), want.slice(0, 1001), 'head');
+                const { content, totalRecordCount } = await readTailRecords(f, 1000, ',');
+                assert.strictEqual(totalRecordCount, want.length, 'the total of tail');
+                assert.deepStrictEqual(gridParse(content), [want[0], ...want.slice(-1000)], 'tail');
+                const index = await buildPageIndex(f, 500, ',');
+                assert.strictEqual(index.headerLine, 'id,name,note', 'the header line');
+                assert.strictEqual(index.totalRows, want.length - 1, 'the rows of the paged view');
+                assert.strictEqual(index.offsets.length, Math.ceil((want.length - 1) / 500), 'the pages');
+                const seen = [];
+                for (let p = 0; p < index.offsets.length; p++) {
+                    const rows = gridParse(await readPage(f, index, p));
+                    assert.deepStrictEqual(rows[0], want[0], 'page ' + p + ' lost its header');
+                    assert.ok(rows.length - 1 <= 500, 'page ' + p + ' holds ' + (rows.length - 1) + ' rows');
+                    seen.push(...dataRows(rows));
+                }
+                assert.deepStrictEqual(seen, dataRows(want), 'the pages');
+            });
+        }
+    }
+
+    // The scanners learn how rows end from the start of the file. A first line
+    // longer than that start whose CR is its last byte is no Mac file: the LF
+    // follows right behind it.
+    for (const eol of ['\r\n', '\r\r\n']) {
+        await test(`a ${JSON.stringify(eol)} header longer than 64 KB is not read as a Mac file`, async () => {
+            const header = 'id,' + 'h'.repeat(CHUNK - 3 - (eol.length - 1)) + eol;
+            assert.strictEqual(header.indexOf('\n'), CHUNK, 'the LF does not sit right behind the first 64 KB');
+            const text = header + '1,a' + eol + '2,b' + eol;
+            const f = fixture('long-header-' + eol.length + '.csv', text);
+            const want = gridParse(text);
+            assert.strictEqual(await countRecords(f, ','), want.length);
+            const { content } = await readTailRecords(f, 1, ',');
+            assert.deepStrictEqual(gridParse(content), [want[0], want[2]]);
+        });
+    }
+
     // ── wiring ──────────────────────────────────────────────────────────────
 
     await test('the paged view hands its record total to the banner', () => {

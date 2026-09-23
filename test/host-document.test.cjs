@@ -862,6 +862,45 @@ async function main() {
         });
     }
 
+    // A classic Mac file ends its rows with a lone CR. Detection counted the
+    // separators of the first line up to an LF, which is the whole file there.
+    for (const [eol, name] of [['\n', 'LF'], ['\r\n', 'CRLF'], ['\r\r\n', 'CR CR LF'], ['\r', 'CR']]) {
+        await test(`the delimiter is detected from the first line of a ${name} file`, async () => {
+            const tags = ['id,tags', '1,"red;green;blue;black"', '2,"red;blue;white"', '3,"green;black;white"'];
+            const t = await open(file(`delim-${name.replace(/ /g, '')}.csv`, tags.join(eol) + eol));
+            assert.strictEqual(t.doc.delimiter, ',', 'the tags file');
+            const prices = ['Preis;Menge', '1,50;2,5', '2,20;1,5', '0,80;3,0'];
+            const u = await open(file(`delim-eu-${name.replace(/ /g, '')}.csv`, prices.join(eol) + eol));
+            assert.strictEqual(u.doc.delimiter, ';', 'the file with decimal commas');
+        });
+    }
+
+    // The previews of a large Mac file read it as one record: all of it went
+    // to the grid, the banner said "of 0 rows" and the paged view put every
+    // row into the header.
+    const MAC_TEXT = 'id;name;amount\r' + Array.from({ length: 2500 }, (_, i) => `${i};name ${i};${i * 3}`).join('\r') + '\r';
+    for (const mode of ['head', 'tail', 'chunked']) {
+        await test(`a Mac file shows its rows in ${mode}`, async () => {
+            const p = file(`mac-${mode}.csv`, MAC_TEXT);
+            fakeSize = 60 * 1024 * 1024;
+            quickPickChoice = mode;
+            const t = await open(p);
+            assert.strictEqual(t.doc.isPreview, true, 'the test did not reach the preview');
+            assert.strictEqual(t.doc.delimiter, ';');
+            assert.strictEqual(t.doc.totalLineCount, 2501, 'the rows the banner counts');
+            await t.ready();
+            const shown = t.posted.find(m => m.type === 'init').text;
+            const rows = shown.split('\r').filter(Boolean);
+            assert.strictEqual(rows[0], 'id;name;amount');
+            assert.strictEqual(rows.length, mode === 'chunked' ? 501 : 1001, 'rows sent to the grid');
+            assert.ok(!shown.includes('\n'), 'the text sent has an LF, the grid would glue the rows together');
+            if (mode === 'tail') assert.strictEqual(rows[1], '1500;name 1500;4500');
+            if (mode === 'chunked') {
+                assert.strictEqual(t.posted.find(m => m.type === 'pageData').totalPages, 5);
+            }
+        });
+    }
+
     fs.rmSync(tmpDir, { recursive: true, force: true });
     if (failures) { console.error(`\n${failures} test(s) failed`); process.exit(1); }
     console.log('\nAll host document tests passed.');
