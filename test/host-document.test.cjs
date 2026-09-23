@@ -113,8 +113,20 @@ const vscodeStub = {
             for (const editor of editors) await editor.save();
             return uri;
         },
-        // The workspace is the temp folder.
+        // The workspace is the temp folder, unless a test opens folders of
+        // its own. VS Code then puts the folder's name in front of the path
+        // in it when there are several.
+        workspaceFolders: undefined,
+        getWorkspaceFolder: uri => (vscodeStub.workspace.workspaceFolders || [])
+            .find(folder => uri.fsPath.startsWith(folder.uri.fsPath + path.sep)),
         asRelativePath: uri => {
+            const folders = vscodeStub.workspace.workspaceFolders;
+            if (folders) {
+                const folder = vscodeStub.workspace.getWorkspaceFolder(uri);
+                if (!folder) return uri.fsPath;
+                const relative = path.relative(folder.uri.fsPath, uri.fsPath).split(path.sep).join('/');
+                return folders.length > 1 ? folder.name + '/' + relative : relative;
+            }
             const relative = path.relative(tmpDir, uri.fsPath);
             return relative.startsWith('..') ? uri.fsPath : relative.split(path.sep).join('/');
         },
@@ -225,6 +237,7 @@ const workspaceSave = vscodeStub.workspace.save;
 let failures = 0;
 async function test(name, fn) {
     vscodeStub.workspace.save = workspaceSave;
+    vscodeStub.workspace.workspaceFolders = undefined;
     warnings.length = 0;
     errors.length = 0;
     fakeSize = null;
@@ -602,6 +615,39 @@ async function main() {
         }
     });
 
+    // Some file systems on Windows give every file the number 0. Save As onto
+    // a file that is there already took the two files for one: from a
+    // preview it copied nothing and from the grid it saved the file itself,
+    // so the other file kept what it held.
+    await test('Save As onto another file writes it on a disk that numbers every file 0', async () => {
+        const text = 'id,name\n' + Array.from({ length: 1500 }, (_, i) => `${i},row ${i}`).join('\n') + '\n';
+        const stat = fs.promises.stat;
+        fs.promises.stat = async (name, ...rest) => {
+            const s = await stat(name, ...rest);
+            return Object.assign(Object.create(Object.getPrototypeOf(s)), s, { ino: typeof s.ino === 'bigint' ? 0n : 0 });
+        };
+        try {
+            const p = file('ino-zero.csv', text);
+            fakeSize = 60 * 1024 * 1024;
+            quickPickChoice = 'head';
+            const preview = await open(p);
+            assert.strictEqual(preview.doc.isPreview, true, 'the test did not reach the preview');
+            const copy = file('ino-zero-copy.csv', 'old\n');
+            await preview.saveAs(copy);
+            assert.strictEqual(fs.readFileSync(copy, 'utf8'), text, 'Save As from the preview wrote no copy');
+            fakeSize = null;
+            const q = file('ino-zero-grid.csv', 'h\n1\n');
+            const t = await open(q);
+            await t.edit('h\nEDIT\n');
+            const gridCopy = file('ino-zero-grid-copy.csv', 'old\n');
+            await t.saveAs(gridCopy);
+            assert.strictEqual(fs.readFileSync(gridCopy, 'utf8'), 'h\nEDIT\n', 'Save As from the grid wrote no copy');
+            assert.strictEqual(fs.readFileSync(q, 'utf8'), 'h\n1\n', 'Save As wrote the file itself');
+        } finally {
+            fs.promises.stat = stat;
+        }
+    });
+
     // A preview is read-only, so it has nothing to revert. Reading the whole
     // file there and handing it to the grid would be exactly the load the
     // preview was chosen to avoid.
@@ -956,6 +1002,90 @@ async function main() {
         assert.strictEqual(t.tab.isDirty, false);
     });
 
+    // The file went back to the grid's text and then to the other program's
+    // change once more, a git checkout back and forth. The document still
+    // took the change for what the disk held and the second time for nothing
+    // new, so the next save wrote over it without a word. The grid's edits
+    // are still unsaved when another program wrote their very text, so the
+    // change that comes again is warned about like the first one.
+    const FLIP_FILES = [
+        ['a plain file', text => Buffer.from(text)],
+        // A save writes the stray byte as UTF-8, so the file never holds the
+        // bytes of the grid's text, only the text.
+        ['a file with a stray byte', text => {
+            const at = text.indexOf('Schön') + 3;
+            return Buffer.concat([BOM, Buffer.from(text.slice(0, at)), Buffer.from([0xF6]), Buffer.from(text.slice(at + 1))]);
+        }],
+    ];
+    const FLIP_START = 'name;city\nMüller;Köln\nSchön;x\n';
+    const FLIP_MINE = 'name;city\nMüller;Mine\nSchön;x\n';
+    const FLIP_OUTSIDE = 'name;city\nMüller;OUTSIDE\nSchön;x\nnew;row\n';
+    for (const [name, bytes] of FLIP_FILES) {
+        await test(`a change on disk that comes again after the file held the edits is warned about in ${name}`, async () => {
+            const p = file(`flip-${name.replace(/ /g, '-')}.csv`, bytes(FLIP_START));
+            const t = await open(p);
+            assert.strictEqual(t.doc.content, FLIP_START, 'the test did not read the file');
+            await t.edit(FLIP_MINE);
+            fs.writeFileSync(p, bytes(FLIP_OUTSIDE));
+            await t.fireWatcher();
+            assert.strictEqual(warnings.length, 1, 'the test did not reach the warning');
+            fs.writeFileSync(p, bytes(FLIP_MINE));       // the file goes back to the grid's text
+            await t.fireWatcher();
+            fs.writeFileSync(p, bytes(FLIP_OUTSIDE));    // and the change comes again
+            await t.fireWatcher();
+            assert.strictEqual(warnings.length, 2, 'the change that came again was not reported');
+            assert.strictEqual(onScreen().length, 1, 'the warnings stacked');
+            assert.strictEqual(t.updates().length, 0, 'the grid was reloaded over the unsaved edits');
+            await assert.rejects(t.save(), /changed on disk/, 'Ctrl+S went through');
+            assert.ok(fs.readFileSync(p).equals(bytes(FLIP_OUTSIDE)), 'the save wrote over the change on disk');
+            assert.strictEqual(t.doc.content, FLIP_MINE, 'the edits are gone');
+            onScreen()[0].pick('Reload from Disk');
+            await tick();
+            assert.strictEqual(t.doc.content, FLIP_OUTSIDE, 'Reload from Disk did not load the change');
+        });
+
+        // With auto-save after a delay: the edit is undone while the change
+        // waits for a decision, then the file goes back to what it was and
+        // the change comes again.
+        await test(`a change on disk that comes again after an undo is warned about in ${name}`, async () => {
+            const p = file(`flip-undo-${name.replace(/ /g, '-')}.csv`, bytes(FLIP_START));
+            const t = await open(p);
+            await t.edit(FLIP_MINE);
+            fs.writeFileSync(p, bytes(FLIP_OUTSIDE));
+            await t.fireWatcher();
+            await assert.rejects(t.save(), /changed on disk/, 'the test did not reach the conflict');
+            await t.edit(FLIP_START);                    // Ctrl+Z
+            await assert.rejects(t.save(), /changed on disk/);
+            fs.writeFileSync(p, bytes(FLIP_START));      // git checkout back
+            await t.fireWatcher();
+            const shown = warnings.length;
+            fs.writeFileSync(p, bytes(FLIP_OUTSIDE));    // and forth
+            await t.fireWatcher();
+            assert.strictEqual(warnings.length, shown + 1, 'the change that came again was not reported');
+            assert.strictEqual(t.updates().length, 0, 'the grid was reloaded over the unsaved edits');
+            await t.edit(FLIP_START.replace('Schön;x', 'Schön;Later'));
+            await assert.rejects(t.save(), /changed on disk/, 'auto-save went through');
+            assert.ok(fs.readFileSync(p).equals(bytes(FLIP_OUTSIDE)), 'the save wrote over the change on disk');
+        });
+
+        // No warning came before: the other program wrote the grid's text
+        // first. The edits were still unsaved when it wrote another text.
+        await test(`a change on disk after the file held the unsaved edits is warned about in ${name}`, async () => {
+            const p = file(`flip-quiet-${name.replace(/ /g, '-')}.csv`, bytes(FLIP_START));
+            const t = await open(p);
+            await t.edit(FLIP_MINE);
+            fs.writeFileSync(p, bytes(FLIP_MINE));
+            await t.fireWatcher();
+            assert.deepStrictEqual(warnings.map(w => w.msg), [], 'the file that holds the edits was reported');
+            fs.writeFileSync(p, bytes(FLIP_OUTSIDE));
+            await t.fireWatcher();
+            assert.strictEqual(warnings.length, 1, 'the change was not reported');
+            assert.strictEqual(t.updates().length, 0, 'the grid was reloaded over the unsaved edits');
+            await assert.rejects(t.save(), /changed on disk/, 'the save went through');
+            assert.ok(fs.readFileSync(p).equals(bytes(FLIP_OUTSIDE)), 'the save wrote over the change on disk');
+        });
+    }
+
     // Two warnings with the same text are one notification to VS Code, so
     // the second closed the first. Overwrite on the one left wrote the file
     // whose warning came last, whichever grid the user looked at.
@@ -975,6 +1105,39 @@ async function main() {
         assert.deepStrictEqual(onScreen().map(w => w.msg), [
             'same-1/data.csv changed on disk. Your unsaved edits in the grid were kept.',
             'same-2/data.csv changed on disk. Your unsaved edits in the grid were kept.'
+        ]);
+        onScreen()[0].pick('Overwrite');
+        await tick();
+        assert.strictEqual(fs.readFileSync(p1, 'utf8'), 'h\nmine 1\n', 'Overwrite did not write the file its warning named');
+        assert.strictEqual(fs.readFileSync(p2, 'utf8'), 'h\ntheirs\n', 'Overwrite wrote the other file');
+    });
+
+    // A workspace of several folders names a file by its folder's name and
+    // the path in it. Two folders of the same name, one/app and two/app, gave
+    // their data.csv one name, the warnings were one again and Overwrite
+    // wrote one of the files.
+    await test('warnings for two files in folders of the same name tell which file they are about', async () => {
+        const [p1, p2, p3] = ['one', 'two', 'three'].map(dir => {
+            fs.mkdirSync(path.join(tmpDir, dir, 'app'), { recursive: true });
+            return file(path.join(dir, 'app', 'data.csv'), 'h\n1\n');
+        });
+        vscodeStub.workspace.workspaceFolders = [['one', 'app'], ['two', 'app'], ['three', 'other']]
+            .map(([dir, name], index) => ({ uri: uriFile(path.join(tmpDir, dir, 'app')), name, index }));
+        const opened = [];
+        for (const [p, mine] of [[p1, 'h\nmine 1\n'], [p2, 'h\nmine 2\n'], [p3, 'h\nmine 3\n']]) {
+            const t = await open(p);
+            await t.edit(mine);
+            opened.push(t);
+        }
+        for (const [i, p] of [p1, p2, p3].entries()) {
+            fs.writeFileSync(p, 'h\ntheirs\n');
+            await opened[i].fireWatcher();
+        }
+        assert.deepStrictEqual(onScreen().map(w => w.msg), [
+            `${p1} changed on disk. Your unsaved edits in the grid were kept.`,
+            `${p2} changed on disk. Your unsaved edits in the grid were kept.`,
+            // A folder whose name no other folder has keeps the short name.
+            'other/data.csv changed on disk. Your unsaved edits in the grid were kept.'
         ]);
         onScreen()[0].pick('Overwrite');
         await tick();
@@ -1335,6 +1498,63 @@ async function main() {
         onScreen()[0].pick('Overwrite');
         await tick();
         assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\nTYPED\n');
+    });
+
+    // A save waits for the value being typed. Another program's change that
+    // came in meanwhile was warned about and then written over by that very
+    // save. Reload from Disk on the warning had nothing left to load.
+    for (const [name, save] of [['a save', t => t.save()], ['Save As onto the file itself', t => t.saveAs(t.uri.fsPath)]]) {
+        await test(`${name} that waits for the value being typed does not write over a change on disk that came meanwhile`, async () => {
+            const p = file(`typing-save-outside-${name.length}.csv`, 'h\n1\n');
+            const t = await open(p);
+            await t.typing();
+            const saving = save(t);
+            await tick();
+            assert.strictEqual(t.flushes().length, 1, 'the test did not reach the wait');
+            fs.writeFileSync(p, 'h\nOUTSIDE\n');
+            await t.fireWatcher();
+            assert.strictEqual(onScreen().length, 1, 'the change was not reported');
+            await t.flushed('h\nTYPED\n');
+            await assert.rejects(saving, /changed on disk/, 'the save went through');
+            assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\nOUTSIDE\n', 'the save wrote over the change on disk');
+            assert.strictEqual(t.tab.isDirty, true);
+            assert.strictEqual(onScreen().length, 1, 'the warnings stacked');
+            onScreen()[0].pick('Overwrite');
+            await tick();
+            await t.flushed('h\nTYPED\n');
+            await tick();
+            assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\nTYPED\n', 'Overwrite did not write the value');
+        });
+    }
+
+    // Hot exit backed the file up without the value being typed in a cell,
+    // although the tab was marked unsaved for it. Ctrl+Q with the cell open
+    // brought the tab back after the restart without the value.
+    await test('a hot exit backup takes the value being typed', async () => {
+        const p = file('typing-backup.csv', 'h\n1\n');
+        const t = await open(p);
+        const diff = await t.openSecondEditor();
+        await t.typing();
+        const backupPath = path.join(tmpDir, 'typing-backup.backup');
+        const backingUp = t.backup(backupPath);
+        await tick();
+        assert.strictEqual(t.flushes().length, 1, 'the backup did not ask the editor for the value');
+        await t.flushed('h\nTYPED\n');
+        const backup = await backingUp;
+        assert.strictEqual(fs.readFileSync(backupPath, 'utf8'), 'h\nTYPED\n', 'the backup holds no value being typed');
+        assert.deepStrictEqual(diff.updates().map(m => m.text), ['h\nTYPED\n'], 'the other editor kept the text without the value');
+        assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\n1\n', 'the backup wrote the file');
+        const changes = t.changes();
+        // Escape afterwards gives the value up. VS Code is told, so it takes
+        // a newer backup.
+        await t.typingEnded('h\n1\n');
+        assert.strictEqual(t.doc.content, 'h\n1\n', 'Escape did not give the value up');
+        assert.strictEqual(t.changes(), changes + 1, 'VS Code was not told of the change');
+        t.close();
+        group.tabs.splice(group.tabs.indexOf(t.tab), 1);   // VS Code quits with the first backup
+        const after = await open(p, { backupId: backup.id });
+        assert.strictEqual(after.doc.content, 'h\nTYPED\n', 'the restored tab lost the value');
+        assert.deepStrictEqual(warnings.map(w => w.msg), [], 'the file nobody changed was reported as changed');
     });
 
     await test('an unchanged document still reloads silently', async () => {

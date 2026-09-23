@@ -156,7 +156,10 @@ async function sameFileOnDisk(a: vscode.Uri, b: vscode.Uri): Promise<boolean> {
     if (a.scheme !== 'file' || b.scheme !== 'file') return false;
     try {
         const [x, y] = await Promise.all([fs.promises.stat(a.fsPath, { bigint: true }), fs.promises.stat(b.fsPath, { bigint: true })]);
-        if (x.dev === y.dev && x.ino === y.ino) return true;
+        // Some file systems on Windows give every file the number 0. Any two
+        // files were taken for one there, so Save As onto another file that
+        // was there already left it as it was.
+        if (x.ino !== 0n && x.dev === y.dev && x.ino === y.ino) return true;
         // A mount without stable inode numbers (FUSE without use_ino, cifs
         // with noserverino) gives each name a number of its own. The file was
         // still deleted there. Where the two paths differ only in case, a
@@ -187,8 +190,14 @@ class CsvDocument implements vscode.CustomDocument {
     public set diskText(text: string) {
         this._diskText = text;
         this.diskPrint = undefined;
+        this.editsOnDisk = false;
     }
     private _diskText: string;
+    // Set when another program wrote the very text of the grid's unsaved
+    // edits (see reload). diskText then holds that text, but the tab still
+    // shows the edits unsaved. A change on disk after that is one under
+    // unsaved edits all the same. A new diskText drops it.
+    public editsOnDisk = false;
     // The file's encoding, byte order mark included (see encoding.ts). The
     // grid never sees either, so the document remembers them and every write
     // puts them back. Excel reads UTF-8 without the mark as ANSI, so a save
@@ -258,6 +267,14 @@ class CsvDocument implements vscode.CustomDocument {
         const bytes = encodeFile(this.content, this.encoding);
         if (bytes) return { bytes, encoding: this.encoding };
         return { bytes: encodeFile(this.content, 'utf8bom') as Uint8Array, encoding: 'utf8bom' };
+    }
+
+    // The file on disk was found holding the grid's text. A text that differs
+    // from diskText is the grid's unsaved edits, which another program wrote.
+    recordContentOnDisk(): void {
+        if (this.content === this.diskText) return;
+        this.diskText = this.content;
+        this.editsOnDisk = true;
     }
 }
 
@@ -827,8 +844,14 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             // changes it leaves the text as it was, but the next save has to
             // write the file the way it is now. A file that holds the grid's
             // text also leaves no change on disk for a save to write over.
+            // The disk holds the grid's text now, which is recorded too. Left
+            // at an outside change warned about before, that change coming
+            // again was taken for the late echo below and ignored. The next
+            // save wrote over it. The grid's edits still count as unsaved
+            // (see recordContentOnDisk).
             if (holds(document.content)) {
                 document.conflict = false;
+                document.recordContentOnDisk();
                 return false;
             }
             // The echo of a save that is still being written, which the
@@ -856,7 +879,10 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             // from it tells whether anything changed.
             if (encoding === document.encoding
                 && (text === document.content || (fromWatcher && text === document.diskText))) {
-                if (text === document.content) document.conflict = false;
+                if (text === document.content) {
+                    document.conflict = false;
+                    document.recordContentOnDisk();
+                }
                 return false;
             }
             // Another program changed the file while the grid holds
@@ -873,7 +899,7 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             // follows brings nothing new. It is marked unsaved here, since the
             // grid no longer holds what the file does. Closing it lost the
             // value and kept the other program's text.
-            if (fromWatcher && (document.content !== document.diskText || document.typing.size > 0)) {
+            if (fromWatcher && (document.content !== document.diskText || document.editsOnDisk || document.typing.size > 0)) {
                 const looksSaved = document.content === document.diskText;
                 document.diskText = text;
                 document.encoding = encoding;
@@ -910,8 +936,13 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
     // acted on the file that warned last.
     private warnChangedOnDisk(document: CsvDocument): void {
         document.conflict = true;
+        // In a workspace of several folders the name starts with the folder's
+        // name. Two folders of the same name, one/app and two/app, gave their
+        // data.csv one name again, so the full path is used then.
+        const folder = vscode.workspace.getWorkspaceFolder(document.uri);
+        const shared = !!folder && (vscode.workspace.workspaceFolders ?? []).filter(f => f.name === folder.name).length > 1;
         void vscode.window.showWarningMessage(
-            `${vscode.workspace.asRelativePath(document.uri)} changed on disk. Your unsaved edits in the grid were kept.`,
+            `${shared ? document.uri.fsPath : vscode.workspace.asRelativePath(document.uri)} changed on disk. Your unsaved edits in the grid were kept.`,
             'Reload from Disk', 'Overwrite'
         ).then(choice => {
             if (choice === 'Reload from Disk') void this.reloadFromDisk(document);
@@ -993,6 +1024,9 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             vscode.window.showWarningMessage('Cannot save in preview mode. Open the full file to edit.');
             return;
         }
+        // A value being typed in a cell goes into the file too (flushTyping).
+        // A save refused below does not wait for it.
+        const missed = !document.conflict && document.typing.size > 0 && await this.flushTyping(document);
         // Another program changed the file under the unsaved edits and the
         // user has not chosen between the two yet (see warnChangedOnDisk).
         // Auto-save wrote the edits over that change and Reload from Disk had
@@ -1001,12 +1035,14 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         // The warning comes back with every refused save. Its toast hides
         // after a few seconds and the warning then waits behind the bell,
         // where nobody saw it.
+        // The change can also come in while the save waits for the value
+        // being typed. The warning showed and the save then wrote over the
+        // change all the same. So the mark is looked at once that wait is
+        // over, right before the write.
         if (document.conflict) {
             this.warnChangedOnDisk(document);
             throw new Error('The file changed on disk and your edits were not saved over it. Choose Overwrite or Reload from Disk on the warning.');
         }
-        // A value being typed in a cell goes into the file too (flushTyping).
-        const missed = document.typing.size > 0 && await this.flushTyping(document);
         // The text goes out as a pending save first, so a watcher event that
         // arrives while the write is still running is known as ours (see
         // reload). It becomes the disk's text only once the write has landed.
@@ -1095,6 +1131,12 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
     }
 
     async backupCustomDocument(document: CsvDocument, context: vscode.CustomDocumentBackupContext, _cancellation: vscode.CancellationToken): Promise<vscode.CustomDocumentBackup> {
+        // A value being typed in a cell marks the tab unsaved, so the backup
+        // takes it too, the way a save does (flushTyping). Ctrl+Q with the
+        // cell open brought the tab back after the restart without it. The
+        // grid tells of the next change of the value again, so VS Code then
+        // takes a newer backup.
+        if (document.typing.size > 0) await this.flushTyping(document);
         const utf16 = document.encoding === 'utf16le' || document.encoding === 'utf16be';
         const bytes = utf16 ? Buffer.from(document.content, 'utf16le') : new TextEncoder().encode(document.content);
         await vscode.workspace.fs.writeFile(context.destination, bytes);
