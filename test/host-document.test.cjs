@@ -1207,6 +1207,25 @@ async function main() {
         assert.strictEqual(t.tab.isDirty, true);
     });
 
+    // Ctrl+W on the grid tab and Don't Save: VS Code loads the file into the
+    // document and closes the tab. The warning stays in the notification
+    // list. Overwrite on it wrote that text over a newer change on disk.
+    await test('Overwrite on the warning of a grid tab closed without saving writes nothing', async () => {
+        const p = file('closed-overwrite.csv', 'h\n1\n');
+        const t = await open(p);
+        await t.edit('h\nmine\n');
+        fs.writeFileSync(p, 'h\ntheirs1\n');
+        await t.fireWatcher();
+        await t.provider.revertCustomDocument(t.doc, {});    // Don't Save
+        t.close();
+        await vscodeStub.window.tabGroups.close(t.tab);
+        fs.writeFileSync(p, 'h\ntheirs2\n');                // another program writes again
+        warnings[0].pick('Overwrite');
+        await gaveUp();
+        assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\ntheirs2\n', 'Overwrite wrote over the newer change on disk');
+        assert.deepStrictEqual(errors, []);
+    });
+
     await test('Save As onto the file itself after the warning is refused, onto another file it is not', async () => {
         const p = file('dirty-saveas.csv', 'h\n1\n');
         const t = await open(p);

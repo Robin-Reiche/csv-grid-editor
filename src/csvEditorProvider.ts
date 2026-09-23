@@ -981,8 +981,13 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
     // is given up only right before that save. Given up first, a save that
     // never ran left the file with the other program's text and no warning.
     // A grid that does not come to the front is written from here, which
-    // touches no other editor but leaves its tab marked unsaved.
+    // touches no other editor but leaves its tab marked unsaved. The warning
+    // stays in the notification list after its grid tab was closed with
+    // Don't Save, which loads the file into the document. Overwrite on it
+    // then wrote that text over a newer change on disk. With no editor left
+    // there are no edits to write.
     private async overwrite(document: CsvDocument): Promise<void> {
+        if (document.panels.size === 0) return;
         if (await this.onOwnTab(document, 'workbench.action.files.save', () => { document.conflict = false; })) return;
         document.conflict = false;
         try {
