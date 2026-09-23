@@ -14,7 +14,7 @@ import {
     readPreviewEncoding,
     readPage
 } from './largeFileReader';
-import { FileEncoding, decodeFile, encodeFile, isFileEncoding } from './encoding';
+import { FileEncoding, decodeExactly, decodeFile, encodeFile, isFileEncoding } from './encoding';
 
 const LARGE_FILE_THRESHOLD   = 10  * 1024 * 1024; // 10 MB
 const CHUNKED_THRESHOLD      = 50  * 1024 * 1024; // 50 MB
@@ -136,7 +136,14 @@ class CsvDocument implements vscode.CustomDocument {
     // The text we know the file on disk holds: what was read on open, what we
     // last saved, or the outside change we last loaded. The watcher compares
     // against this, not only against content, see reload() below.
-    public diskText: string;
+    public get diskText(): string {
+        return this._diskText;
+    }
+    public set diskText(text: string) {
+        this._diskText = text;
+        this.diskPrint = undefined;
+    }
+    private _diskText: string;
     // The file's encoding, byte order mark included (see encoding.ts). The
     // grid never sees either, so the document remembers them and every write
     // puts them back. Excel reads UTF-8 without the mark as ANSI, so a save
@@ -154,10 +161,12 @@ class CsvDocument implements vscode.CustomDocument {
     // The one watcher on the file while any editor is open, see
     // resolveCustomEditor. A preview has none.
     public watcher: vscode.FileSystemWatcher | undefined;
-    // The fingerprint of diskText in its encoding for the hot exit backup,
-    // kept with the two it was taken of. A backup follows every edit, so
-    // hashing a large file each time would add a pause to each of them.
-    public diskPrint: { text: string; encoding: FileEncoding; print: string } | undefined;
+    // The fingerprint of diskText in this encoding for the hot exit backup. A
+    // backup follows every edit, so hashing a large file each time would add
+    // a pause to each of them. A new diskText drops it. Kept together with the
+    // text it was taken of, it held on to what the file had before a save
+    // until the next edit: as much memory again as a large file takes.
+    public diskPrint: { encoding: FileEncoding; print: string } | undefined;
 
     constructor(
         public readonly uri: vscode.Uri,
@@ -169,7 +178,7 @@ class CsvDocument implements vscode.CustomDocument {
         public readonly isChunked: boolean = false
     ) {
         this.content = content;
-        this.diskText = content;
+        this._diskText = content;
     }
 
     dispose(): void {}
@@ -442,7 +451,8 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         // against the restored edits. A file deleted since the backup holds
         // nothing. Failing the restore over that would lose the edits too.
         try {
-            const onDisk = decodeFile(await vscode.workspace.fs.readFile(uri), backup.encoding);
+            const raw = await vscode.workspace.fs.readFile(uri);
+            const onDisk = decodeFile(raw, backup.encoding);
             doc.diskText = onDisk.text;
             // Another program changed the file while VS Code was closed, a
             // git pull for one. Nothing watched it then. Taking the new file
@@ -451,8 +461,18 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             // user is told, the way the watcher does it. A file that now
             // holds the very edits has nothing to tell.
             if (disk !== undefined && fingerprint(onDisk.text, onDisk.encoding) !== disk) {
-                doc.encoding = onDisk.encoding;
-                if (onDisk.text !== doc.content) this.warnChangedOnDisk(doc);
+                // Read by its bytes, a file can give another text than the
+                // one the document saved into it: a U+FEFF at the start of a
+                // UTF-8 text reads back as the byte order mark. Such a file
+                // did not change. Taken for changed, it also took the mark
+                // for its encoding and the next save wrote the mark twice.
+                const saved = decodeExactly(raw, backup.encoding);
+                if (saved !== undefined && fingerprint(saved, backup.encoding) === disk) {
+                    doc.diskText = saved;
+                } else {
+                    doc.encoding = onDisk.encoding;
+                    if (onDisk.text !== doc.content) this.warnChangedOnDisk(doc);
+                }
             }
         } catch {
             doc.diskText = '';
@@ -855,8 +875,8 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         const bytes = utf16 ? Buffer.from(document.content, 'utf16le') : new TextEncoder().encode(document.content);
         await vscode.workspace.fs.writeFile(context.destination, bytes);
         let known = document.diskPrint;
-        if (!known || known.text !== document.diskText || known.encoding !== document.encoding) {
-            known = { text: document.diskText, encoding: document.encoding, print: fingerprint(document.diskText, document.encoding) };
+        if (!known || known.encoding !== document.encoding) {
+            known = { encoding: document.encoding, print: fingerprint(document.diskText, document.encoding) };
             document.diskPrint = known;
         }
         return {

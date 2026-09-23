@@ -190,6 +190,30 @@ function detectEncoding(raw: Uint8Array): { text: string; encoding: FileEncoding
     }
 }
 
+// The text whose save in this encoding writes exactly these bytes, undefined
+// when there is none. decodeFile reads a file by what its bytes look like.
+// This reads it the way a document in this encoding wrote it: a U+FEFF at the
+// start of the text of a UTF-8 file is written as the bytes of the byte order
+// mark, which decodeFile then drops.
+export function decodeExactly(raw: Uint8Array, encoding: FileEncoding): string | undefined {
+    const bytes = asBuffer(raw);
+    const utf8 = (body: Uint8Array): string | undefined => {
+        try {
+            return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(body);
+        } catch {
+            return undefined;
+        }
+    };
+    const utf16 = bytes.length % 2 === 0;
+    switch (encoding) {
+        case 'utf8':        return utf8(bytes);
+        case 'utf8bom':     return startsWith(bytes, UTF8_BOM) ? utf8(bytes.subarray(UTF8_BOM.length)) : undefined;
+        case 'utf16le':     return utf16 && startsWith(bytes, UTF16LE_BOM) ? bytes.toString('utf16le', 2) : undefined;
+        case 'utf16be':     return utf16 && startsWith(bytes, UTF16BE_BOM) ? Buffer.from(bytes.subarray(2)).swap16().toString('utf16le') : undefined;
+        case 'windows1252': return decodeWindows1252(bytes);
+    }
+}
+
 // The bytes of a file with this text, behind the byte order mark the encoding
 // has. Null when the encoding cannot hold every character of the text, which
 // only happens with Windows-1252.

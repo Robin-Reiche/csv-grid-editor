@@ -957,6 +957,98 @@ async function main() {
         assert.ok(fs.readFileSync(p).equals(ansi('Name;Stadt\r\nAnna;Gräz\r\n')), 'saved ' + hex(p));
     });
 
+    // The restore reads the file the way the document knew it. Plain ASCII
+    // reads as UTF-8 on its own, so a Windows-1252 file whose last umlaut was
+    // saved away looked changed and turned into UTF-8, which Excel reads as
+    // ANSI. The next umlaut came out garbled.
+    await test('a restore of a Windows-1252 file that is plain ASCII now says nothing and keeps Windows-1252', async () => {
+        const p = file('hot-ansi-ascii.csv', ansi('h\nä\n'));
+        const before = await open(p);
+        await before.edit('h\na\n');
+        await before.save();
+        await before.edit('h\nb\n');
+        const backup = await before.backup(path.join(tmpDir, 'hot-ansi-ascii.backup'));
+        before.close();
+        const after = await open(p, { backupId: backup.id });
+        assert.deepStrictEqual(warnings.map(w => w.msg), [], 'the unchanged file was reported as changed');
+        assert.strictEqual(after.doc.encoding, 'windows1252');
+        await after.edit('h\nö\n');
+        await after.save();
+        assert.strictEqual(hex(p), ansi('h\nö\n').toString('hex'));
+    });
+
+    await test('a restore of a Windows-1252 file changed to other plain ASCII keeps Windows-1252', async () => {
+        const p = file('hot-ansi-changed.csv', ansi('h\nä\n'));
+        const before = await open(p);
+        await before.edit('h\nmine\n');
+        const backup = await before.backup(path.join(tmpDir, 'hot-ansi-changed.backup'));
+        before.close();
+        fs.writeFileSync(p, 'h\ntheirs\n');
+        const after = await open(p, { backupId: backup.id });
+        assert.strictEqual(warnings.length, 1, 'the change was not reported');
+        await after.edit('h\nö\n');
+        await after.save();
+        assert.strictEqual(hex(p), ansi('h\nö\n').toString('hex'), 'the file turned into UTF-8');
+    });
+
+    // A save writes the file the way it is now, so a byte order mark another
+    // program added while VS Code was closed stays.
+    await test('a restore takes the encoding the file was given while VS Code was closed', async () => {
+        const p = file('hot-new-bom.csv', 'h\n1\n');
+        const before = await open(p);
+        await before.edit('h\nmine\n');
+        const backup = await before.backup(path.join(tmpDir, 'hot-new-bom.backup'));
+        before.close();
+        fs.writeFileSync(p, Buffer.concat([BOM, Buffer.from('h\n1\n')]));
+        const after = await open(p, { backupId: backup.id });
+        await after.save();
+        assert.strictEqual(hex(p), Buffer.concat([BOM, Buffer.from('h\nmine\n')]).toString('hex'));
+    });
+
+    // A U+FEFF typed in front of the first header name of a UTF-8 file. A
+    // save writes it as the bytes of a byte order mark and the file reads back
+    // as UTF-8 with the mark, without that character. The restore took that
+    // for a change nobody made and for the file's new encoding, so the next
+    // save wrote the mark twice.
+    await test('a restore of a UTF-8 file whose text starts with U+FEFF says nothing', async () => {
+        const p = file('hot-feff.csv', 'h,v\n1,a\n');
+        const before = await open(p);
+        await before.edit('﻿h,v\n1,a\n');
+        await before.save();
+        await before.edit('﻿h,v\n1,b\n');
+        const backup = await before.backup(path.join(tmpDir, 'hot-feff.backup'));
+        before.close();
+        const after = await open(p, { backupId: backup.id });
+        assert.deepStrictEqual(warnings.map(w => w.msg), [], 'the unchanged file was reported as changed');
+        await after.save();
+        assert.strictEqual(hex(p), Buffer.concat([BOM, Buffer.from('h,v\n1,b\n')]).toString('hex'));
+    });
+
+    // The fingerprint of the file for the hot exit backup was kept together
+    // with the text it was taken of. After a save that was the only copy of
+    // what the file held before. It stayed in memory until the next edit: as
+    // much again as a large file takes.
+    await test('a save keeps no copy of the text the file held before', async () => {
+        const p = file('hot-print.csv', 'h\nOLD\n');
+        const t = await open(p);
+        await t.edit('h\nNEW\n');
+        await t.backup(path.join(tmpDir, 'hot-print-1.backup'));
+        await t.save();
+        const held = [];
+        const walk = value => {
+            if (typeof value === 'string') held.push(value);
+            else if (value && typeof value === 'object') Object.values(value).forEach(walk);
+        };
+        for (const [key, value] of Object.entries(t.doc)) if (key !== 'panels' && key !== 'watcher') walk(value);
+        assert.ok(!held.includes('h\nOLD\n'), 'the document still holds the text from before the save');
+        // The fingerprint is taken again, of the saved file.
+        await t.edit('h\nNEWER\n');
+        const backup = await t.backup(path.join(tmpDir, 'hot-print-2.backup'));
+        t.close();
+        await open(p, { backupId: backup.id });
+        assert.deepStrictEqual(warnings.map(w => w.msg), [], 'the saved file was taken for an outside change');
+    });
+
     const UTF16_TEXT = 'name,city\r\nJürgen,Köln\r\n';
     const UTF16_EDIT = 'name,city\r\nJürgen,Köln\r\nAnna,Wien\r\n';
     const utf16 = (text, bigEndian) => {
