@@ -53,7 +53,10 @@ function openRenamePopover(colId: string, anchorEl: HTMLElement | null): void {
     setTimeout(() => { input.focus(); input.select(); }, 0);
 }
 
-function closeRenamePopover(): void {
+// Also called when the rows are replaced from outside (readText in
+// messaging.ts): the column the rename was opened on is remembered by its
+// index, which may hold another column by then or none at all.
+export function closeRenamePopover(): void {
     document.getElementById('rename-popover')?.classList.add('hidden');
     pendingColIndex = null;
 }

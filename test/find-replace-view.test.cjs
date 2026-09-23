@@ -330,6 +330,69 @@ runSuite('find and replace (browser)', [
         `),
     },
     {
+        // An edit in a cell changed what it matched, but the search did not
+        // run again. A new match was not counted or marked and a cell that no
+        // longer matched stayed the current match, so the first Replace press
+        // only searched.
+        name: 'an edit in a cell searches again',
+        csv: 'k,v\na,apple\nb,pear\nc,plum\nd,fig',
+        steps: steps(`
+            const edit = async (row, col, value) => {
+                await t.focusCell(row, col);
+                await t.pressEnter();
+                const ta = document.querySelector('#grid-container textarea');
+                ta.value = value;
+                ta.dispatchEvent(new Event('input', { bubbles: true }));
+                await t.pressEnter();
+                await t.wait(300);
+            };
+            await t.init(csv);
+            await find(t, 'apple', 'X');
+            t.check(count() === '1 / 1', 'one match (' + count() + ')');
+            await edit(1, 1, 'apple pie');
+            t.check(count() === '1 / 2' && marks(t.cell(1, 1)) === 'match',
+                'the edited cell is counted and marked (' + count() + ', ' + marks(t.cell(1, 1)) + ')');
+            await edit(0, 1, 'kiwi');
+            t.check(count() === '1 / 1' && marks(t.cell(0, 1)) === 'none',
+                'a cell that no longer matches is let go (' + count() + ', ' + marks(t.cell(0, 1)) + ')');
+            t.check(marks(t.cell(1, 1)) === 'active', 'the match after it is current (' + marks(t.cell(1, 1)) + ')');
+            const before = t.sent('edit').length;
+            await press(t, 'replace-one');
+            t.check(t.sent('edit').length === before + 1 && t.lastEdit() === 'k,v\\na,kiwi\\nb,X pie\\nc,plum\\nd,fig',
+                'the first Replace press replaces (' + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
+    {
+        name: 'Delete on a cell searches again',
+        csv: 'k,v\na,apple\nb,pear\nc,plum\nd,fig',
+        steps: steps(`
+            await t.init(csv);
+            await find(t, 'p', '');
+            t.check(count() === '1 / 3', 'three matches (' + count() + ')');
+            await t.focusCell(2, 1);
+            t.cell(2, 1).dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', code: 'Delete', bubbles: true, cancelable: true }));
+            await t.wait(300);
+            t.check(t.lastEdit() === 'k,v\\na,apple\\nb,pear\\nc,\\nd,fig', 'the cell is emptied (' + JSON.stringify(t.lastEdit()) + ')');
+            t.check(count() === '1 / 2' && marks(t.cell(2, 1)) === 'none',
+                'the empty cell is no match (' + count() + ', ' + marks(t.cell(2, 1)) + ')');
+        `),
+    },
+    {
+        name: 'a checkbox click searches again',
+        csv: 'k,b\na,true\nb,false\nc,true',
+        settings: { boolCheckboxes: true },
+        steps: steps(`
+            await t.init(csv);
+            await find(t, 'true', '');
+            t.check(count() === '1 / 2' && marks(t.cell(0, 1)) === 'active', 'two matches (' + count() + ')');
+            t.click(t.box(0, 1));
+            await t.wait(300);
+            t.check(t.lastEdit() === 'k,b\\na,false\\nb,false\\nc,true', 'the box writes false (' + JSON.stringify(t.lastEdit()) + ')');
+            t.check(count() === '1 / 1' && marks(t.cell(0, 1)) === 'none',
+                'the cell is no match (' + count() + ', ' + marks(t.cell(0, 1)) + ')');
+        `),
+    },
+    {
         // A search moves the view to its match. The search that runs again
         // after an undo or an outside change took the user away from the row
         // they had just changed or that had just changed under them.

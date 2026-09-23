@@ -125,6 +125,54 @@ export function makeComparator(colType: string): (a: string, b: string) => numbe
     return textCompare;
 }
 
+// Writes a value the grid has taken into a cell to state.data and the file.
+// The cell editor and a checkbox click arrive here when AG Grid reports the
+// change (onCellValueChanged), the save key earlier (commitOpenEditor).
+function writeCellValue(node: any, colField: string | undefined, newValue: unknown): void {
+    // Map the edited node back to its row in state.data via _origIndex.
+    // node.rowIndex is the DISPLAY position and points at the wrong
+    // row once a sort or filter is active.
+    const dataIndex = dataRowIndexForNode(node);
+    if (!colField) return;
+    const colIndex = parseInt(colField.replace('col_', ''));
+    const value = newValue != null ? String(newValue) : '';
+    const row = state.data[dataIndex];
+    // The save key wrote this value already. AG Grid reports the commit
+    // afterwards all the same.
+    if ((row[colIndex] ?? '') === value) return;
+    pushUndo();
+    while (row.length <= colIndex) row.push('');
+    row[colIndex] = value;
+    markValueListsStale();
+    notifyChange();
+    scheduleRecomputeColTypes();
+    // The cell may have gained or lost a match. A checkbox click
+    // writes through here too.
+    refreshFindInPlace();
+}
+
+// Ctrl+S while a cell is being typed in (keyboard.ts). VS Code saves the file
+// as soon as it gets the key, which is right after this page has seen it.
+// AG Grid reports a committed value on a timer, so the typed value reached the
+// file after the save. The file was saved without it and the tab showed it as
+// saved. The value is committed and written here, while the key is still on
+// its way. The edit message then reaches VS Code before the key does.
+export function commitOpenEditor(): void {
+    const api = state.gridApi;
+    const cell = api?.getEditingCells()[0];
+    if (!cell) return;
+    // Looked up before the commit, while the display position still names
+    // the row being typed in, in case a commit ever moves the rows.
+    const node = cell.rowPinned ? api.getPinnedTopRow(cell.rowIndex) : api.getDisplayedRowAtIndex(cell.rowIndex);
+    api.stopEditing();
+    // Enter hands the keyboard back to the cell. stopEditing() does not, so
+    // the focus fell to the page and the arrow keys and typing went nowhere
+    // until the next click.
+    api.setFocusedCell(cell.rowIndex, cell.column, cell.rowPinned);
+    const colId = cell.column.getColId();
+    if (node?.data) writeCellValue(node, colId, node.data[colId]);
+}
+
 // Guards the one-time wiring of the resize-handle dblclick listener. #grid-container
 // persists across rebuilds (buildGrid only clears its innerHTML), so the delegated
 // listener must be attached once — not re-added on every buildGrid call.
@@ -436,21 +484,7 @@ export function buildGrid(): void {
             refreshFindInPlace();
         },
 
-        onCellValueChanged: (event: any) => {
-            // Map the edited node back to its row in state.data via _origIndex —
-            // event.node.rowIndex is the DISPLAY position and points at the wrong
-            // row once a sort or filter is active.
-            const dataIndex = dataRowIndexForNode(event.node);
-            const colField  = event.colDef.field;
-            if (!colField) return;
-            const colIndex = parseInt(colField.replace('col_', ''));
-            pushUndo();
-            while (state.data[dataIndex].length <= colIndex) state.data[dataIndex].push('');
-            state.data[dataIndex][colIndex] = event.newValue != null ? String(event.newValue) : '';
-            markValueListsStale();
-            notifyChange();
-            scheduleRecomputeColTypes();
-        },
+        onCellValueChanged: (event: any) => writeCellValue(event.node, event.colDef.field, event.newValue),
     };
 
     state.gridApi = agGrid.createGrid(container, gridOptions);

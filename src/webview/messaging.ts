@@ -10,6 +10,8 @@ import { resetDuplicatesState } from './features/duplicates';
 import { frozenRowPositions, reanchorFrozenRows } from './features/freeze-rows';
 import { loadRows, rowsInFile } from './features/header-row';
 import { updateSettingsButton } from './features/settings-menu';
+import { closeAllPopups } from './features/popups';
+import { closeRenamePopover } from './features/rename-column';
 
 // The preview banner of Show Head and Show Tail: how many of the file's rows
 // are on screen. The paged view has its own (features/pagination.ts).
@@ -37,6 +39,13 @@ export function readText(text: string): void {
     // reason, but only a change of columns rebuilds the grid. What was typed
     // is dropped, since the file changed under it.
     if (state.isCellEditing) state.gridApi?.stopEditing(true);
+    // The row menu, the column menu and the Rename popover act on the row or
+    // column they were opened on, kept by its place. Left open, Delete row
+    // took the row that had moved into that place, Delete column took its
+    // neighbour and Rename wrote a header wider than the rows. They close
+    // like the editor. A pending rename is given up.
+    closeAllPopups();
+    closeRenamePopover();
     state.rawCsvText = text;
     // Untrimmed: the file's values exactly, see parseCsv.
     state.data = loadRows(parseCsv(text, state.currentDelimiter, false, true));

@@ -85,7 +85,10 @@ runSuite('rows (browser)', [
             await press(t, 'K', { ctrlKey: true, shiftKey: true });
             t.check(t.lastEdit() === 'a,b', 'Ctrl+Shift+K deletes the only row (' + JSON.stringify(t.lastEdit()) + ')');
             await press(t, 'Enter', { ctrlKey: true });
-            t.check(t.lastEdit() === 'a,b\\n,', 'Ctrl+Enter then starts a new first row (' + JSON.stringify(t.lastEdit()) + ')');
+            // This used to expect 'a,b\\n,', which the next read of the file
+            // took for a trailing blank line. The empty row now gets a break
+            // after it and stays a row (test/empty-table.test.cjs).
+            t.check(t.lastEdit() === 'a,b\\n,\\n', 'Ctrl+Enter then starts a new first row (' + JSON.stringify(t.lastEdit()) + ')');
             t.check(!!t.cell(0, 0), 'and the grid shows it');
         }`,
     },
@@ -180,7 +183,9 @@ runSuite('rows (browser)', [
             await press(t, 'K', { ctrlKey: true, shiftKey: true });
             t.check(t.lastEdit() === 'city,n', 'Ctrl+Shift+K deletes the only row (' + JSON.stringify(t.lastEdit()) + ')');
             await press(t, 'Enter', { ctrlKey: true });
-            t.check(t.lastEdit() === 'city,n\\n,', 'Ctrl+Enter starts a new first row (' + JSON.stringify(t.lastEdit()) + ')');
+            // With a break after the empty row, see 'insert after deleting the
+            // last row' above for why 'city,n\\n,' was the wrong thing to expect.
+            t.check(t.lastEdit() === 'city,n\\n,\\n', 'Ctrl+Enter starts a new first row (' + JSON.stringify(t.lastEdit()) + ')');
             const status = document.getElementById('status').textContent;
             t.check(!!t.cell(0, 0) && status === '1 records', 'the new row is shown (status "' + status + '")');
             t.check(t.focusedRow() === 0, 'the focus is on it (row ' + t.focusedRow() + ')');

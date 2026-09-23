@@ -168,21 +168,18 @@ export function relabelVirtualHeader(): void {
 // An undo step moved into the other mode, the way the switch moves the grid's
 // table (features/header-row.ts), so undo keeps working across a switch. The
 // frozen rows are kept by position and move along. A row that would become
-// the header is no longer frozen, the header never is.
+// the header is no longer frozen, the header never is. The rest of the step
+// stays as it is, the file's text too: the switch writes nothing.
 export function snapshotInHeaderMode(snap: UndoSnapshot, headerless: boolean): UndoSnapshot {
     return headerless
         ? {
+            ...snap,
             data: withVirtualHeader(snap.data, true),
             frozenRowIdx: snap.frozenRowIdx.map(i => i + 1),
-            pinnedCols: snap.pinnedCols,
-            delimiter: snap.delimiter,
-            lineFormat: snap.lineFormat,
         }
         : {
+            ...snap,
             data: fileRows(snap.data, true),
             frozenRowIdx: snap.frozenRowIdx.map(i => i - 1).filter(i => i >= 1),
-            pinnedCols: snap.pinnedCols,
-            delimiter: snap.delimiter,
-            lineFormat: snap.lineFormat,
         };
 }
