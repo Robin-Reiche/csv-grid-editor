@@ -10,12 +10,14 @@ import { closeAllPopups } from './popups';
 // and freeze state are preserved. Entry point: the column header context menu
 // ("Rename column"). Double-click is deliberately NOT used because a single click
 // already sorts the column, and fast sort-toggle clicks were being misread as a
-// double-click and opening rename (issue #10). Disabled in preview (read-only) mode.
+// double-click and opening rename (issue #10). Disabled in preview (read-only) mode
+// and in a file without a header row, whose column letters are not in the file
+// (state.firstRowIsHeader).
 
 let pendingColIndex: number | null = null;
 
 function renameColumn(colIndex: number, newName: string): void {
-    if (isNaN(colIndex) || !state.gridApi) return;
+    if (isNaN(colIndex) || !state.gridApi || !state.firstRowIsHeader) return;
 
     const header = state.data[0] ?? (state.data[0] = []);
     if ((header[colIndex] ?? '') === newName) return; // no-op — nothing changed

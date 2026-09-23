@@ -212,7 +212,9 @@ export function copySelection(withHeader = false, format: ClipboardFormat = 'tsv
     const rowMap = displayRowToOrig();
 
     const rows: string[][] = [];
-    if (withHeader) {
+    // A file without a header row has only the grid's column letters up
+    // there, which are not in the file.
+    if (withHeader && state.firstRowIsHeader) {
         const header = state.data[0] ?? [];
         rows.push(selCols.map(colId => String(header[parseInt(colId.slice(4), 10)] ?? '')));
     }

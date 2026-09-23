@@ -292,7 +292,9 @@ function showContextMenu(x: number, y: number, rowIndex: number | null, colId: s
         // Google Sheets paste back as columns, and what Ctrl+C gives); Copy as CSV
         // is comma-separated for pasting into a file, a snippet or a ticket. The
         // format is named in the label rather than hidden behind a remembered
-        // setting, so what lands on the clipboard is never a surprise.
+        // setting, so what lands on the clipboard is never a surprise. A file
+        // without a header row has no header to copy, only the column letters
+        // the grid shows in its place, so the header variants are left out.
         const copyVariants: Array<[string, boolean, 'tsv' | 'csv']> = [
             ['Copy',                    false, 'tsv'],
             ['Copy with header',        true,  'tsv'],
@@ -300,6 +302,7 @@ function showContextMenu(x: number, y: number, rowIndex: number | null, colId: s
             ['Copy as CSV with header', true,  'csv'],
         ];
         for (const [label, withHeader, format] of copyVariants) {
+            if (withHeader && !state.firstRowIsHeader) continue;
             const item = makeRowItem(label, 'codicon-copy');
             item.addEventListener('click', () => { copySelection(withHeader, format); hideMenu(); });
             menu.appendChild(item);

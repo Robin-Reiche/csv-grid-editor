@@ -198,6 +198,38 @@ runSuite('first row is the header (browser)', [
         `),
     },
     {
+        name: 'rename and copy with header are not offered',
+        csv: 'a,b\n1,2\n3,4',
+        steps: steps(`
+            const headerMenu = async () => {
+                const h = t.header(0);
+                const r = h.getBoundingClientRect();
+                h.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 5, clientY: r.top + 5 }));
+                await t.wait(200);
+                const shown = document.getElementById('col-ctx-rename').style.display !== 'none';
+                document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+                await t.wait(100);
+                return shown;
+            };
+            const copyItems = async () => {
+                t.click(document.querySelector('#grid-container .ag-header-cell[col-id="row-index"]'));
+                await t.wait(200);
+                const items = (await t.rowMenuItems(0, 0)).map(i => i.textContent).filter(l => l.indexOf('Copy') === 0);
+                document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+                await t.wait(100);
+                return items.join('|');
+            };
+            t.check(await headerMenu(), 'with a header, Rename column is offered');
+            t.check(/with header/.test(await copyItems()), 'and so is Copy with header');
+            await t.header1(false);
+            t.check(!(await headerMenu()), 'without one, Rename column is not');
+            const items = await copyItems();
+            t.check(items === 'Copy|Copy as CSV', 'nor Copy with header (' + items + ')');
+            await t.header1(true);
+            t.check(await headerMenu(), 'on again, Rename column is back');
+        `),
+    },
+    {
         name: 'a frozen first row becomes the header',
         csv: '1,alice\n2,bob',
         steps: steps(`
