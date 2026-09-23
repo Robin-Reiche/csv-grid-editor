@@ -811,32 +811,29 @@ body.vscode-high-contrast #grid-container.cm-on {
    spaces at its start and end, so the padding was drawn zero wide and
    '     Berlin' looked exactly like 'Berlin'. pre draws every space and still
    keeps the text on one line, so the ellipsis stays. A wrapped cell draws its
-   spaces already (pre-wrap above). In a cell a line break is drawn as a chip
-   and a space while wrapping is off (grid/control-char-cell.ts), so pre finds
-   no break to follow there. */
-body.spaces-shown :is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-cell:not(.ag-cell-wrap-text) {
+   spaces already (pre-wrap above). pre finds no line break to follow here: a
+   cell draws one as a chip and a space while wrapping is off, a column name
+   as a space (shownName in grid/control-char-cell.ts). A tab keeps the room
+   of the one space it takes with the switch on. pre moved it on to the next
+   tab stop up to eight spaces away. Auto-fit also ranks the widest values
+   with a tab counted as one space. */
+body.spaces-shown :is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-cell:not(.ag-cell-wrap-text),
+body.spaces-shown .col-chooser-label {
     white-space: pre;
+    tab-size: 1;
 }
-/* A name or a listed value can hold a line break of its own, which pre turns
-   into a second line. The header is one line high, so a name keeps to its
-   first line there and ends in an ellipsis. Cut off without one, '  top' read
-   as the whole of '  top\nbottom'. The name takes the width of its widest
-   line. Where that is the first line, the ellipsis takes the room of its last
-   letters. Giving the name the rest of the header for it, as the lists below
-   do, would move the sort arrow away from the name in every column. */
 body.spaces-shown :is(.ag-theme-alpine-dark, .ag-theme-alpine) .ag-header-cell-text {
     white-space: pre !important;
-    display: -webkit-box;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 1;
+    tab-size: 1;
 }
-/* In the name and value lists the first line ends in an ellipsis, so '  Ber'
+/* A value in the filter list can hold a line break of its own, which pre
+   turns into a second line. Its first line ends in an ellipsis, so '  Ber'
    and a value going on after it on a second line do not look alike. A clamped
    line is only as wide as the text, which leaves the ellipsis no room and
    drops the last word for it, so the label takes the rest of its row. */
-body.spaces-shown .csv-filter-value-label,
-body.spaces-shown .col-chooser-label {
+body.spaces-shown .csv-filter-value-label {
     white-space: pre;
+    tab-size: 1;
     display: -webkit-box;
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 1;

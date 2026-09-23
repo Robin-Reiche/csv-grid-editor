@@ -12,6 +12,18 @@ export function shownValue(value: string): string {
     return state.settings.trimDisplay ? trimPadding(value) : value;
 }
 
+// What the grid shows for a column name: the shown value on one line. The
+// header and the column chooser give a name one line. A line that does not
+// wrap has always drawn a line break as a space. With the spaces around
+// values shown the text is drawn as it stands (media/webview.css), where a
+// break starts a second line. Cut to its first line, a name whose first line
+// was its widest lost the end of that line to the ellipsis, however wide the
+// column. Display only: the column keeps the break in its name, so an export
+// keeps it too.
+export function shownName(name: string): string {
+    return shownValue(name).replace(/\r\n|\r|\n/g, ' ');
+}
+
 // ── Cell renderer: labelled control characters ───────────────────────────────
 // Draws the value with each control character replaced by a chip showing its
 // ASCII abbreviation. Display only — the stored value is untouched.

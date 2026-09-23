@@ -18,13 +18,15 @@ const CITIES = [
 ].join('\n');
 
 // Padding in a header, before a value, after a value and in front of a value
-// with a line break in it. The last header has a line break of its own.
+// with a line break in it. Two headers have a line break of their own. In the
+// last one the first line is the wider one. The last column holds a value
+// with a tab inside and one with a space in the same place.
 const PADDED = [
-    '    city,n,"  top\nbottom"',
-    '     Berlin,1,a',
-    'Berlin,2,b',
-    'Berlin     ,3,c',
-    '"  Ber\nlin",4,d',
+    '    city,n,"  top\nbottom","Total\nEUR"',
+    '     Berlin,1,a,a\tb',
+    'Berlin,2,b,a b',
+    'Berlin     ,3,c,x',
+    '"  Ber\nlin",4,d,x',
 ].join('\n');
 
 // Where the browser draws text, which is what the spaces switch is about. A
@@ -195,18 +197,21 @@ runSuite('settings menu (browser)', [
 
             const head = t.header(0).querySelector('.ag-header-cell-text');
             t.check(t.xOf(head, 'c') > 8, 'the header draws its spaces (c at ' + t.xOf(head, 'c') + ')');
+            // A line break in a name is drawn as a space, as it is with the
+            // switch on. Kept as a break, the header had room for the first
+            // line only. Cut to it with an ellipsis, a name whose first line
+            // was its widest lost letters of that line in any column width.
             const multi = t.header(2).querySelector('.ag-header-cell-text');
             const size = parseFloat(getComputedStyle(multi).fontSize);
-            t.check(multi.getBoundingClientRect().height < size * 1.8 && t.xOf(multi, 't') > 4,
-                'a header with a line break keeps to one line and shows its spaces ('
-                + multi.getBoundingClientRect().height + 'px high, t at ' + t.xOf(multi, 't') + ')');
-            // The ellipsis is drawn by the line clamp and a page cannot see it
-            // drawn. A name clamped to one line with more of it below is one
-            // that ends in an ellipsis.
-            const clamp = getComputedStyle(multi).webkitLineClamp;
-            t.check(clamp === '1' && multi.scrollHeight > multi.clientHeight + 4,
-                'and its first line ends in an ellipsis, since the name goes on (clamp ' + clamp + ', '
-                + multi.scrollHeight + 'px of text in ' + multi.clientHeight + ')');
+            t.check(multi.getBoundingClientRect().height < size * 1.8 && t.xOf(multi, 't') > 4
+                && Math.abs(t.yOf(multi, 'b') - t.yOf(multi, 't')) < 2 && t.xOf(multi, 'b') > t.xOf(multi, 't'),
+                'a header with a line break reads on one line and shows its spaces ('
+                + multi.getBoundingClientRect().height + 'px high, t at ' + t.xOf(multi, 't') + ', b at '
+                + t.xOf(multi, 'b') + ' and y ' + t.yOf(multi, 'b') + ')');
+            const total = t.header(3).querySelector('.ag-header-cell-text');
+            t.check(Math.abs(t.yOf(total, 'R') - t.yOf(total, 'T')) < 2 && total.scrollWidth <= total.clientWidth,
+                'a name whose first line is its widest reads in full (' + JSON.stringify(total.textContent) + ', '
+                + total.scrollWidth + 'px of text in ' + total.clientWidth + ')');
             const plainName = () => t.header(1).querySelector('.ag-header-cell-text').getBoundingClientRect();
             const shownBox = plainName();
 
@@ -222,6 +227,11 @@ runSuite('settings menu (browser)', [
             document.getElementById('btn-wraptext').dispatchEvent(new MouseEvent('click', { bubbles: true }));
             await t.wait(400);
             t.check(Math.abs(t.yOf(t.cell(3, 0), 'l') - t.yOf(t.cell(3, 0), 'B')) < 2, 'and off again it is back on one line');
+            // The switch is about the spaces around a value. A tab inside one
+            // keeps the width of the one space it has with the switch on. It
+            // does not jump to a tab stop.
+            const tab = t.xOf(t.cell(0, 3), 'b'), space = t.xOf(t.cell(1, 3), 'b');
+            t.check(Math.abs(tab - space) < 3, 'a tab inside a value takes the room of a space (b at ' + tab + ' against ' + space + ')');
 
             t.click(t.header(0).querySelector('.ag-header-cell-filter-button, .ag-header-cell-menu-button'));
             await t.wait(300);
@@ -254,12 +264,21 @@ runSuite('settings menu (browser)', [
             const name = [...document.querySelectorAll('.col-chooser-label')].find(l => l.textContent === '    city');
             t.check(!!name && t.xOf(name, 'c') > 8, 'the column chooser draws the spaces of a name ('
                 + (name && t.xOf(name, 'c')) + ')');
+            const listed = [...document.querySelectorAll('.col-chooser-label')].find(l => l.textContent === 'Total EUR');
+            t.check(!!listed && Math.abs(t.yOf(listed, 'R') - t.yOf(listed, 'T')) < 2 && listed.scrollWidth <= listed.clientWidth,
+                'and lists a name with a line break in full, as the header shows it ('
+                + (listed ? listed.scrollWidth + 'px of text in ' + listed.clientWidth : 'not listed') + ')');
             document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
             await t.wait(100);
 
             await t.setSetting('trimDisplay', true);
             t.check(Math.abs(t.xOf(t.cell(0, 0), 'B') - t.xOf(t.cell(1, 0), 'B')) < 1, 'switched back on, the spaces are gone');
             t.check(t.xOf(t.header(0).querySelector('.ag-header-cell-text'), 'c') < 2, 'from the header too');
+            // The switch hands the grid new column names. A line break still
+            // reads as a space after that.
+            const named = t.header(2).querySelector('.ag-header-cell-text').textContent;
+            t.check(named === 'top bottom', 'a name with a line break reads the same way ('
+                + JSON.stringify(named) + ')');
             const hiddenBox = plainName();
             t.check(Math.abs(shownBox.height - hiddenBox.height) < 0.5 && Math.abs(shownBox.top - hiddenBox.top) < 0.5,
                 'a name without spaces sits in the same place either way (' + shownBox.height + 'px at ' + shownBox.top
@@ -287,6 +306,23 @@ runSuite('settings menu (browser)', [
             t.check(!!cell && t.xOf(cell, 'B') > 60, 'the spaces are drawn (B at ' + (cell && t.xOf(cell, 'B')) + ')');
             t.check(!!cell && cell.scrollWidth <= cell.clientWidth, 'and the column is wide enough for them ('
                 + (cell && cell.scrollWidth) + ' in ' + (cell && cell.clientWidth) + ')');
+        }`,
+    },
+    {
+        name: 'auto-fit makes room for a name with a line break',
+        // The header draws the break as a space, so the whole name is one
+        // line. Measured with the break in it, the column came out as wide as
+        // the longer of the two lines and cut the name short.
+        csv: ['id,"Quantity ordered\nin the last quarter"', '1,2', '3,4'].join('\n'),
+        settings: { trimDisplay: false },
+        steps: `async (t, csv) => {
+            await t.init(csv);
+            document.getElementById('btn-autofit').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(1500);
+            const name = t.header(1).querySelector('.ag-header-cell-text');
+            t.check(name.textContent === 'Quantity ordered in the last quarter' && name.scrollWidth <= name.clientWidth,
+                'the whole name fits its column (' + JSON.stringify(name.textContent) + ', '
+                + name.scrollWidth + 'px of text in ' + name.clientWidth + ')');
         }`,
     },
     {

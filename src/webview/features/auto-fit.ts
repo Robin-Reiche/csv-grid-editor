@@ -2,7 +2,7 @@ import { state, getNumCols } from '../state';
 import { showLoader, hideLoader } from '../utils/loader';
 import { buildGrid } from '../grid/builder';
 import { longestLine } from '../utils/csv';
-import { paint, shownValue } from '../grid/control-char-cell';
+import { paint, shownName, shownValue } from '../grid/control-char-cell';
 
 export function measureTextWidths(): { colId: string; width: number }[] {
     const { data, colTypes } = state;
@@ -164,6 +164,11 @@ export function measureTextWidths(): { colId: string; width: number }[] {
     // (media/webview.css). A probe that dropped them would size a padded
     // value's column too narrow for it.
     probe.style.whiteSpace    = state.settings.trimDisplay ? 'nowrap' : 'pre';
+    // Under pre a tab takes the room of one space in a header and in a cell
+    // that does not wrap, as it does with the switch on. A wrapped cell moves
+    // it on to the next tab stop (media/webview.css).
+    const cellTabs = state.wrapText ? '' : '1';
+    probe.style.tabSize       = cellTabs;
     probe.style.fontFamily    = fontFamily;
     probe.style.fontSize      = fontSize + 'px';
     if (letterSpacing !== 0) probe.style.letterSpacing = letterSpacing + 'px';
@@ -242,7 +247,11 @@ export function measureTextWidths(): { colId: string; width: number }[] {
         // Header: bold, measure exactly
         probe.style.fontSize   = fontSize + 'px';
         probe.style.fontWeight = '600';
-        probe.textContent      = shownValue(headerRow?.[c] ?? '');
+        probe.style.tabSize    = '1';
+        // As the header draws it, a line break as a space. Under pre the break
+        // measured the longer of two lines and left the name too narrow a
+        // column.
+        probe.textContent      = shownName(headerRow?.[c] ?? '');
         // No room for a badge when the type badges are switched off in the menu.
         const badgePx = !state.settings.typeBadges ? 0
             : badgeWidthCache[colTypes[c]] ?? badgeWidthCache['string'];
@@ -251,6 +260,7 @@ export function measureTextWidths(): { colId: string; width: number }[] {
         // Cells: measure the top-N candidates (calibFactor corrects systematic
         // probe under-measurement detected against actual rendered cells above)
         probe.style.fontWeight = '400';
+        probe.style.tabSize    = cellTabs;
         let maxBodyW = 0;
         for (const val of topCandidates[c]) {
             // Fill the probe through the cell renderer, not with plain text: a
