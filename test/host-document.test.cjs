@@ -102,16 +102,21 @@ const vscodeStub = {
             },
             delete: async uri => fs.rmSync(uri.fsPath, { force: true }),
         },
-        // Came with VS Code 1.86: saves the editor of this file the way Ctrl+S
-        // does and gives back its URI, undefined when no editor shows it. A
-        // save that fails rejects with its error. A test that restarts VS Code
-        // can leave the tab from before the restart behind, so the newest one
-        // is the file's editor.
+        // Came with VS Code 1.86: saves every editor of this file, a text
+        // editor of it as well. It forces the save, so a text editor without
+        // unsaved edits writes what it holds too. Gives back the URI,
+        // undefined when no editor shows it. A save that fails rejects with
+        // its error.
         save: async uri => {
-            const tab = group.tabs.findLast(t => t.save && t.input && t.input.uri.toString() === uri.toString());
-            if (!tab) return undefined;
-            await tab.save();
+            const editors = group.tabs.filter(t => t.save && t.input && t.input.uri.toString() === uri.toString());
+            if (!editors.length) return undefined;
+            for (const editor of editors) await editor.save();
             return uri;
+        },
+        // The workspace is the temp folder.
+        asRelativePath: uri => {
+            const relative = path.relative(tmpDir, uri.fsPath);
+            return relative.startsWith('..') ? uri.fsPath : relative.split(path.sep).join('/');
         },
         createFileSystemWatcher: () => {
             const w = {
@@ -128,14 +133,22 @@ const vscodeStub = {
             offered = items.map(i => i.id);
             return items.find(i => i.id === quickPickChoice);
         },
-        showErrorMessage: msg => {
-            errors.push(msg);
-            return Promise.resolve(undefined);
-        },
+        // VS Code shows a notification once: the same message with the same
+        // buttons closes the one on screen and takes its place. A closed one
+        // can no longer be clicked.
         showWarningMessage: (msg, ...actions) => {
-            const w = { msg, actions, pick: null };
+            for (const shown of warnings) {
+                if (shown.open && shown.msg === msg && shown.actions.join('\n') === actions.join('\n')) shown.pick(undefined);
+            }
+            const w = { msg, actions, open: true, pick: null };
             warnings.push(w);
-            return new Promise(resolve => { w.pick = resolve; });
+            return new Promise(resolve => {
+                w.pick = choice => {
+                    if (!w.open) return;
+                    w.open = false;
+                    resolve(choice);
+                };
+            });
         },
         setStatusBarMessage() {},
     },
@@ -165,12 +178,12 @@ vscodeStub.commands.executeCommand = async (id, ...args) => {
         const [uri, viewType] = args;
         let tab = group.tabs.find(t => t.input && t.input.uri.toString() === uri.toString() && t.input.viewType === viewType);
         // A document that only a Source Control diff shows opens in a tab of
-        // its own. The two tabs share the document, so its unsaved mark and
-        // its revert.
+        // its own. The two tabs share the document, so its unsaved mark, its
+        // revert and its save.
         const diff = group.tabs.find(t => !t.input && t.uri.toString() === uri.toString());
         if (!tab && diff && !openWithFails) {
             tab = {
-                input: new TabInputCustom(uri, viewType), group, isActive: true, revert: diff.revert,
+                input: new TabInputCustom(uri, viewType), group, isActive: true, revert: diff.revert, save: diff.save,
                 get isDirty() { return diff.isDirty; }, set isDirty(v) { diff.isDirty = v; },
             };
             group.tabs.push(tab);
@@ -183,6 +196,17 @@ vscodeStub.commands.executeCommand = async (id, ...args) => {
         if (tab && tab.isDirty) {
             tab.isDirty = false;
             await tab.revert();
+        }
+    } else if (id === 'workbench.action.files.save') {
+        // File > Save saves the active editor and nothing else. A save that
+        // fails is shown as an error, the tab keeps its unsaved mark.
+        const tab = group.activeTab;
+        if (tab && tab.save) {
+            try {
+                await tab.save();
+            } catch (e) {
+                errors.push(`Failed to save '${path.basename(tab.input.uri.fsPath)}': ${e.message}`);
+            }
         }
     }
 };
@@ -252,8 +276,9 @@ async function open(filePath, openContext = {}, uri = uriFile(filePath)) {
     const context = { extensionUri: uriFile('/ext'), globalState: { get: (_k, d) => d, update() {} } };
     const provider = new CsvEditorProvider(context);
     const doc = await provider.openCustomDocument(uri, openContext, {});
+    // VS Code shows a document restored from a backup as unsaved.
     const tab = {
-        input: new TabInputCustom(uri, 'csvViewer.grid'), group, isActive: true, isDirty: false,
+        input: new TabInputCustom(uri, 'csvViewer.grid'), group, isActive: true, isDirty: !!openContext.backupId,
         revert: () => provider.revertCustomDocument(doc, {}),
         save: async () => {
             await provider.saveCustomDocument(doc, {});
@@ -278,6 +303,13 @@ async function open(filePath, openContext = {}, uri = uriFile(filePath)) {
         }
         return backedUp.backup;
     };
+    // A backup is handed back after a restart, which left no tab of the file
+    // from before it.
+    if (openContext.backupId) {
+        for (const old of group.tabs.filter(t => t.input && t.input.uri.toString() === uri.toString())) {
+            group.tabs.splice(group.tabs.indexOf(old), 1);
+        }
+    }
     group.tabs.push(tab);
     group.activeTab = tab;
     // The watchers made for this file, see fireWatcher.
@@ -315,6 +347,8 @@ async function open(filePath, openContext = {}, uri = uriFile(filePath)) {
 }
 
 const tick = () => new Promise(r => setTimeout(r, 20));
+// The warnings still on screen, the ones a user can click.
+const onScreen = () => warnings.filter(w => w.open);
 
 async function main() {
     console.log('reading, saving and restoring a file');
@@ -436,7 +470,7 @@ async function main() {
         assert.strictEqual(after.doc.content, 'h\nmine\nmore\n');
         await assert.rejects(after.save(), /changed on disk/, 'the save went through');
         assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\ntheirs\n', 'the save wrote over the change on disk');
-        warnings[0].pick('Overwrite');
+        onScreen()[0].pick('Overwrite');
         await tick();
         assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\nmine\nmore\n', 'Overwrite did not write the edits');
     });
@@ -523,6 +557,40 @@ async function main() {
         await t.saveAs(other);
         assert.ok(fs.existsSync(p), 'the file is gone');
         assert.strictEqual(fs.readFileSync(p, 'utf8'), text);
+    });
+
+    // A mount without stable inode numbers (FUSE without use_ino, cifs with
+    // noserverino) gives big.csv and BIG.csv a number each although they are
+    // one file. Here the folder lists big.csv only and the disk finds BIG.csv
+    // by ignoring case.
+    await test('Save As from a preview onto the file in other case keeps it on a disk that numbers each name', async () => {
+        const text = 'id,name\n' + Array.from({ length: 1500 }, (_, i) => `${i},row ${i}`).join('\n') + '\n';
+        const p = file('big-noino.csv', text);
+        const other = path.join(tmpDir, 'BIG-NOINO.csv');
+        const stat = fs.promises.stat;
+        const copy = vscodeStub.workspace.fs.copy;
+        fs.promises.stat = async (name, ...rest) => {
+            if (name !== other) return stat(name, ...rest);
+            const s = await stat(p, ...rest);
+            return Object.assign(Object.create(Object.getPrototypeOf(s)), s, { ino: s.ino + (typeof s.ino === 'bigint' ? 1n : 1) });
+        };
+        // VS Code deletes the target first, which is the file itself here.
+        vscodeStub.workspace.fs.copy = async (from, to, options) => {
+            if (options && options.overwrite && to.fsPath === other) fs.rmSync(p);
+            fs.copyFileSync(from.fsPath, to.fsPath);
+        };
+        try {
+            fakeSize = 60 * 1024 * 1024;
+            quickPickChoice = 'head';
+            const t = await open(p);
+            assert.strictEqual(t.doc.isPreview, true, 'the test did not reach the preview');
+            await t.saveAs(other).catch(() => {});
+            assert.ok(fs.existsSync(p), 'the file is gone');
+            assert.strictEqual(fs.readFileSync(p, 'utf8'), text);
+        } finally {
+            fs.promises.stat = stat;
+            vscodeStub.workspace.fs.copy = copy;
+        }
     });
 
     // A preview is read-only, so it has nothing to revert. Reading the whole
@@ -680,6 +748,17 @@ async function main() {
         assert.deepStrictEqual(group.tabs, [t.tab], 'the tab opened for the revert is still open');
     });
 
+    await test('Overwrite on the warning saves a diff with no grid tab', async () => {
+        const t = await diffOnly('diff-only-overwrite.csv');
+        await t.fireWatcher();
+        warnings[0].pick('Overwrite');
+        await tick();
+        assert.strictEqual(fs.readFileSync(t.uri.fsPath, 'utf8'), 'h\nmine\n', 'Overwrite did not write the edits');
+        assert.strictEqual(t.tab.isDirty, false, 'the diff is still marked unsaved');
+        assert.deepStrictEqual(group.tabs, [t.tab], 'the tab opened for the save is still open');
+        assert.strictEqual(group.activeTab, t.tab, 'the diff is not in front again');
+    });
+
     // File > Revert File does nothing on a tab not marked unsaved. Reload
     // from Disk went on to report the file loaded and the grid kept the edits.
     await test('Reload from Disk on a diff not marked unsaved still loads the file', async () => {
@@ -707,8 +786,8 @@ async function main() {
         assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\ntheirs\n', 'the save wrote over the change on disk');
         assert.strictEqual(t.tab.isDirty, true);
         assert.strictEqual(t.doc.content, 'h\nmine\n', 'the edits are gone');
-        assert.strictEqual(warnings.length, 1, 'the warning still on screen was shown again');
-        warnings[0].pick('Reload from Disk');
+        assert.strictEqual(onScreen().length, 1, 'the refused save stacked a second warning');
+        onScreen()[0].pick('Reload from Disk');
         await tick();
         assert.strictEqual(t.doc.content, 'h\ntheirs\n', 'Reload from Disk did not load the change');
         await t.edit('h\ntheirs\nmore\n');
@@ -716,19 +795,28 @@ async function main() {
         assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\ntheirs\nmore\n', 'a save after Reload from Disk was refused');
     });
 
-    await test('a refused save shows the warning again once it was closed', async () => {
+    // The warning's toast hides after a few seconds and the warning waits
+    // behind the bell. A refused auto-save then said nothing at all. A
+    // refused Ctrl+S pointed to buttons nobody could see.
+    await test('every refused save shows the warning again in place of the one before', async () => {
         const p = file('dirty-save-again.csv', 'h\n1\n');
         const t = await open(p);
         await t.edit('h\nmine\n');
         fs.writeFileSync(p, 'h\ntheirs\n');
         await t.fireWatcher();
-        warnings[0].pick(undefined);                    // closed
+        await assert.rejects(t.save(), /changed on disk/);   // the warning is still open, its toast hidden
+        assert.strictEqual(warnings.length, 2, 'the refused save did not show the warning again');
+        assert.deepStrictEqual(onScreen(), [warnings[1]], 'the warnings stacked');
+        assert.deepStrictEqual(warnings[1].actions, ['Reload from Disk', 'Overwrite']);
+        onScreen()[0].pick(undefined);                  // closed
         await tick();
         await assert.rejects(t.save(), /changed on disk/);
-        assert.strictEqual(warnings.length, 2, 'the refused save did not bring the warning back');
-        assert.deepStrictEqual(warnings[1].actions, ['Reload from Disk', 'Overwrite']);
+        assert.strictEqual(onScreen().length, 1, 'the refused save did not bring the closed warning back');
         await assert.rejects(t.save(), /changed on disk/);   // auto-save after the next edit
-        assert.strictEqual(warnings.length, 2, 'every refused save stacked another warning');
+        assert.strictEqual(onScreen().length, 1, 'the warnings stacked');
+        onScreen()[0].pick('Overwrite');
+        await tick();
+        assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\nmine\n', 'Overwrite on the warning shown last did not write');
     });
 
     await test('Overwrite on the warning writes the edits over the change on disk', async () => {
@@ -746,8 +834,32 @@ async function main() {
         assert.strictEqual(warnings.length, 1);
     });
 
+    // workspace.save saves every editor of the file and forces it. A text
+    // editor that had loaded the other program's change wrote it back over
+    // the edits. The grid then loaded it as a change on disk. Or VS Code
+    // refused the text editor's save as older than the file and its own
+    // Overwrite wrote the change back the same way.
+    await test('Overwrite saves the grid only, not a text editor of the same file', async () => {
+        const p = file('dirty-overwrite-text.csv', 'a,b\n1,2\n');
+        const t = await open(p);
+        await t.edit('a,b\n1,Mine\n');
+        const text = { input: { uri: t.uri }, group, isDirty: false, content: 'a,b\n1,2\n' };
+        text.save = async () => fs.writeFileSync(p, text.content);
+        group.tabs.push(text);
+        fs.writeFileSync(p, 'a,b\n1,OUTSIDE\n');
+        text.content = 'a,b\n1,OUTSIDE\n';            // the text editor loads the change
+        await t.fireWatcher();
+        warnings[0].pick('Overwrite');
+        await tick();
+        await t.fireWatcher();                          // what landed on disk
+        assert.strictEqual(fs.readFileSync(p, 'utf8'), 'a,b\n1,Mine\n', 'the text editor wrote the change back');
+        assert.strictEqual(t.doc.content, 'a,b\n1,Mine\n', 'the grid lost the edits');
+        assert.strictEqual(t.tab.isDirty, false);
+    });
+
     // A file another program still holds open. VS Code shows nothing for a
     // save that workspace.save asked for, so the button seemed to do nothing.
+    // Its File > Save shows why the save failed.
     await test('Overwrite that cannot write the file says so', async () => {
         const p = file('dirty-overwrite-locked.csv', 'h\n1\n');
         const t = await open(p);
@@ -757,14 +869,14 @@ async function main() {
         failNextWrite = true;
         warnings[0].pick('Overwrite');
         await tick();
-        assert.deepStrictEqual(errors, ['dirty-overwrite-locked.csv was not saved: EBUSY: resource busy or locked']);
+        assert.deepStrictEqual(errors, ["Failed to save 'dirty-overwrite-locked.csv': EBUSY: resource busy or locked"]);
         assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\ntheirs\n');
         assert.strictEqual(t.tab.isDirty, true);
         await t.save();
         assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\nmine\n', 'the next save did not write');
     });
 
-    await test('Overwrite before VS Code 1.86 lets the next save write', async () => {
+    await test('Overwrite writes on VS Code before 1.86 as well', async () => {
         vscodeStub.workspace.save = undefined;
         const p = file('dirty-overwrite-old.csv', 'h\n1\n');
         const t = await open(p);
@@ -773,9 +885,8 @@ async function main() {
         await t.fireWatcher();
         warnings[0].pick('Overwrite');
         await tick();
-        assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\ntheirs\n');
-        await t.save();
-        assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\nmine\n', 'the save after Overwrite did not write');
+        assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\nmine\n', 'Overwrite did not write');
+        assert.strictEqual(t.tab.isDirty, false);
     });
 
     await test('Save As onto the file itself after the warning is refused, onto another file it is not', async () => {
@@ -791,6 +902,22 @@ async function main() {
         assert.strictEqual(fs.readFileSync(copy, 'utf8'), 'h\nmine\n');
     });
 
+    // On a disk that ignores case under Linux, Save As onto SMALL.csv is Save
+    // As onto small.csv. Written like a copy, it went over the change on disk
+    // that still waited for Overwrite or Reload from Disk. A hard link stands
+    // in for the other spelling.
+    await test('Save As onto the file under another name after the warning is refused', async () => {
+        const p = file('dirty-saveas-other.csv', 'h\n1\n');
+        const other = path.join(tmpDir, 'DIRTY-SAVEAS-OTHER.csv');
+        fs.linkSync(p, other);
+        const t = await open(p);
+        await t.edit('h\nmine\n');
+        fs.writeFileSync(p, 'h\ntheirs\n');
+        await t.fireWatcher();
+        await assert.rejects(t.saveAs(other), /changed on disk/, 'Save As went through');
+        assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\ntheirs\n', 'Save As wrote over the change on disk');
+    });
+
     await test('a file that now holds the edits settles the change on disk', async () => {
         const p = file('dirty-settled.csv', 'h\n1\n');
         const t = await open(p);
@@ -801,6 +928,49 @@ async function main() {
         await t.fireWatcher();
         await t.save();
         assert.strictEqual(warnings.length, 1);
+    });
+
+    // A file with a stray byte behind a UTF-8 byte order mark reads as the
+    // grid's text although a save would write other bytes.
+    await test('a file with a stray byte that holds the edits again settles the change on disk', async () => {
+        const stray = rest => Buffer.concat([BOM, Buffer.from('name;city\nMüller;Köln\nSch'), Buffer.from([0xF6]), Buffer.from('n;x\n' + rest)]);
+        const p = file('dirty-settled-stray.csv', stray(''));
+        const t = await open(p);
+        assert.strictEqual(t.doc.content, 'name;city\nMüller;Köln\nSchön;x\n', 'the test did not read the stray byte');
+        await t.edit('name;city\nMüller;Köln\nSchön;x\nEva;Graz\n');
+        fs.writeFileSync(p, stray('Otto;Linz\n'));
+        await t.fireWatcher();
+        assert.strictEqual(warnings.length, 1, 'the test did not reach the warning');
+        fs.writeFileSync(p, stray('Eva;Graz\n'));    // the other program writes the same edit
+        await t.fireWatcher();
+        await t.save();
+        assert.strictEqual(t.tab.isDirty, false);
+    });
+
+    // Two warnings with the same text are one notification to VS Code, so
+    // the second closed the first. Overwrite on the one left wrote the file
+    // whose warning came last, whichever grid the user looked at.
+    await test('warnings for two files of the same name tell which file they are about', async () => {
+        const [p1, p2] = ['same-1', 'same-2'].map(dir => {
+            fs.mkdirSync(path.join(tmpDir, dir));
+            return file(path.join(dir, 'data.csv'), 'h\n1\n');
+        });
+        const t1 = await open(p1);
+        const t2 = await open(p2);
+        await t1.edit('h\nmine 1\n');
+        await t2.edit('h\nmine 2\n');
+        fs.writeFileSync(p1, 'h\ntheirs\n');
+        fs.writeFileSync(p2, 'h\ntheirs\n');
+        await t1.fireWatcher();
+        await t2.fireWatcher();
+        assert.deepStrictEqual(onScreen().map(w => w.msg), [
+            'same-1/data.csv changed on disk. Your unsaved edits in the grid were kept.',
+            'same-2/data.csv changed on disk. Your unsaved edits in the grid were kept.'
+        ]);
+        onScreen()[0].pick('Overwrite');
+        await tick();
+        assert.strictEqual(fs.readFileSync(p1, 'utf8'), 'h\nmine 1\n', 'Overwrite did not write the file its warning named');
+        assert.strictEqual(fs.readFileSync(p2, 'utf8'), 'h\ntheirs\n', 'Overwrite wrote the other file');
     });
 
     await test('an outside change after a failed save does not replace the edits', async () => {
