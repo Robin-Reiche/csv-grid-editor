@@ -340,4 +340,34 @@ runSuite('spaces around values (browser)', [
                 'a plain click still flips it');
         },
     },
+    {
+        // AG Grid numbers a frozen row "t-0" in the page, and reading that as
+        // a number gave NaN. The menu then found no row and put an empty
+        // string on the clipboard.
+        name: 'copy from a frozen row',
+        csv: 'k,v\n  alpha  ,1\nbeta,2',
+        steps: async (t, csv) => {
+            const copied = [];
+            Object.defineProperty(navigator, 'clipboard', {
+                configurable: true,
+                value: { writeText: s => { copied.push(s); return Promise.resolve(); } },
+            });
+            const menu = async (cell, label) => {
+                const r = cell.getBoundingClientRect();
+                cell.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 5, clientY: r.top + 5 }));
+                await t.wait(200);
+                const item = [...document.querySelectorAll('#row-context-menu .row-ctx-item')].find(i => i.textContent === label);
+                if (!item) { t.check(false, 'the row menu offers ' + label); return; }
+                item.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+                await t.wait(300);
+            };
+            await t.init(csv);
+            await menu(t.cell(0, 0), 'Freeze row');
+            const frozen = document.querySelector('#grid-container .ag-floating-top .ag-cell[col-id="col_0"]');
+            t.check(!!frozen && frozen.textContent === 'alpha', 'the first row is frozen');
+            await menu(frozen, 'Copy');
+            t.check(copied[copied.length - 1] === 'alpha', 'Copy on the frozen row copies its value as shown ('
+                + JSON.stringify(copied[copied.length - 1]) + ')');
+        },
+    },
 ]);

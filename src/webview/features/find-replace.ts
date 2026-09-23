@@ -89,12 +89,14 @@ function screenRow(rowIndex: number, pinned: boolean | undefined, pinnedCount: n
 // top or landing on the same cell again. Showing or hiding a column passes the
 // active match with `keep`, so the position survives a change that did not
 // touch it.
-function execFind(anchor?: { rowIndex: number; origIndex?: number; colField: string; pinned?: boolean }, keep = false): void {
+// scroll is off for a search that runs again because the rows changed under
+// it. That one keeps the view where the user left it instead of jumping to the
+// match.
+function execFind(anchor?: { rowIndex: number; origIndex?: number; colField: string; pinned?: boolean }, keep = false, scroll = true): void {
     // A search that runs now makes a pending one pointless. Letting that one
     // fire later would throw away the position this one sets.
     if (debounceTimer !== null) clearTimeout(debounceTimer);
     debounceTimer = null;
-    if (!state.gridApi) return;
 
     const needle  = (document.getElementById('find-input') as HTMLInputElement).value;
     const cs      = isCaseSensitive();
@@ -103,6 +105,14 @@ function execFind(anchor?: { rowIndex: number; origIndex?: number; colField: str
     const prevMatches = state.findMatches;
     state.findMatches    = [];
     state.findMatchIndex = -1;
+
+    // No grid means no rows, for example after an outside change emptied the
+    // file. Nothing is left to find, and the counter has to say so rather than
+    // keep the count of rows that are gone.
+    if (!state.gridApi) {
+        countEl.textContent = needle ? '0 matches' : '';
+        return;
+    }
 
     if (!needle) {
         countEl.textContent = '';
@@ -172,7 +182,7 @@ function execFind(anchor?: { rowIndex: number; origIndex?: number; colField: str
 
     // A frozen row is on screen already.
     const active = state.findMatches[state.findMatchIndex];
-    if (active && !active.pinned) state.gridApi.ensureIndexVisible(active.rowIndex, 'middle');
+    if (scroll && active && !active.pinned) state.gridApi.ensureIndexVisible(active.rowIndex, 'middle');
 
     refreshRows([...prevMatches, ...state.findMatches]);
 }
@@ -192,6 +202,19 @@ export function refreshFindIfOpen(): void {
     if (document.getElementById('find-bar')?.classList.contains('hidden') ?? true) return;
     if (debounceTimer !== null) clearTimeout(debounceTimer);
     execFind(state.findMatches[state.findMatchIndex], true);
+}
+
+// Public: the grid calls this whenever its rows were built or swapped again
+// (an edit that inserts or deletes rows, undo, an outside change, a delimiter
+// switch, a page change, freezing a row, the header row switch). A match
+// remembers the row by where it sat on screen, so after such a change the old
+// matches marked whatever cell had taken its place. The search runs again in
+// place: the active match stays active where it still exists and the view is
+// not moved, because the user did not ask to go anywhere.
+export function refreshFindInPlace(): void {
+    if (document.getElementById('find-bar')?.classList.contains('hidden') ?? true) return;
+    if (debounceTimer !== null) clearTimeout(debounceTimer);
+    execFind(state.findMatches[state.findMatchIndex], true, false);
 }
 
 // ── navigation ────────────────────────────────────────────────────────────────

@@ -618,7 +618,11 @@ export function setupDeleteRowCol(): void {
         // row-index attribute — flag them so the menu resolves the right node.
         const isPinnedRow = !!agRow?.closest('.ag-floating-top');
         const riStr   = agRow?.getAttribute('row-index');
-        const rowIndex = riStr != null ? parseInt(riStr, 10) : null;
+        // A frozen row carries "t-0", "t-1" and so on. Read as a number that
+        // was NaN, the menu found no row and Copy put an empty string on the
+        // clipboard.
+        const riNum    = riStr != null ? parseInt(riStr.replace(/^t-/, ''), 10) : NaN;
+        const rowIndex = isNaN(riNum) ? null : riNum;
 
         // For a pinned (frozen) row, resolve which row it is independently of AG
         // Grid's pinned-row index scheme: the '#' gutter cell renders a pin icon +

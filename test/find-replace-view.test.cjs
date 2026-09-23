@@ -432,4 +432,76 @@ runSuite('find and replace (browser)', [
             t.check(t.lastEdit() === 'k,v\\nQ,1\\nx,2\\nQ,3\\n', 'the next Replace takes that row (' + JSON.stringify(t.lastEdit()) + ')');
         `),
     },
+    {
+        // The marks were tied to where a row sat on screen. A sort moved the
+        // rows and left the marks on the cells that took their place.
+        name: 'a sort while the bar is open moves the marks with the rows',
+        csv: 'k,v\nc,x\na,x\nb,y',
+        steps: steps(`
+            await t.init(csv);
+            await find(t, 'x', '');
+            t.check(count() === '1 / 2', 'two matches (' + count() + ')');
+            t.header(0).querySelector('.ag-header-cell-label').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(400);
+            t.check(col(t, 0, 3) === 'a,b,c', 'sorted by k (' + col(t, 0, 3) + ')');
+            t.check(marks(t.cell(0, 1)) !== 'none' && marks(t.cell(1, 1)) === 'none' && marks(t.cell(2, 1)) !== 'none',
+                'the x cells are marked, the y cell is not (' + [0, 1, 2].map(r => marks(t.cell(r, 1))).join(',') + ')');
+            const active = () => [0, 1, 2].filter(r => marks(t.cell(r, 1)) === 'active').join(',');
+            const first = active();
+            await press(t, 'find-next');
+            const second = active();
+            t.check(first !== second && [first, second].sort().join('|') === '0|2',
+                'Next goes from one x to the other in the new order (' + first + ' then ' + second + ')');
+        `),
+    },
+    {
+        // The counter kept counting a match the filter had just hidden.
+        name: 'a filter while the bar is open counts only the rows it shows',
+        csv: 'k,v\nc,x\na,x\nb,y',
+        steps: steps(`
+            await t.init(csv);
+            await find(t, 'x', '');
+            t.check(count() === '1 / 2', 'two matches (' + count() + ')');
+            t.click(t.header(0).querySelector('.ag-header-cell-filter-button, .ag-header-cell-menu-button'));
+            await t.wait(300);
+            const row = [...document.querySelectorAll('.csv-filter-value-row')].find(r => r.textContent === 'a');
+            const cb = row.querySelector('input');
+            cb.checked = false;
+            cb.dispatchEvent(new Event('change'));
+            await t.wait(300);
+            document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+            await t.wait(300);
+            t.check(count() === '1 / 1', 'the hidden row is no longer counted (' + count() + ')');
+        `),
+    },
+    {
+        name: 'freezing a row while the bar is open moves the marks with the rows',
+        csv: 'k,v\nb,1\nx,2\nb,3\n',
+        steps: steps(`
+            await t.init(csv);
+            await find(t, 'b', '');
+            t.check(count() === '1 / 2', 'two matches (' + count() + ')');
+            await freezeRow(t, 1);
+            t.check(!!frozen(0) && frozen(0).textContent === 'x', 'the x row is frozen');
+            t.check(marks(frozen(0)) === 'none' && marks(t.cell(0, 0)) !== 'none' && marks(t.cell(1, 0)) !== 'none',
+                'both b rows below it are marked and the frozen x row is not ('
+                + [marks(frozen(0)), marks(t.cell(0, 0)), marks(t.cell(1, 0))].join(',') + ')');
+        `),
+    },
+    {
+        // With no rows left there is no grid to search, and the search used to
+        // stop before it touched the counter.
+        name: 'an outside change that empties the file',
+        csv: 'k,v\nb,1',
+        steps: steps(`
+            await t.init(csv);
+            await find(t, 'b', 'Q');
+            t.check(count() === '1 / 1', 'one match (' + count() + ')');
+            window.postMessage({ type: 'update', text: '', delimiter: ',' }, '*');
+            await t.wait(500);
+            t.check(count() === '0 matches', 'the counter says nothing is left (' + JSON.stringify(count()) + ')');
+            await press(t, 'replace-all');
+            t.check(t.sent('edit').length === 0, 'Replace All writes nothing (' + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
 ]);

@@ -1,6 +1,6 @@
 import { state } from '../state';
 import { buildGrid } from '../grid/builder';
-import { readText, refreshFindInPlace } from '../messaging';
+import { readText } from '../messaging';
 import { frozenRowPositions, reanchorFrozenRows } from './freeze-rows';
 import { closeAllPopups } from './popups';
 import { resetDuplicatesState } from './duplicates';
@@ -48,10 +48,6 @@ export function setupDelimiterBadge(): void {
             // nothing, so notifyChange, which ends the view after every edit,
             // never runs here.
             resetDuplicatesState();
-            // The find matches were found in the columns as they were split
-            // before. Replace on one of them changed nothing and still sent
-            // the file.
-            refreshFindInPlace();
         });
     });
 

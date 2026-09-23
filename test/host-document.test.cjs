@@ -40,6 +40,9 @@ let quickPickChoice = null;
 let fakeSize = null;
 // The next write fails the way a file Excel holds open does on Windows.
 let failNextWrite = false;
+// Runs inside the next write, before it lands or fails, so a test can make
+// something happen while a save is still on its way to the disk.
+let duringNextWrite = null;
 
 class EventEmitter {
     constructor() { this.listeners = []; this.event = l => { this.listeners.push(l); return { dispose() {} }; }; }
@@ -62,6 +65,11 @@ const vscodeStub = {
             stat: async uri => ({ size: fakeSize ?? fs.statSync(uri.fsPath).size }),
             readFile: async uri => new Uint8Array(fs.readFileSync(uri.fsPath)),
             writeFile: async (uri, bytes) => {
+                if (duringNextWrite) {
+                    const during = duringNextWrite;
+                    duringNextWrite = null;
+                    await during();
+                }
                 if (failNextWrite) {
                     failNextWrite = false;
                     throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' });
@@ -134,6 +142,7 @@ async function test(name, fn) {
     fakeSize = null;
     quickPickChoice = null;
     failNextWrite = false;
+    duringNextWrite = null;
     openWithFails = false;
     group.tabs.length = 0;
     group.activeTab = null;
@@ -415,6 +424,42 @@ async function main() {
         assert.strictEqual(t.doc.content, 'h\nMY EDIT\n', 'the outside change replaced the unsaved edit');
         assert.strictEqual(t.updates().length, 0, 'the grid was reloaded over the unsaved edit');
         assert.strictEqual(warnings.length, 1, 'the user was not told the file changed on disk');
+    });
+
+    await test('an outside change while a failing save is on its way keeps the edits', async () => {
+        // The save used to record its text as the disk's before the write. An
+        // outside change arriving meanwhile then found nothing unsaved and
+        // loaded over the edits, and the failed write could not bring them back.
+        const p = file('locked-race.csv', 'h\n1\n');
+        const t = await open(p);
+        await t.edit('h\nMY EDIT\n');
+        failNextWrite = true;
+        duringNextWrite = async () => {
+            fs.writeFileSync(p, 'h\nEXCEL\n');
+            await t.fireWatcher();
+        };
+        await assert.rejects(t.save(), /EBUSY/);
+        assert.strictEqual(t.doc.content, 'h\nMY EDIT\n', 'the outside change replaced the unsaved edit');
+        assert.strictEqual(t.updates().length, 0, 'the grid was reloaded over the unsaved edit');
+        assert.strictEqual(warnings.length, 1, 'the user was not told the file changed on disk');
+        await t.fireWatcher();                          // a second event for the same change
+        assert.strictEqual(t.doc.content, 'h\nMY EDIT\n');
+        assert.strictEqual(warnings.length, 1, 'the same change was reported twice');
+    });
+
+    await test('the echo of a save still being written is not taken for an outside change', async () => {
+        const p = file('slow-save.csv', 'h\n1\n');
+        const t = await open(p);
+        await t.edit('h\nmine\n');
+        duringNextWrite = async () => {
+            fs.writeFileSync(p, 'h\nmine\n');         // the bytes land, the call has not returned yet
+            await t.fireWatcher();
+        };
+        await t.save();
+        assert.strictEqual(t.updates().length, 0, 'the grid reloaded on its own save');
+        assert.strictEqual(warnings.length, 0, 'its own save was reported as an outside change');
+        await t.fireWatcher();                          // the echo once more, after the save
+        assert.strictEqual(t.updates().length, 0);
     });
 
     await test('a change event after a failed save leaves the edits alone', async () => {

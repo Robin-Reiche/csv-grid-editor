@@ -6,7 +6,6 @@ import { updatePreviewBanner } from '../messaging';
 import { updatePageBanner } from './pagination';
 import { clearRangeSelection } from './range-select';
 import { resetDuplicatesState } from './duplicates';
-import { refreshFindIfOpen } from './find-replace';
 import { frozenRowPositions, reanchorFrozenRows } from './freeze-rows';
 
 // ── First row is the header ──────────────────────────────────────────────────
@@ -98,8 +97,8 @@ export function setFirstRowIsHeader(on: boolean): void {
     // Find searches again below. Its current match should stay on the cell it
     // was on, which find looks up by the row's place in state.data.
     for (const m of state.findMatches) m.origIndex += shift;
+    // buildGrid searches again, without moving the view.
     buildGrid();
-    refreshFindIfOpen();
     updatePreviewBanner();
     updatePageBanner();
     vscodeApi.postMessage({ type: 'headerRowChanged', value: on });

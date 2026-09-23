@@ -8,7 +8,7 @@ import { ControlCharCellRenderer, shownName, shownValue } from './control-char-c
 import { MultilineCellEditor } from './multiline-cell-editor';
 import { refreshProfileIfOpen } from '../features/profile';
 import { pushUndo, notifyChange, updateButtons } from '../features/undo-redo';
-import { getFindCellClassRules, refreshFindIfOpen } from '../features/find-replace';
+import { getFindCellClassRules, refreshFindIfOpen, refreshFindInPlace } from '../features/find-replace';
 import { getCellMarkClassRules } from '../features/cell-marks';
 import { attachHeaderContextMenus } from '../features/freeze-columns';
 import { applyZoom } from '../features/zoom';
@@ -173,6 +173,8 @@ export function buildGrid(): void {
         updateCountsDisplay();
         syncClearFiltersButton();
         updateButtons();
+        // Nothing is left to find. The counter must not keep the old count.
+        refreshFindInPlace();
         return;
     }
 
@@ -417,6 +419,9 @@ export function buildGrid(): void {
             // which AG Grid won't re-evaluate on its own after a reorder (the
             // row data is unchanged). Force it so the numbers renumber at once.
             state.gridApi?.refreshCells({ columns: ['row-index'], force: true });
+            // The find matches are in display order, so Next went through them
+            // in the order from before the sort.
+            refreshFindInPlace();
         },
 
         onColumnVisible: () => refreshFindIfOpen(),
@@ -427,6 +432,8 @@ export function buildGrid(): void {
             syncClearFiltersButton();
 
             updateCountsDisplay();
+            // A row the filter now hides is not on screen, so it is no match.
+            refreshFindInPlace();
         },
 
         onCellValueChanged: (event: any) => {
@@ -472,6 +479,10 @@ export function buildGrid(): void {
     updateCountsDisplay();
     syncClearFiltersButton();
     refreshProfileIfOpen(); // column add/delete changes the column set the profile shows
+    // New rows and maybe new columns, so the find matches point at the wrong
+    // cells. This covers every rebuild: a column insert or delete, a delimiter
+    // switch, a page change, the header row switch.
+    refreshFindInPlace();
 
     setTimeout(attachHeaderContextMenus, 80);
 }

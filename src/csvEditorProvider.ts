@@ -119,6 +119,11 @@ class CsvDocument implements vscode.CustomDocument {
     // puts them back. Excel reads UTF-8 without the mark as ANSI, so a save
     // that dropped it turned every umlaut into mojibake.
     public encoding: FileEncoding = 'utf8';
+    // A save that is still being written: its text and the encoding it goes
+    // out in. The watcher can report the write before the call returns, and
+    // that event is ours. diskText only takes the text once the write has
+    // landed, because a write that fails leaves the old file on disk.
+    public pendingSave: { text: string; encoding: FileEncoding } | null = null;
     // Every editor that shows this document. Usually one, but VS Code opens a
     // second editor on the same document for the modified side of a Source
     // Control diff while the grid tab stays open.
@@ -597,6 +602,14 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             // changes it leaves the text as it was, but the next save has to
             // write the file the way it is now.
             if (holds(document.content)) return false;
+            // The echo of a save that is still being written, which the
+            // watcher can report before the write call returns. By then the
+            // grid may have moved on to a newer edit.
+            const pending = document.pendingSave;
+            if (fromWatcher && pending) {
+                const bytes = encodeFile(pending.text, pending.encoding);
+                if (bytes && Buffer.compare(bytes, raw) === 0) return false;
+            }
             // The same echo, arriving late. The watcher reports a save only
             // after the write. With auto-save on the next edit can land in
             // between: the editor has moved on, the disk still holds the
@@ -682,24 +695,26 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             vscode.window.showWarningMessage('Cannot save in preview mode. Open the full file to edit.');
             return;
         }
-        // Recorded before the write, so the watcher event it causes is known as
-        // ours however late it arrives (see reload). A write that fails (the
-        // file is locked or read-only) puts it back. The disk still holds the
-        // old text. Taking the edits for it let the next outside change or
-        // change event replace them without a warning. The encoding goes with
-        // the text, since the watcher compares both.
+        // The text goes out as a pending save first, so a watcher event that
+        // arrives while the write is still running is known as ours (see
+        // reload). It becomes the disk's text only once the write has landed.
+        // Taking it for the disk's text up front had two ways to lose edits:
+        // an outside change during the write found nothing unsaved and loaded
+        // silently over them, and a write that failed (the file locked or
+        // read-only) left the provider believing the edits were on disk. The
+        // encoding goes with the text, since the watcher compares both.
         const { bytes, encoding } = document.encode();
-        const disk = { text: document.diskText, encoding: document.encoding };
-        document.diskText = document.content;
-        document.encoding = encoding;
+        const before = document.encoding;
+        const pending = { text: document.content, encoding };
+        document.pendingSave = pending;
         try {
             await vscode.workspace.fs.writeFile(document.uri, bytes);
-        } catch (e) {
-            document.diskText = disk.text;
-            document.encoding = disk.encoding;
-            throw e;
+        } finally {
+            if (document.pendingSave === pending) document.pendingSave = null;
         }
-        if (encoding !== disk.encoding) warnSavedAsUtf8(document.uri);
+        document.diskText = pending.text;
+        document.encoding = encoding;
+        if (encoding !== before) warnSavedAsUtf8(document.uri);
     }
 
     async saveCustomDocumentAs(document: CsvDocument, destination: vscode.Uri, _cancellation: vscode.CancellationToken): Promise<void> {

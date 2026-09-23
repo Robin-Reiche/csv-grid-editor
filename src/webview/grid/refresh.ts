@@ -1,6 +1,7 @@
 import { state, getNumCols, emptyTableKind, relabelVirtualHeader } from '../state';
 import { buildGrid, makeComparator } from './builder';
 import { recomputeColTypes, TYPE_LABELS } from './column-type';
+import { refreshFindInPlace } from '../features/find-replace';
 import { shownValue } from './control-char-cell';
 import { updateColumnsButton } from '../features/column-chooser';
 
@@ -270,6 +271,8 @@ export function refreshGrid(): void {
     // The header row is data like any other. An outside change or an undo can
     // rename a column without changing how many there are.
     syncColumnHeaders();
+    // The rows moved, so the find matches point at the wrong ones.
+    refreshFindInPlace();
 }
 
 // Recomputes the "<n> rows × <n> columns" toolbar text and the "<n> records"

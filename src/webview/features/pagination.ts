@@ -1,7 +1,7 @@
 import { state } from '../state';
 import { buildGrid } from '../grid/builder';
 import { hideLoader } from '../utils/loader';
-import { readText, refreshFindInPlace } from '../messaging';
+import { readText } from '../messaging';
 import { rowsInFile } from './header-row';
 
 export function requestPage(pageNum: number): void {
@@ -45,8 +45,6 @@ export function handlePageData(msg: { pageNumber: number; totalPages: number; te
     readText(msg.text);
     buildGrid();
     hideLoader();
-    // Another page, so the find matches of the last one are gone.
-    refreshFindInPlace();
 }
 
 export function setupPagination(): void {
