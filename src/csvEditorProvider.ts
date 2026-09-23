@@ -154,6 +154,10 @@ class CsvDocument implements vscode.CustomDocument {
     // The one watcher on the file while any editor is open, see
     // resolveCustomEditor. A preview has none.
     public watcher: vscode.FileSystemWatcher | undefined;
+    // The fingerprint of diskText in its encoding for the hot exit backup,
+    // kept with the two it was taken of. A backup follows every edit, so
+    // hashing a large file each time would add a pause to each of them.
+    public diskPrint: { text: string; encoding: FileEncoding; print: string } | undefined;
 
     constructor(
         public readonly uri: vscode.Uri,
@@ -444,10 +448,11 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             // git pull for one. Nothing watched it then. Taking the new file
             // for the one the edits were made on let the next save write
             // over the change without a word. The edits are kept and the
-            // user is told, the way the watcher does it.
+            // user is told, the way the watcher does it. A file that now
+            // holds the very edits has nothing to tell.
             if (disk !== undefined && fingerprint(onDisk.text, onDisk.encoding) !== disk) {
                 doc.encoding = onDisk.encoding;
-                this.warnChangedOnDisk(doc);
+                if (onDisk.text !== doc.content) this.warnChangedOnDisk(doc);
             }
         } catch {
             doc.diskText = '';
@@ -849,8 +854,13 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         const utf16 = document.encoding === 'utf16le' || document.encoding === 'utf16be';
         const bytes = utf16 ? Buffer.from(document.content, 'utf16le') : new TextEncoder().encode(document.content);
         await vscode.workspace.fs.writeFile(context.destination, bytes);
+        let known = document.diskPrint;
+        if (!known || known.text !== document.diskText || known.encoding !== document.encoding) {
+            known = { text: document.diskText, encoding: document.encoding, print: fingerprint(document.diskText, document.encoding) };
+            document.diskPrint = known;
+        }
         return {
-            id: backupId(context.destination, document.encoding, utf16, fingerprint(document.diskText, document.encoding)),
+            id: backupId(context.destination, document.encoding, utf16, known.print),
             delete: async () => {
                 try { await vscode.workspace.fs.delete(context.destination); } catch {}
             }

@@ -322,6 +322,17 @@ async function main() {
         assert.strictEqual(fs.readFileSync(p, 'utf8'), 'id,val\n1,MINE\n');
     });
 
+    await test('a restore says nothing when the file changed to the very edits', async () => {
+        const p = file('hot-same-edit.csv', 'id,val\n1,a\n');
+        const before = await open(p);
+        await before.edit('id,val\n1,SAME\n');
+        const backup = await before.backup(path.join(tmpDir, 'hot-same-edit.backup'));
+        before.close();
+        fs.writeFileSync(p, 'id,val\n1,SAME\n');      // a teammate made the same edit
+        await open(p, { backupId: backup.id });
+        assert.deepStrictEqual(warnings.map(w => w.msg), [], 'the file holds the edits, nothing of them was kept');
+    });
+
     // The disk the edits were made on is the one the document last knew:
     // the file as it was opened or an outside change it has since heard of.
     await test('a restore compares with the outside change the document already knew', async () => {
@@ -503,7 +514,7 @@ async function main() {
     // Only the Source Control diff shows the file, no grid tab of its own.
     // VS Code tells an extension nothing about such a tab: its input is
     // unknown. Reload from Disk loaded the file but left the diff marked
-    // unsaved, and the command refused to work there at all.
+    // unsaved. The command refused to work there at all.
     const diffOnly = async name => {
         const p = file(name, 'h\n1\n');
         const t = await open(p);
