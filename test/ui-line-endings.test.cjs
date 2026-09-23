@@ -152,6 +152,22 @@ runSuite('line endings (browser)', [
         `),
     },
     {
+        // The editor shows every break as LF. Enter on a value with a lone CR
+        // or with CRLF and LF mixed wrote it back with other breaks.
+        name: 'the editor opened and closed without a change',
+        csv: 'a,b\n"x\ry",2\n"x\r\ny\nz",4\n',
+        steps: steps(`
+            for (const row of [0, 1]) {
+                await t.focusCell(row, 0);
+                await t.pressEnter();
+                t.check(!!document.querySelector('#grid-container textarea'), 'the editor opens on row ' + row);
+                await t.pressEnter();
+                await t.wait(300);
+            }
+            t.check(t.sent('edit').length === 0, 'nothing is written (' + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
+    {
         // Deleting the only row leaves a CRLF file with no row break to read.
         // A delimiter switch reads the text again and fell back to LF, so the
         // next added row went into the file with LF.
