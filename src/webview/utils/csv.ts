@@ -7,6 +7,13 @@ export function trimPadding(s: string): string {
     return s.replace(/^[^\S\r\n]+|[^\S\r\n]+$/g, '');
 }
 
+// The characters the parser looks at, as char codes.
+const QUOTE = 34;
+const LF    = 10;
+const CR    = 13;
+const SPACE = 32;
+const TAB   = 9;
+
 // trimFields defaults to true for the callers that want clean values out of a
 // string, such as the tests. The grid itself reads files with it off: a value
 // is kept exactly as the file has it, spaces included, and the settings menu
@@ -17,30 +24,36 @@ export function trimPadding(s: string): string {
 // fromFile is set only by the callers that read a file. It decides one thing,
 // whether a last line of only spaces is dropped, see the end of the function.
 // Paste reads the clipboard through here too and leaves it off.
+//
+// Each value is cut out of the text with slice, in one piece wherever it can
+// be. Only an escaped "" or a skipped CR splits it into pieces that are joined.
+// Built one character at a time, a value stayed a chain with a link per
+// character inside V8. Nothing flattened it once the grid stopped trimming what
+// it reads. A file with a long text column then took 5 to 14 times the memory
+// and a 227 MB file crashed the webview before it showed anything.
 export function parseCsv(text: string, delimiter: string, trimFields: boolean = true, fromFile: boolean = false): CsvRow[] {
     const rows: CsvRow[] = [];
+    const n = text.length;
+    // The delimiter is one character. Compared as a char code, a longer one
+    // matches nothing, the way it matched nothing as a string.
+    const delim = delimiter.length === 1 ? delimiter.charCodeAt(0) : -1;
     let row: string[] = [];
+    // The value so far is `field` followed by the text from `start` up to
+    // where the scan is. `field` holds the pieces a quoted section or a
+    // skipped CR has already cut off. It stays empty for most values.
     let field = '';
-    let inQuotes = false;
+    let start = 0;
+    // Whether the value so far holds only spaces and tabs, which is what
+    // decides whether a quote opens a quoted section.
+    let padOnly = true;
     // Whether a quoted field has turned up on the current line. Only the last
     // line needs it, see the blank line rule below.
     let lineQuoted = false;
     const finalize = (s: string) => trimFields ? trimPadding(s) : s;
 
-    for (let i = 0; i < text.length; i++) {
-        const ch = text[i];
-        if (inQuotes) {
-            if (ch === '"') {
-                if (i + 1 < text.length && text[i + 1] === '"') {
-                    field += '"';
-                    i++;
-                } else {
-                    inQuotes = false;
-                }
-            } else {
-                field += ch;
-            }
-        } else if (ch === '"' && /^[ \t]*$/.test(field)) {
+    for (let i = 0; i < n; i++) {
+        const ch = text.charCodeAt(i);
+        if (ch === QUOTE && padOnly) {
             // A quote opens a quoted field only as the field's first character,
             // spaces and tabs before it aside. Further in it is part of the
             // value, as in 5" disk: read as an opening quote it swallowed the
@@ -48,29 +61,54 @@ export function parseCsv(text: string, delimiter: string, trimFields: boolean = 
             // into one cell. Excel and Python's csv read it the same way. The
             // padding is allowed because hand-written files put a space after
             // the comma, as in name, "Smith, John". That value has always
-            // been read as one quoted field. field is also empty right after a
-            // quoted "" closes, but a quote there would have made it an escaped
-            // "" inside the field, so this cannot reopen one by mistake.
+            // been read as one quoted field. The value is also blank right
+            // after a quoted "" closes, but a quote there would have made it an
+            // escaped "" inside the field, so this cannot reopen one by mistake.
             // largeFileReader.ts makes the same call byte by byte and has to
             // stay in step with this one, as does detectLineFormat below.
-            inQuotes = true;
             lineQuoted = true;
-        } else if (ch === delimiter) {
-            row.push(finalize(field));
+            // The padding in front stays part of the value.
+            field += text.slice(start, i);
+            // Inside quotes "" is a literal quote and a single " closes the
+            // section. Without a closing quote the section runs to the end.
+            let close = -1;
+            let escaped = false;
+            for (let from = i + 1; ;) {
+                const q = text.indexOf('"', from);
+                if (q < 0) break;
+                if (text.charCodeAt(q + 1) === QUOTE) { escaped = true; from = q + 2; continue; }
+                close = q;
+                break;
+            }
+            let quoted = close < 0 ? text.slice(i + 1) : text.slice(i + 1, close);
+            if (escaped) quoted = quoted.replace(/""/g, '"');
+            field += quoted;
+            if (!/^[ \t]*$/.test(quoted)) padOnly = false;
+            if (close < 0) { start = n; break; }
+            i = close;
+            start = close + 1;
+        } else if (ch === delim) {
+            row.push(finalize(field + text.slice(start, i)));
             field = '';
-        } else if (ch === '\r') {
-            // skip
-        } else if (ch === '\n') {
-            row.push(finalize(field));
-            if (row.length > 0) rows.push(row);
+            start = i + 1;
+            padOnly = true;
+        } else if (ch === CR) {
+            // A CR outside quotes is skipped.
+            field += text.slice(start, i);
+            start = i + 1;
+        } else if (ch === LF) {
+            row.push(finalize(field + text.slice(start, i)));
+            rows.push(row);
             row = [];
             field = '';
+            start = i + 1;
+            padOnly = true;
             lineQuoted = false;
-        } else {
-            field += ch;
+        } else if (padOnly && ch !== SPACE && ch !== TAB) {
+            padOnly = false;
         }
     }
-    row.push(finalize(field));
+    row.push(finalize(field + text.slice(start)));
     // A last line with nothing in it is a trailing blank line, not a row, and is
     // dropped. Except when it is the only line and holds a delimiter: that is a
     // header of unnamed columns, ",,,," is five of them. Dropping it opened the
