@@ -53,12 +53,18 @@ export function createCombinedFilter(colType: ColType): any {
         _keyedTrimmed = state.settings.trimDisplay;
         // The rowsVersion the list was made at.
         _builtAt = -1;
+        // Whether every value is ticked, null until asked. See _everyTicked.
+        _allTicked: boolean | null = null;
+        // The last key typed into a condition, waiting for the typing to
+        // pause. See _applyTyped.
+        _typing: ReturnType<typeof setTimeout> | null = null;
 
         init(params: any) {
             this.params = params;
             this._buildValueList();
             this.checkedValues = new Set(this.allValues);
             if (this.hasBlank) this.checkedValues.add('__blank__');
+            this._ticksChanged();
             this.eGui = document.createElement('div');
             this.eGui.className = 'csv-filter-panel';
             this._render();
@@ -83,6 +89,39 @@ export function createCombinedFilter(colType: ColType): any {
             }
             this.allValues = arr.slice(0, 2000);
             this.truncated = arr.length > 2000;
+            this._ticksChanged();
+        }
+
+        // Whether every value is ticked, the blank one too. The ticks then let
+        // every row through, which is how the filter starts and how it stays
+        // while a condition is typed. doesFilterPass asks this for every row.
+        // Worked out there, it went through all values once per row, which
+        // froze the grid for about a second per key typed on 100,000 rows. So
+        // it is kept. Every change to the list or to the ticks drops it.
+        _everyTicked(): boolean {
+            if (this._allTicked === null) {
+                this._allTicked = this.allValues.every(v => this.checkedValues.has(v))
+                    && (!this.hasBlank || this.checkedValues.has('__blank__'));
+            }
+            return this._allTicked;
+        }
+
+        _ticksChanged() {
+            this._allTicked = null;
+        }
+
+        // Applies what is typed into a condition once the typing pauses. Each
+        // key used to run the filter over every row and draw the value list
+        // again. The condition holds the typed text at once, so the key typed
+        // last is the one that applies, also when the panel is closed before
+        // the pause is over.
+        _applyTyped() {
+            if (this._typing !== null) clearTimeout(this._typing);
+            this._typing = setTimeout(() => {
+                this._typing = null;
+                this._renderValuesList?.();
+                this.params.filterChangedCallback();
+            }, 200);
         }
 
         _conditionOptions() {
@@ -146,8 +185,7 @@ export function createCombinedFilter(colType: ColType): any {
             if (!rekey && !force) return;
             const field = this.params.column.getColId();
             const known = new Set(this.allValues);
-            const allTicked = this.allValues.every(v => this.checkedValues.has(v))
-                && (!this.hasBlank || this.checkedValues.has('__blank__'));
+            const allTicked = this._everyTicked();
             const wasTicked = (oldKey: string) =>
                 oldKey === '' ? (this.hasBlank ? this.checkedValues.has('__blank__') : allTicked)
                     : known.has(oldKey) ? this.checkedValues.has(oldKey) : allTicked;
@@ -161,6 +199,7 @@ export function createCombinedFilter(colType: ColType): any {
             });
             this._buildValueList();
             this.checkedValues = checked;
+            this._ticksChanged();
             // The panel is kept between openings, so its list is redrawn here
             // rather than showing the old keys the next time it opens.
             this._renderValuesList?.();
@@ -318,8 +357,7 @@ export function createCombinedFilter(colType: ColType): any {
                         inp.placeholder = isNumeric ? 'Value\u2026' : 'Filter\u2026';
                         inp.addEventListener('input', () => {
                             cond.value = inp.value;
-                            this._renderValuesList?.();
-                            this.params.filterChangedCallback();
+                            this._applyTyped();
                         });
                         row.appendChild(inp);
                     }
@@ -438,6 +476,7 @@ export function createCombinedFilter(colType: ColType): any {
                     cb.addEventListener('change', () => {
                         if (cb.checked) this.checkedValues.add(item.value);
                         else this.checkedValues.delete(item.value);
+                        this._ticksChanged();
                         syncMaster();
                         this.params.filterChangedCallback();
                     });
@@ -465,6 +504,7 @@ export function createCombinedFilter(colType: ColType): any {
                     if (check) this.checkedValues.add(v);
                     else this.checkedValues.delete(v);
                 }
+                this._ticksChanged();
                 renderList();
                 this.params.filterChangedCallback();
             });
@@ -488,8 +528,7 @@ export function createCombinedFilter(colType: ColType): any {
         isFilterActive() {
             this._syncKeys();
             if (this._hasAnyActiveCondition()) return true;
-            const allChecked = this.allValues.every(v => this.checkedValues.has(v));
-            return this.hasBlank ? !(allChecked && this.checkedValues.has('__blank__')) : !allChecked;
+            return !this._everyTicked();
         }
 
         doesFilterPass(params: any) {
@@ -499,9 +538,7 @@ export function createCombinedFilter(colType: ColType): any {
             const isBlank = valStr === '';
 
             // 1. Checkbox filter
-            const allChecked = this.allValues.every(v => this.checkedValues.has(v)) &&
-                (!this.hasBlank || this.checkedValues.has('__blank__'));
-            if (!allChecked) {
+            if (!this._everyTicked()) {
                 const key = isBlank ? '__blank__' : valStr;
                 if (!this.checkedValues.has(key)) return false;
             }
@@ -541,9 +578,14 @@ export function createCombinedFilter(colType: ColType): any {
                 if (this.conditions.length === 0) this.conditions = [{ type: 'none', value: '', join: 'and' }];
                 this.checkedValues = new Set(model.checkedValues || this.allValues);
             }
+            this._ticksChanged();
             this._render();
         }
 
-        destroy() {}
+        // A grid built again makes its filters afresh, so a key still waiting
+        // has nothing left to apply to.
+        destroy() {
+            if (this._typing !== null) clearTimeout(this._typing);
+        }
     };
 }
