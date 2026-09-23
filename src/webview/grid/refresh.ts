@@ -2,6 +2,7 @@ import { state, getNumCols, emptyTableKind, relabelVirtualHeader } from '../stat
 import { buildGrid, makeComparator } from './builder';
 import { recomputeColTypes, TYPE_LABELS } from './column-type';
 import { shownValue } from './control-char-cell';
+import { updateColumnsButton } from '../features/column-chooser';
 
 // Splits a freshly-built rowData array into the scrollable body and the frozen
 // reference rows (AG Grid renders the latter in a fixed pinned-top band). Frozen
@@ -107,8 +108,29 @@ export function focusCell(rowIndex: number | null, colId: string | null): void {
         if (!document.hasFocus()) return;
         const row = clampRow(rowIndex, state.gridApi.getDisplayedRowCount());
         if (row === null) return; // nothing but the header left
-        try { state.gridApi.setFocusedCell(row, colId); } catch {}
+        const col = shownColNear(colId);
+        if (col === null) return; // every column is hidden
+        try { state.gridApi.setFocusedCell(row, col); } catch {}
     });
+}
+
+// The column a focus restore lands on. One hidden in the column chooser since
+// its cell had the focus cannot take it back. setFocusedCell on it does
+// nothing, so the keys stayed on the checkbox that hid it. The nearest shown
+// column stands in, the one to its right first, since that one moved into its
+// place on screen. A column the grid does not know is passed on unchanged.
+function shownColNear(colId: string): string | null {
+    const api = state.gridApi;
+    const col = api.getColumn(colId);
+    if (!col || col.isVisible()) return colId;
+    const cols = (api.getAllGridColumns() as any[]).filter(c => String(c.getColId()).indexOf('col_') === 0);
+    const at = cols.indexOf(col);
+    for (let d = 1; d < cols.length; d++) {
+        for (const c of [cols[at + d], cols[at - d]]) {
+            if (c && c.isVisible()) return c.getColId();
+        }
+    }
+    return null;
 }
 
 // The row a focus restore actually lands on, given how many rows are left.
@@ -255,6 +277,12 @@ export function refreshGrid(): void {
 // buildGrid() and refreshGrid() (and the filter handler) so the counts stay live
 // across every structural change, not just full rebuilds.
 export function updateCountsDisplay(): void {
+    // The column count is shown here. Every change to the column set passes
+    // through here, the ones that drop hidden columns included (insert,
+    // delete, a delimiter switch, an outside change with fewer columns). None
+    // of those went past the Columns button, which stayed marked with nothing
+    // hidden.
+    updateColumnsButton();
     const infoEl   = document.getElementById('info');
     const statusEl = document.getElementById('status');
     if (!infoEl && !statusEl) return;

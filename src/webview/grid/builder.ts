@@ -4,7 +4,7 @@ import { NoRowsOverlay, renderNoColumns } from '../features/empty-state';
 import { createCombinedFilter, markValueListsStale } from './filter';
 import { dataRowIndexForNode } from './row-mapping';
 import { partitionFrozenRows, updateCountsDisplay } from './refresh';
-import { ControlCharCellRenderer, shownValue } from './control-char-cell';
+import { ControlCharCellRenderer, shownName, shownValue } from './control-char-cell';
 import { MultilineCellEditor } from './multiline-cell-editor';
 import { refreshProfileIfOpen } from '../features/profile';
 import { pushUndo, notifyChange, updateButtons } from '../features/undo-redo';
@@ -220,6 +220,9 @@ export function buildGrid(): void {
         state.colTypes[c] = colType;
         const colDef: any = {
             headerName:   shownValue(headerRow[c] ?? ''),
+            // Drawn on one line, a break in the name as a space. The name
+            // itself keeps the break (grid/control-char-cell.ts).
+            headerValueGetter: (p: any) => shownName(String(p.colDef.headerName ?? '')),
             field:        'col_' + c,
             headerClass:  'col-type-' + colType,
             headerTooltip: TYPE_LABELS[colType] ?? 'Text',

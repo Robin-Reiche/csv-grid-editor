@@ -17,6 +17,56 @@ const CITIES = [
     'Paris,true,1500,',
 ].join('\n');
 
+// Padding in a header, before a value, after a value and in front of a value
+// with a line break in it. Two headers have a line break of their own. In the
+// last one the first line is the wider one. The last column holds a value
+// with a tab inside and one with a space in the same place.
+const PADDED = [
+    '    city,n,"  top\nbottom","Total\nEUR"',
+    '     Berlin,1,a,a\tb',
+    'Berlin,2,b,a b',
+    'Berlin     ,3,c,x',
+    '"  Ber\nlin",4,d,x',
+].join('\n');
+
+// Where the browser draws text, which is what the spaces switch is about. A
+// value can hold its spaces while the browser draws them zero wide, so reading
+// textContent alone proves nothing. Runs in the page.
+const DRAWN = `
+    // x of the first "letter" inside el, from el's left edge. null if absent.
+    t.xOf = (el, letter) => {
+        const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+        for (let n = w.nextNode(); n; n = w.nextNode()) {
+            const i = n.data.indexOf(letter);
+            if (i < 0) continue;
+            const r = document.createRange();
+            r.setStart(n, i);
+            r.setEnd(n, i + 1);
+            return r.getBoundingClientRect().left - el.getBoundingClientRect().left;
+        }
+        return null;
+    };
+    // y of the first "letter" inside el, from el's top edge.
+    t.yOf = (el, letter) => {
+        const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+        for (let n = w.nextNode(); n; n = w.nextNode()) {
+            const i = n.data.indexOf(letter);
+            if (i < 0) continue;
+            const r = document.createRange();
+            r.setStart(n, i);
+            r.setEnd(n, i + 1);
+            return r.getBoundingClientRect().top - el.getBoundingClientRect().top;
+        }
+        return null;
+    };
+    // How wide the text inside el is drawn, spaces included where they show.
+    t.drawnWidth = el => {
+        const r = document.createRange();
+        r.selectNodeContents(el);
+        return r.getBoundingClientRect().width;
+    };
+`;
+
 const BOOLEANS = [
     'name,active,sub,flag,tf,sw,num,note',
     'a,true,Yes,Y,T,ON,1,alpha',
@@ -128,6 +178,270 @@ runSuite('settings menu (browser)', [
 
             t.check(t.sent('edit').length === 0, 'no switch wrote anything to the file ('
                 + t.sent('edit').length + ' edits)');
+        },
+    },
+    {
+        name: 'spaces shown are drawn',
+        csv: PADDED,
+        settings: { trimDisplay: false },
+        // Wrap cell text stays off, its default. A line that does not wrap
+        // drops the spaces at its start and end, so the cells held their
+        // padding and drew it zero wide.
+        steps: `async (t, csv) => {
+            ${DRAWN}
+            await t.init(csv);
+            const padded = t.xOf(t.cell(0, 0), 'B'), plain = t.xOf(t.cell(1, 0), 'B');
+            t.check(padded - plain > 10, 'five spaces push the word to the right (B at ' + padded + ' against ' + plain + ')');
+            const trailing = t.drawnWidth(t.cell(2, 0)), bare = t.drawnWidth(t.cell(1, 0));
+            t.check(trailing - bare > 10, 'spaces after a value take room too (' + trailing + ' against ' + bare + ')');
+
+            const head = t.header(0).querySelector('.ag-header-cell-text');
+            t.check(t.xOf(head, 'c') > 8, 'the header draws its spaces (c at ' + t.xOf(head, 'c') + ')');
+            // A line break in a name is drawn as a space, as it is with the
+            // switch on. Kept as a break, the header had room for the first
+            // line only. Cut to it with an ellipsis, a name whose first line
+            // was its widest lost letters of that line in any column width.
+            const multi = t.header(2).querySelector('.ag-header-cell-text');
+            const size = parseFloat(getComputedStyle(multi).fontSize);
+            t.check(multi.getBoundingClientRect().height < size * 1.8 && t.xOf(multi, 't') > 4
+                && Math.abs(t.yOf(multi, 'b') - t.yOf(multi, 't')) < 2 && t.xOf(multi, 'b') > t.xOf(multi, 't'),
+                'a header with a line break reads on one line and shows its spaces ('
+                + multi.getBoundingClientRect().height + 'px high, t at ' + t.xOf(multi, 't') + ', b at '
+                + t.xOf(multi, 'b') + ' and y ' + t.yOf(multi, 'b') + ')');
+            const total = t.header(3).querySelector('.ag-header-cell-text');
+            t.check(Math.abs(t.yOf(total, 'R') - t.yOf(total, 'T')) < 2 && total.scrollWidth <= total.clientWidth,
+                'a name whose first line is its widest reads in full (' + JSON.stringify(total.textContent) + ', '
+                + total.scrollWidth + 'px of text in ' + total.clientWidth + ')');
+            const plainName = () => t.header(1).querySelector('.ag-header-cell-text').getBoundingClientRect();
+            const shownBox = plainName();
+
+            const cell = t.cell(3, 0);
+            t.check(Math.abs(t.yOf(cell, 'l') - t.yOf(cell, 'B')) < 2 && t.xOf(cell, 'B') - plain > 4,
+                'a value with a line break stays on one line with its spaces (B at y ' + t.yOf(cell, 'B')
+                + ', l at y ' + t.yOf(cell, 'l') + ')');
+            document.getElementById('btn-wraptext').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(400);
+            const wrapped = t.cell(3, 0);
+            t.check(t.yOf(wrapped, 'l') - t.yOf(wrapped, 'B') > 5, 'with Wrap cell text on the break is a real one ('
+                + t.yOf(wrapped, 'B') + ' and ' + t.yOf(wrapped, 'l') + ')');
+            document.getElementById('btn-wraptext').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(400);
+            t.check(Math.abs(t.yOf(t.cell(3, 0), 'l') - t.yOf(t.cell(3, 0), 'B')) < 2, 'and off again it is back on one line');
+            // The switch is about the spaces around a value. A tab inside one
+            // keeps the width of the one space it has with the switch on. It
+            // does not jump to a tab stop.
+            const tab = t.xOf(t.cell(0, 3), 'b'), space = t.xOf(t.cell(1, 3), 'b');
+            t.check(Math.abs(tab - space) < 3, 'a tab inside a value takes the room of a space (b at ' + tab + ' against ' + space + ')');
+
+            t.click(t.header(0).querySelector('.ag-header-cell-filter-button, .ag-header-cell-menu-button'));
+            await t.wait(300);
+            const labels = [...document.querySelectorAll('.csv-filter-value-label')];
+            const lab = text => labels.find(l => l.textContent === text);
+            t.check(!!lab('     Berlin') && !!lab('Berlin'), 'the value filter lists the padded value apart');
+            if (lab('     Berlin') && lab('Berlin')) {
+                t.check(t.drawnWidth(lab('     Berlin')) - t.drawnWidth(lab('Berlin')) > 10,
+                    'and draws it with its spaces, so the two do not look the same');
+            }
+            // A value with a line break shows its first line and an ellipsis.
+            // A label only as wide as that line had no room for the ellipsis.
+            // The browser dropped the word to make some.
+            const two = lab('  Ber\\nlin');
+            if (two) {
+                const r = document.createRange();
+                r.setStart(two.firstChild, 0);
+                r.setEnd(two.firstChild, 5);
+                const line = r.getBoundingClientRect().width;
+                t.check(two.clientWidth > line + 10 && t.yOf(two, 'B') < 4, 'a listed value with a line break keeps its first line in view ('
+                    + two.clientWidth + ' wide for a ' + line + ' line)');
+            } else {
+                t.check(false, 'the value filter lists the value with a line break');
+            }
+            document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+            await t.wait(200);
+
+            document.getElementById('btn-columns').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(200);
+            const name = [...document.querySelectorAll('.col-chooser-label')].find(l => l.textContent === '    city');
+            t.check(!!name && t.xOf(name, 'c') > 8, 'the column chooser draws the spaces of a name ('
+                + (name && t.xOf(name, 'c')) + ')');
+            const listed = [...document.querySelectorAll('.col-chooser-label')].find(l => l.textContent === 'Total EUR');
+            t.check(!!listed && Math.abs(t.yOf(listed, 'R') - t.yOf(listed, 'T')) < 2 && listed.scrollWidth <= listed.clientWidth,
+                'and lists a name with a line break in full, as the header shows it ('
+                + (listed ? listed.scrollWidth + 'px of text in ' + listed.clientWidth : 'not listed') + ')');
+            document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+            await t.wait(100);
+
+            await t.setSetting('trimDisplay', true);
+            t.check(Math.abs(t.xOf(t.cell(0, 0), 'B') - t.xOf(t.cell(1, 0), 'B')) < 1, 'switched back on, the spaces are gone');
+            t.check(t.xOf(t.header(0).querySelector('.ag-header-cell-text'), 'c') < 2, 'from the header too');
+            // The switch hands the grid new column names. A line break still
+            // reads as a space after that.
+            const named = t.header(2).querySelector('.ag-header-cell-text').textContent;
+            t.check(named === 'top bottom', 'a name with a line break reads the same way ('
+                + JSON.stringify(named) + ')');
+            const hiddenBox = plainName();
+            t.check(Math.abs(shownBox.height - hiddenBox.height) < 0.5 && Math.abs(shownBox.top - hiddenBox.top) < 0.5,
+                'a name without spaces sits in the same place either way (' + shownBox.height + 'px at ' + shownBox.top
+                + ' against ' + hiddenBox.height + 'px at ' + hiddenBox.top + ')');
+        }`,
+    },
+    {
+        name: 'auto-fit makes room for the spaces shown',
+        // The padded value sits far below the first screen, where the check
+        // auto-fit runs on the drawn cells cannot see it, so the measurement
+        // alone has to get it right.
+        csv: ['city,n'].concat(Array.from({ length: 80 }, (_, i) =>
+            (i === 70 ? ' '.repeat(40) + 'Berlin' : 'Paris') + ',' + i)).join('\n'),
+        settings: { trimDisplay: false },
+        steps: `async (t, csv) => {
+            ${DRAWN}
+            await t.init(csv);
+            document.getElementById('btn-autofit').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(1500);
+            const viewport = document.querySelector('#grid-container .ag-body-viewport');
+            viewport.scrollTop = 100000;
+            viewport.dispatchEvent(new Event('scroll'));
+            await t.wait(500);
+            const cell = t.cell(70, 0);
+            t.check(!!cell && t.xOf(cell, 'B') > 60, 'the spaces are drawn (B at ' + (cell && t.xOf(cell, 'B')) + ')');
+            t.check(!!cell && cell.scrollWidth <= cell.clientWidth, 'and the column is wide enough for them ('
+                + (cell && cell.scrollWidth) + ' in ' + (cell && cell.clientWidth) + ')');
+        }`,
+    },
+    {
+        name: 'auto-fit makes room for a name with a line break',
+        // The header draws the break as a space, so the whole name is one
+        // line. Measured with the break in it, the column came out as wide as
+        // the longer of the two lines and cut the name short.
+        csv: ['id,"Quantity ordered\nin the last quarter"', '1,2', '3,4'].join('\n'),
+        settings: { trimDisplay: false },
+        steps: `async (t, csv) => {
+            await t.init(csv);
+            document.getElementById('btn-autofit').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(1500);
+            const name = t.header(1).querySelector('.ag-header-cell-text');
+            t.check(name.textContent === 'Quantity ordered in the last quarter' && name.scrollWidth <= name.clientWidth,
+                'the whole name fits its column (' + JSON.stringify(name.textContent) + ', '
+                + name.scrollWidth + 'px of text in ' + name.clientWidth + ')');
+        }`,
+    },
+    {
+        name: 'auto-fit counts the spaces after a value',
+        // Only the fifty widest values of a column are measured exactly, picked
+        // by a quick first pass. Seventy values here are wider than the word
+        // Berlin. The one value wider than all of them is wide only for the
+        // spaces after it, so a first pass that left those out never handed
+        // it on. It sits below the first screen, out of reach of the check
+        // auto-fit runs on the drawn cells.
+        csv: ['city,n'].concat(Array.from({ length: 80 }, (_, i) =>
+            (i === 70 ? 'Berlin' + ' '.repeat(40) : 'Paris Paris') + ',' + i)).join('\n'),
+        settings: { trimDisplay: false },
+        steps: `async (t, csv) => {
+            ${DRAWN}
+            await t.init(csv);
+            document.getElementById('btn-autofit').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(1500);
+            const viewport = document.querySelector('#grid-container .ag-body-viewport');
+            viewport.scrollTop = 100000;
+            viewport.dispatchEvent(new Event('scroll'));
+            await t.wait(500);
+            const cell = t.cell(70, 0);
+            const drawn = cell && t.drawnWidth(cell);
+            t.check(!!cell && drawn > 100, 'the spaces after the value are drawn (' + drawn + ' wide)');
+            t.check(!!cell && cell.scrollWidth <= cell.clientWidth, 'and the column is wide enough for them ('
+                + (cell && cell.scrollWidth) + ' in ' + (cell && cell.clientWidth) + ')');
+        }`,
+    },
+    {
+        name: 'auto-fit leaves out the spaces it hides',
+        // The other way round, with "Hide spaces around values" on. Seventy
+        // values are only an x on screen but padded wider than anything in
+        // the column. Ranked with their padding they took all fifty places.
+        // The value really drawn widest was never measured.
+        csv: ['city,n'].concat(Array.from({ length: 80 }, (_, i) =>
+            (i === 70 ? 'A wider value than x' : ' '.repeat(60) + 'x') + ',' + i)).join('\n'),
+        steps: `async (t, csv) => {
+            await t.init(csv);
+            document.getElementById('btn-autofit').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(1500);
+            const viewport = document.querySelector('#grid-container .ag-body-viewport');
+            viewport.scrollTop = 100000;
+            viewport.dispatchEvent(new Event('scroll'));
+            await t.wait(500);
+            const cell = t.cell(70, 0);
+            t.check(!!cell && cell.scrollWidth <= cell.clientWidth, 'the widest value drawn fits its column ('
+                + (cell && cell.scrollWidth) + ' in ' + (cell && cell.clientWidth) + ')');
+        }`,
+    },
+    {
+        name: 'Escape gives the keys back to the grid',
+        csv: ['n,v'].concat(Array.from({ length: 12 }, (_, i) => i + ',' + i)).join('\n'),
+        // A real click focuses what it lands on and a real key goes to the
+        // focused element. The clicks and keys here are sent by hand, so the
+        // focus is moved the same way first.
+        steps: async (t, csv) => {
+            await t.init(csv);
+            const onCell = () => {
+                const a = document.activeElement;
+                const cell = a && a.closest && a.closest('#grid-container .ag-cell');
+                return cell ? cell.closest('.ag-row').getAttribute('row-index') + '/' + cell.getAttribute('col-id') : String(a && a.tagName);
+            };
+            const press = async (key) => {
+                document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+                await t.wait(250);
+            };
+            const clickOn = async (el) => {
+                el.focus();
+                el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+                await t.wait(200);
+            };
+            t.cell(6, 1).focus();
+            await t.focusCell(6, 1);
+            t.check(onCell() === '6/col_1', 'the clicked cell has the keyboard (' + onCell() + ')');
+
+            await clickOn(document.getElementById('btn-settings'));
+            const box = t.settingBox('markEmpty');
+            await clickOn(box);
+            await clickOn(box);
+            await press('Escape');
+            t.check(document.getElementById('settings-popover').classList.contains('hidden'), 'Escape closes the settings menu');
+            t.check(onCell() === '6/col_1', 'and the cell has the keyboard again (' + onCell() + ')');
+            await press('ArrowUp');
+            t.check(t.focusedRow() === 5, 'so the arrow keys move again (row ' + t.focusedRow() + ')');
+
+            await clickOn(document.getElementById('btn-columns'));
+            t.check(!document.getElementById('col-chooser-popover').classList.contains('hidden'), 'the column chooser is open');
+            await press('Escape');
+            t.check(onCell() === '5/col_1', 'Escape in the column chooser gives the cell back too (' + onCell() + ')');
+
+            await clickOn(document.getElementById('btn-export'));
+            await press('Escape');
+            t.check(onCell() === '5/col_1', 'and in the Export menu (' + onCell() + ')');
+
+            // A menu opened on a cell leaves the focus where it was, on that cell.
+            const c = t.cell(3, 0);
+            const r = c.getBoundingClientRect();
+            c.focus();
+            c.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 2, clientX: r.left + 5, clientY: r.top + 5 }));
+            c.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 5, clientY: r.top + 5 }));
+            await t.wait(200);
+            const where = onCell();
+            await press('Escape');
+            t.check(document.getElementById('row-context-menu').classList.contains('hidden') && onCell() === where,
+                'the row menu closes and the focus stays on its cell (' + where + ' then ' + onCell() + ')');
+
+            // The column of the focused cell hidden in the column chooser
+            // cannot take the keys back. A shown column in the same row does.
+            t.cell(2, 1).focus();
+            await t.focusCell(2, 1);
+            await clickOn(document.getElementById('btn-columns'));
+            const hide = document.querySelectorAll('#col-chooser-list .col-chooser-item input')[1];
+            await clickOn(hide);
+            t.check(!hide.checked && !t.cell(2, 1), 'the column of the focused cell is hidden');
+            await press('Escape');
+            t.check(onCell() === '2/col_0', 'Escape gives the keys to the column next to it (' + onCell() + ')');
+            await press('ArrowDown');
+            t.check(t.focusedRow() === 3, 'and the arrow keys move from there (row ' + t.focusedRow() + ')');
         },
     },
     {
