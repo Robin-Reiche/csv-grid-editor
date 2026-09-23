@@ -23,6 +23,7 @@ import { closeAllPopups } from './popups';
 import { addFirstRow, addFirstColumn } from './empty-state';
 import { resetDuplicatesState } from './duplicates';
 import { shownValue } from '../grid/control-char-cell';
+import { followMovedRows } from './find-replace';
 
 // ── Data mutations ────────────────────────────────────────────────────────────
 
@@ -66,7 +67,9 @@ function deleteRows(displayIndices: number[]): void {
     // already. Deleting nothing must not leave an undo step or write the file.
     if (toDelete.size === 0) return;
     pushUndo();
+    const before = state.data;
     state.data = deleteRowsFromData(state.data, toDelete);
+    followMovedRows(before);
     state.isAutoFitted = false;
     state.autoFitCache = null;
     refreshGrid();
@@ -104,6 +107,7 @@ function insertRows(anchorDisplayIndex: number, position: 'above' | 'below', cou
     const hasActiveSort = colState.some((s: any) => s.sort);
 
     pushUndo();
+    const before = state.data;
 
     if (hasActiveSort) {
         const header = state.data[0];
@@ -140,6 +144,7 @@ function insertRows(anchorDisplayIndex: number, position: 'above' | 'below', cou
     const insertAt = position === 'above' ? targetIndex : targetIndex + 1;
     const numCols = getNumCols(state.data);
     state.data = insertRowsIntoData(state.data, insertAt, count, numCols);
+    followMovedRows(before);
 
     state.isAutoFitted = false;
     state.autoFitCache = null;

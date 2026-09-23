@@ -4,7 +4,7 @@ import { scheduleRecomputeColTypes } from '../grid/column-type';
 import { markValueListsStale } from '../grid/filter';
 import { dataRowIndexForFindMatch } from '../grid/row-mapping';
 import { focusCell } from '../grid/refresh';
-import type { FindMatch } from '../types';
+import type { CsvRow, FindMatch } from '../types';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -215,6 +215,34 @@ export function refreshFindInPlace(): void {
     if (document.getElementById('find-bar')?.classList.contains('hidden') ?? true) return;
     if (debounceTimer !== null) clearTimeout(debounceTimer);
     execFind(state.findMatches[state.findMatchIndex], true, false);
+}
+
+// Public: an insert or a delete moved the rows of state.data, which held
+// `before` until then. The row arrays themselves are the same ones. A match
+// remembers its row by the place it had in state.data. The search that runs
+// again next finds the active match there. The row that has taken that place
+// is another one, so the active match jumped and Replace changed that row.
+// Each match is moved to where its row is now. When the row of the active
+// match is gone, the next match whose row is still there becomes the active
+// one, the match Next would have gone to.
+export function followMovedRows(before: CsvRow[]): void {
+    const matches = state.findMatches;
+    if (!matches.length) return;
+    const now = new Map<CsvRow, number>();
+    state.data.forEach((row, i) => now.set(row, i));
+    const kept = matches.map(m => {
+        const at = now.get(before[m.origIndex]);
+        if (at === undefined) return false;
+        m.origIndex = at;
+        return true;
+    });
+    const from = state.findMatchIndex;
+    if (from < 0 || kept[from]) return;
+    state.findMatchIndex = -1;
+    for (let k = 1; k < matches.length; k++) {
+        const i = (from + k) % matches.length;
+        if (kept[i]) { state.findMatchIndex = i; return; }
+    }
 }
 
 // ── navigation ────────────────────────────────────────────────────────────────
