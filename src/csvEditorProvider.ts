@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { createHash } from 'crypto';
 import { getWebviewContent } from './webview';
-import { firstLineOf, delimiterOfFirstLine } from './webview/utils/csv';
+import { delimiterOfFile } from './webview/utils/csv';
 import { SETTING_DEFAULTS, isSettingKey, type Settings, type SettingKey } from './webview/settings';
 import {
     RowPageIndex,
@@ -902,12 +902,9 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
 
     // ── Delimiter detection ──
 
+    // The grid asks the same function before it writes a header, so a save
+    // keeps the delimiter the file opens with.
     private detectDelimiter(fileName: string, content: string): string {
-        if (fileName.endsWith('.tsv')) return '\t';
-        // The first line ends where the grid ends the first row (firstLineOf):
-        // counting to an LF in a classic Mac file counted the separators of the
-        // whole file, and cutting at any CR split a header whose quoted name
-        // holds one.
-        return delimiterOfFirstLine(firstLineOf(content));
+        return delimiterOfFile(fileName, content);
     }
 }

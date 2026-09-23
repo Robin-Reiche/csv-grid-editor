@@ -226,9 +226,9 @@ export function firstLineOf(text: string): string {
 // "Name, Vorname";Stadt is a semicolon file. Quotes are told apart the way
 // firstLineOf tells them: a quote opens a value only at the start of a field.
 // An inch mark further into a name is a character like any other. Taking any
-// two quotes for a pair hid the semicolon in Breite (");Höhe ("), and that
-// file opened as a single comma column. The extension detects every file
-// with this. The grid asks it before it writes the header (toCsv).
+// two quotes for a pair hid the semicolon in Breite (");Höhe ("). That file
+// opened as a single comma column. The extension detects every file with
+// this. The grid asks it before it writes the header (toCsv).
 export function delimiterOfFirstLine(line: string): string {
     let semicolons = 0;
     let commas = 0;
@@ -254,6 +254,17 @@ export function delimiterOfFirstLine(line: string): string {
     if (tabs > commas && tabs > semicolons) return '\t';
     if (semicolons > commas) return ';';
     return ',';
+}
+
+// The delimiter the extension opens a file with. A .tsv file is a tab file by
+// its name, whatever its first line holds. Any other file goes by its first
+// line. That ends where the grid ends the first row (firstLineOf). Counting
+// to an LF in a classic Mac file counted the separators of the whole file.
+// Cutting at any CR split a header whose quoted name holds one. The grid
+// asks this too before it writes the header (toCsv), so both sides agree.
+export function delimiterOfFile(fileName: string, text: string): string {
+    if (fileName.endsWith('.tsv')) return '\t';
+    return delimiterOfFirstLine(firstLineOf(text));
 }
 
 // Reads the line format from the text parseCsv is about to split into rows. It
@@ -357,7 +368,10 @@ function readsAsEmptyLine(row: CsvRow, onlyRow: boolean): boolean {
 // row nobody touched keeps its bytes. parseCsv keeps a stray CR outside quotes
 // in its value, so such a value gains quotes on the first edit and loses
 // nothing.
-export function toCsv(rows: CsvRow[], delimiter: string, format?: LineFormat): string {
+//
+// fileName is the name of the file written, which decides its delimiter
+// before its first line does (delimiterOfFile).
+export function toCsv(rows: CsvRow[], delimiter: string, format?: LineFormat, fileName = ''): string {
     const eol = format ? format.eol : '\n';
     // An empty table stays empty. A lone break would read back as a blank row.
     const finalNewline = !!format && format.finalNewline && rows.length > 0;
@@ -380,7 +394,7 @@ export function toCsv(rows: CsvRow[], delimiter: string, format?: LineFormat): s
             return quote ? '"' + s.replace(/"/g, '""') + '"' : s;
         }).join(delimiter);
     // The first row written is what detection reads when the file is opened
-    // again (delimiterOfFirstLine). A value goes in quotes only when it has
+    // again (delimiterOfFile). A value goes in quotes only when it has
     // to, so "Name, Vorname";Stadt lost its quotes on the first save. That
     // left one comma against one semicolon. The file opened again as a
     // comma file split in the wrong places. When the row written plainly
@@ -389,11 +403,14 @@ export function toCsv(rows: CsvRow[], delimiter: string, format?: LineFormat): s
     // that needs none is written as before. So is a row of one value. Quotes
     // cannot make it point to a semicolon or a tab. In a file split on commas
     // by mistake they kept the header in one piece once the right delimiter
-    // was picked. The clipboard passes no format and gets none of this.
+    // was picked. The clipboard passes no format and gets none of this. A
+    // .tsv file opens with tabs by its name alone, so its header is written
+    // as it stands. Tools that read tab files without quote rules took the
+    // quotes it gained for part of the name.
     let first = last >= 0 ? line(rows[0], 0, false) : '';
-    if (format && last >= 0 && rows[0].length > 1 && delimiterOfFirstLine(first) !== delimiter) {
+    if (format && last >= 0 && rows[0].length > 1 && delimiterOfFile(fileName, first) !== delimiter) {
         const quoted = line(rows[0], 0, true);
-        if (delimiterOfFirstLine(quoted) === delimiter) first = quoted;
+        if (delimiterOfFile(fileName, quoted) === delimiter) first = quoted;
     }
     const text = rows.map((row, r) => r === 0 ? first : line(row, r, false)).join(eol);
     return finalNewline || breakAfterLast ? text + eol : text;

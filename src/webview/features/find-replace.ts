@@ -270,12 +270,20 @@ export function followMovedRows(before: CsvRow[]): void {
 // until then. The step keeps a copy of its rows, so no row is the array it
 // was and followMovedRows would find none of them. Undoing a row added above
 // the active match moved the mark to the row below it and Replace changed
-// that row. A step adds or takes away rows in one place. The rows above that
-// place are equal in both tables and keep their place. The rows below it are
-// equal too and move by the number of rows added or taken away. A match in
-// between is on a row that changed and is let go. A step that keeps the
-// number of rows changed them where they are, the way an edit or a new
-// column does, so every match stays where it is.
+// that row. Most steps add or take away rows in one place. The rows above
+// that place are equal in both tables and keep their place. The rows below it
+// are equal too and move by the number of rows added or taken away. Row 0 is
+// the header or the column letters of a file without one and never holds a
+// match, so it is left out. Deleting the only wide row took a letter away
+// while the step kept it. No row counted as equal above the change then and
+// the active match moved on to a row below it. Some steps change rows in
+// more than one place. Rows next to each other under a sort lie apart in the
+// file. An insert under a sort writes the rows in the order the sort shows.
+// A row between the two equal runs is looked for among the rows between
+// them in the other table, equal rows in the order they come. A match whose
+// row is in neither is let go. A step that keeps the number of rows changed
+// them where they are, the way an edit or a new column does, so every match
+// stays where it is.
 export function followRestoredRows(before: CsvRow[]): void {
     if (!state.findMatches.length) return;
     const after = state.data;
@@ -283,11 +291,34 @@ export function followRestoredRows(before: CsvRow[]): void {
     if (added === 0) return;
     const same = (a: CsvRow, b: CsvRow) => a.length === b.length && a.every((v, i) => v === b[i]);
     const shorter = Math.min(before.length, after.length);
-    let above = 0;
+    let above = shorter > 0 ? 1 : 0;
     while (above < shorter && same(before[above], after[above])) above++;
     let below = 0;
     while (below < shorter - above && same(before[before.length - 1 - below], after[after.length - 1 - below])) below++;
-    moveMatches(i => i < above ? i : i >= before.length - below ? i + added : undefined);
+    const firstBelow = before.length - below;
+    // Worked out once and only when a match needs it. It reads every row
+    // between the runs, which after an insert under a sort is all of them.
+    let found: Map<number, number> | null = null;
+    const between = (i: number): number | undefined => {
+        if (!found) {
+            // The places of the rows in `after`, last first, so pop() hands
+            // out equal rows from the top down.
+            const places = new Map<string, number[]>();
+            for (let j = after.length - below - 1; j >= above; j--) {
+                const key = JSON.stringify(after[j]);
+                const list = places.get(key);
+                if (list) list.push(j);
+                else places.set(key, [j]);
+            }
+            found = new Map();
+            for (let j = above; j < firstBelow; j++) {
+                const at = places.get(JSON.stringify(before[j]))?.pop();
+                if (at !== undefined) found.set(j, at);
+            }
+        }
+        return found.get(i);
+    };
+    moveMatches(i => i < above ? i : i >= firstBelow ? i + added : between(i));
 }
 
 // Moves each match to the place `to` gives for its row's old place in

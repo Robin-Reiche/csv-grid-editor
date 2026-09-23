@@ -246,4 +246,19 @@ runSuite('delimiter switch (browser)', [
                 'the header line is written with its quotes (' + JSON.stringify(t.lastEdit()) + ')');
         }`,
     },
+    {
+        // A .tsv file opens with tabs whatever its first line holds, so its
+        // header needs no quotes to keep them. Tools that read tab files
+        // without quote rules took the added quotes for part of the name.
+        name: 'a .tsv header with a comma keeps its bytes on an edit',
+        csv: 'Name, Vorname\tStadt\nMüller, Jörg\tKöln\n',
+        fileName: 'names.tsv',
+        steps: `async (t, csv) => { ${HELPERS}
+            await t.init(csv, '\\t');
+            t.check(t.names() === 'Name, Vorname|Stadt|-|-', 'the header splits on the tab (' + t.names() + ')');
+            await t.edit(0, 1, 'Bonn');
+            t.check(t.lastEdit() === 'Name, Vorname\\tStadt\\nMüller, Jörg\\tBonn\\n',
+                'the header line is written as it was (' + JSON.stringify(t.lastEdit()) + ')');
+        }`,
+    },
 ]);

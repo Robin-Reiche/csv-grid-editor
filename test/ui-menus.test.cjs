@@ -236,4 +236,23 @@ runSuite('menus across an outside change (browser)', [
             t.check(!t.shown('row-context-menu'), 'the row menu is closed after Ctrl+Shift+K');
         `),
     },
+    {
+        // Under a sort a pasted value moves its row to its sorted place.
+        name: 'a paste that moves rows under a sort closes the row menu',
+        csv: CITIES,
+        steps: steps(`
+            t.header(1).querySelector('.ag-header-cell-label').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(400);
+            await t.focusCell(2, 1);
+            await t.rightClick(t.cell(2, 1));
+            t.check(t.shown('row-context-menu'), 'the row menu opens on Paris');
+            const clip = new DataTransfer();
+            clip.setData('text/plain', '9');
+            document.querySelector('#grid-container .ag-cell-focus')
+                .dispatchEvent(new ClipboardEvent('paste', { clipboardData: clip, bubbles: true, cancelable: true }));
+            await t.wait(400);
+            t.check(t.rows() === 'Berlin,Hanoi,Rome,Paris', 'the pasted 9 moves Paris to the end, Rome into its place (' + t.rows() + ')');
+            t.check(!t.shown('row-context-menu'), 'the row menu is closed, so Delete row cannot take Rome');
+        `),
+    },
 ]);

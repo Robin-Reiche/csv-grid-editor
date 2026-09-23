@@ -155,7 +155,8 @@ window.__t = {
 // does: { mode: 'head' | 'tail' | 'chunked', total }, where total is the
 // number of records in the whole file, header included, as the extension
 // counts them. The test then sends the text those modes would send.
-function runPage({ csv, delimiter = ',', settings = {}, steps, budget = 30000, preview = null }) {
+// `fileName` is the name the page is told the file has.
+function runPage({ csv, delimiter = ',', settings = {}, steps, budget = 30000, preview = null, fileName = 'test.csv' }) {
     const chrome = findChrome();
     if (!chrome) throw new Error('no Chrome found');
 
@@ -163,7 +164,7 @@ function runPage({ csv, delimiter = ',', settings = {}, steps, budget = 30000, p
     const { readSettings } = require(path.join(ROOT, 'out', 'webview', 'settings.js'));
     let html = getWebviewContent(
         { asWebviewUri: u => u, cspSource: '*' }, ROOT, delimiter,
-        !!preview, preview ? preview.mode : 'full', preview ? preview.total : 0, 'test.csv',
+        !!preview, preview ? preview.mode : 'full', preview ? preview.total : 0, fileName,
         !!preview && preview.mode === 'chunked', false, 4, readSettings(settings), false,
     );
     html = html.replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/, '');
@@ -196,7 +197,7 @@ function runPage({ csv, delimiter = ',', settings = {}, steps, budget = 30000, p
     return text.split('\n').filter(l => l && l !== 'DONE');
 }
 
-// Runs a list of { name, csv, settings, steps } scenarios and prints the result
+// Runs a list of { name, csv, settings, fileName, steps } scenarios and prints the result
 // in the same format as the other test files. Exits the process.
 function runSuite(title, scenarios) {
     console.log(title);
