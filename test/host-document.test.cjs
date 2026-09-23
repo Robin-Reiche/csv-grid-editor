@@ -92,11 +92,30 @@ const vscodeStub = {
 };
 
 // VS Code's tabs, as far as the provider looks at them: one editor group with
-// a tab for each file open() opens.
+// a tab for each file open() opens. An edit marks a tab unsaved the way VS
+// Code marks it on a content change event. Only a save or a revert takes the
+// mark off again.
 class TabInputCustom { constructor(uri, viewType) { this.uri = uri; this.viewType = viewType; } }
 const group = { tabs: [], activeTab: null, viewColumn: 1, isActive: true };
 vscodeStub.TabInputCustom = TabInputCustom;
 vscodeStub.window.tabGroups = { all: [group], activeTabGroup: group };
+// Lets a test pretend VS Code could not bring a tab to the front.
+let openWithFails = false;
+vscodeStub.commands.executeCommand = async (id, ...args) => {
+    if (id === 'vscode.openWith') {
+        const [uri, viewType] = args;
+        const tab = group.tabs.find(t => t.input.uri.toString() === uri.toString() && t.input.viewType === viewType);
+        if (tab && !openWithFails) group.activeTab = tab;
+    } else if (id === 'workbench.action.files.revert') {
+        // File > Revert File reverts the active editor if it has unsaved
+        // edits. VS Code drops it for any other.
+        const tab = group.activeTab;
+        if (tab && tab.isDirty) {
+            tab.isDirty = false;
+            await tab.revert();
+        }
+    }
+};
 
 const load = Module._load;
 Module._load = function (request, ...rest) {
@@ -112,6 +131,7 @@ async function test(name, fn) {
     fakeSize = null;
     quickPickChoice = null;
     failNextWrite = false;
+    openWithFails = false;
     group.tabs.length = 0;
     group.activeTab = null;
     try { await fn(); console.log('  ✓ ' + name); }
@@ -151,26 +171,40 @@ async function attach(provider, doc) {
 
 // Opens a file in the provider and hands back what a test needs to drive it.
 async function open(filePath, openContext = {}) {
-    watchers.length = 0;
     const context = { extensionUri: uriFile('/ext'), globalState: { get: (_k, d) => d, update() {} } };
     const provider = new CsvEditorProvider(context);
     const uri = uriFile(filePath);
     const doc = await provider.openCustomDocument(uri, openContext, {});
-    const tab = { input: new TabInputCustom(uri, 'csvViewer.grid'), group, isActive: true };
+    const tab = {
+        input: new TabInputCustom(uri, 'csvViewer.grid'), group, isActive: true, isDirty: false,
+        revert: () => provider.revertCustomDocument(doc, {}),
+    };
+    provider.onDidChangeCustomDocument(e => { if (e.document === doc) tab.isDirty = true; });
     group.tabs.push(tab);
     group.activeTab = tab;
-    const editor = await attach(provider, doc);
+    // The watchers made for this file, see fireWatcher.
+    const own = [];
+    const watched = async fn => {
+        const before = watchers.length;
+        const result = await fn();
+        own.push(...watchers.slice(before));
+        return result;
+    };
+    const editor = await watched(() => attach(provider, doc));
     return {
-        ...editor, provider, doc, uri,
-        save: () => provider.saveCustomDocument(doc, {}),
+        ...editor, provider, doc, uri, tab, watchers: own,
+        save: async () => {
+            await provider.saveCustomDocument(doc, {});
+            tab.isDirty = false;
+        },
         saveAs: dest => provider.saveCustomDocumentAs(doc, uriFile(dest), {}),
         backup: dest => provider.backupCustomDocument(doc, { destination: uriFile(dest) }, {}),
         // A second editor on the same document, which VS Code opens for the
         // modified side of a Source Control diff while the grid tab is open.
-        openSecondEditor: () => attach(provider, doc),
+        openSecondEditor: () => watched(() => attach(provider, doc)),
         // The watchers' listeners fire and forget, so give the read a moment.
         fireWatcher: async () => {
-            for (const w of watchers) if (!w.disposed) for (const f of w.change) f();
+            for (const w of own) if (!w.disposed) for (const f of w.change) f();
             await new Promise(r => setTimeout(r, 20));
         },
     };
@@ -290,6 +324,70 @@ async function main() {
         assert.strictEqual(t.updates()[0].text, 'h\ntheirs\n');
     });
 
+    // Loading the disk under unsaved edits left the tab marked unsaved,
+    // although the grid now showed exactly the file. Closing it asked to
+    // save and hot exit kept it as unsaved. Only a save or a revert takes
+    // that mark off.
+    await test('Reload from Disk on the warning takes the unsaved mark off the tab', async () => {
+        const p = file('dirty-mark.csv', 'h\n1\n');
+        const t = await open(p);
+        await t.edit('h\nmine\n');
+        assert.strictEqual(t.tab.isDirty, true, 'the test did not reach a tab with unsaved edits');
+        fs.writeFileSync(p, 'h\ntheirs\n');
+        await t.fireWatcher();
+        warnings[0].pick('Reload from Disk');
+        await tick();
+        assert.strictEqual(t.doc.content, 'h\ntheirs\n', 'the action did not load the disk');
+        assert.deepStrictEqual(t.updates().map(m => m.text), ['h\ntheirs\n']);
+        assert.strictEqual(t.tab.isDirty, false, 'the tab is still marked unsaved');
+    });
+
+    await test('the Reload from Disk command takes the unsaved mark off the tab', async () => {
+        const p = file('dirty-mark-command.csv', 'h\n1\n');
+        const t = await open(p);
+        await t.edit('h\nmine\n');
+        fs.writeFileSync(p, 'h\ntheirs\n');
+        await t.provider.reloadActiveFromDisk();
+        await tick();
+        assert.strictEqual(t.doc.content, 'h\ntheirs\n', 'the command did not load the disk');
+        assert.deepStrictEqual(t.updates().map(m => m.text), ['h\ntheirs\n']);
+        assert.strictEqual(t.tab.isDirty, false, 'the tab is still marked unsaved');
+    });
+
+    // File > Revert File works on the editor in front. Run with another tab
+    // in front, it would throw away that tab's unsaved edits.
+    await test('Reload from Disk on the warning of a tab behind another reverts only its own tab', async () => {
+        const p = file('dirty-behind.csv', 'h\n1\n');
+        const t = await open(p);
+        await t.edit('h\nmine\n');
+        const front = await open(file('dirty-front.csv', 'x\n1\n'));
+        await front.edit('x\nFRONT UNSAVED\n');
+        fs.writeFileSync(p, 'h\ntheirs\n');
+        await t.fireWatcher();
+        warnings[0].pick('Reload from Disk');
+        await tick();
+        assert.strictEqual(front.doc.content, 'x\nFRONT UNSAVED\n', 'the tab in front lost its unsaved edits');
+        assert.strictEqual(front.tab.isDirty, true);
+        assert.strictEqual(t.doc.content, 'h\ntheirs\n', 'the action did not load the disk');
+        assert.strictEqual(t.tab.isDirty, false, 'the tab is still marked unsaved');
+    });
+
+    await test('Reload from Disk reverts no other tab when its own cannot come to the front', async () => {
+        const p = file('dirty-stuck.csv', 'h\n1\n');
+        const t = await open(p);
+        await t.edit('h\nmine\n');
+        const front = await open(file('dirty-stuck-front.csv', 'x\n1\n'));
+        await front.edit('x\nFRONT UNSAVED\n');
+        fs.writeFileSync(p, 'h\ntheirs\n');
+        await t.fireWatcher();
+        openWithFails = true;
+        warnings[0].pick('Reload from Disk');
+        await tick();
+        assert.strictEqual(front.doc.content, 'x\nFRONT UNSAVED\n', 'the tab in front lost its unsaved edits');
+        assert.strictEqual(front.tab.isDirty, true);
+        assert.strictEqual(t.doc.content, 'h\ntheirs\n', 'the action did not load the disk');
+    });
+
     await test('saving after the warning keeps the edits', async () => {
         const p = file('dirty-save.csv', 'h\n1\n');
         const t = await open(p);
@@ -373,9 +471,9 @@ async function main() {
         const t = await open(p);
         const diff = await t.openSecondEditor();
         diff.close();
-        assert.ok(watchers.some(w => !w.disposed), 'closing one of two editors stopped the watcher');
+        assert.ok(t.watchers.some(w => !w.disposed), 'closing one of two editors stopped the watcher');
         t.close();
-        assert.ok(watchers.every(w => w.disposed), 'the file is still watched with no editor open');
+        assert.ok(t.watchers.every(w => w.disposed), 'the file is still watched with no editor open');
     });
 
     await test('an edit in one editor reaches the other', async () => {

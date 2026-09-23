@@ -167,7 +167,7 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
 
         // Without this the command looks broken whenever the file is already in
         // sync, which is exactly the confusion that made #25 hard to report.
-        const changed = await this.reload(document);
+        const changed = await this.reloadFromDisk(document);
         if (!changed) {
             vscode.window.setStatusBarMessage('CSV Grid: already up to date', 3000);
         }
@@ -540,7 +540,7 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
                     `${path.basename(document.uri.fsPath)} changed on disk. Your unsaved edits in the grid were kept.`,
                     'Reload from Disk'
                 ).then(choice => {
-                    if (choice === 'Reload from Disk') void this.reload(document);
+                    if (choice === 'Reload from Disk') void this.reloadFromDisk(document);
                 });
                 return false;
             }
@@ -561,6 +561,35 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         } catch {
             return false;
         }
+    }
+
+    // Reload from Disk, the command and the button on the warning above. A
+    // reload under unsaved edits left the tab marked unsaved although the grid
+    // showed exactly the file, so closing it asked to save. Only a save or a
+    // revert takes that mark off. No API lets an extension revert a document
+    // itself. So a tab with unsaved edits goes through File > Revert File,
+    // which calls revertCustomDocument. VS Code drops that revert for a tab
+    // without unsaved edits (issue #25), so such a tab is reloaded here.
+    private async reloadFromDisk(document: CsvDocument): Promise<boolean> {
+        const isOwnTab = (tab: vscode.Tab | undefined): tab is vscode.Tab =>
+            tab?.input instanceof vscode.TabInputCustom
+            && tab.input.viewType === CsvEditorProvider.viewType
+            && tab.input.uri.toString() === document.uri.toString();
+        const tab = vscode.window.tabGroups.all.flatMap(group => group.tabs).find(isOwnTab);
+        if (tab?.isDirty) {
+            // The revert command works on the editor in front, so the tab
+            // comes to the front first. This also takes the focus from the
+            // Open Editors view, where the command would revert the selection
+            // instead. Should another tab still be in front, the command is
+            // not run: it would throw away that tab's unsaved edits.
+            await vscode.commands.executeCommand('vscode.openWith', document.uri, CsvEditorProvider.viewType,
+                { viewColumn: tab.group.viewColumn, preserveFocus: false });
+            if (isOwnTab(vscode.window.tabGroups.activeTabGroup.activeTab)) {
+                await vscode.commands.executeCommand('workbench.action.files.revert');
+                return true;
+            }
+        }
+        return this.reload(document);
     }
 
     // ── Save / Revert / Backup ──
