@@ -1,6 +1,8 @@
 // Resolves an AG Grid row node to its row position within state.data.
 //
-// state.data[0] is the header, so data rows live at index 1..N. When rowData is
+// state.data[0] is the header, so data rows live at index 1..N. In a file
+// without a header row it holds the grid's column letters, so the file's first
+// row is at index 1 like the rest (state.firstRowIsHeader). When rowData is
 // built (see builder.ts / refresh.ts) every row object carries `_origIndex`,
 // the 1-based position of that row within state.data. Unlike `node.rowIndex`
 // (the DISPLAY position, which changes under sort/filter) `_origIndex` rides
