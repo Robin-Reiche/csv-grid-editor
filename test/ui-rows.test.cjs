@@ -7,8 +7,10 @@
 // the last row had been deleted, Ctrl+Enter did nothing, because the focus the
 // deleted row left behind still looked like a row to insert next to. That same
 // focus made a second Ctrl+Shift+K record an empty undo step and write the
-// file again. In the "Show only duplicates" view Ctrl+Enter cleared the column
-// filters although the view itself was what hid the new row.
+// file again. A paste went into the column that focus was in and dropped
+// whatever did not fit to its right. In the "Show only duplicates" view
+// Ctrl+Enter cleared the column filters although the view itself was what
+// hid the new row.
 //
 // Run after `tsc -p ./`:  node test/ui-rows.test.cjs
 
@@ -103,6 +105,27 @@ runSuite('rows (browser)', [
             document.getElementById('btn-undo').dispatchEvent(new MouseEvent('click', { bubbles: true }));
             await t.wait(400);
             t.check(t.lastEdit() === 'a,b\\n1,2', 'one undo brings the row back (' + JSON.stringify(t.lastEdit()) + ')');
+        }`,
+    },
+    {
+        // The row shortcuts ask the table itself as well, so only a paste
+        // still shows where the focus of a deleted last row went. A table with
+        // only a header takes no paste, the same as a file opened that way.
+        name: 'paste after deleting the last row',
+        csv: 'a,b\n1,2',
+        steps: `async (t, csv) => {
+            ${FRAMES}
+            const press = ${PRESS};
+            await t.init(csv);
+            await t.focusCell(0, 1);
+            await press(t, 'K', { ctrlKey: true, shiftKey: true });
+            t.check(t.lastEdit() === 'a,b', 'Ctrl+Shift+K deletes the only row (' + JSON.stringify(t.lastEdit()) + ')');
+            const data = new DataTransfer();
+            data.setData('text/plain', 'x\\ty');
+            document.body.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+            await t.wait(300);
+            t.check(t.sent('edit').length === 1, 'a paste does not land in the column of the deleted row ('
+                + JSON.stringify(t.lastEdit()) + ')');
         }`,
     },
     {
