@@ -640,6 +640,26 @@ runSuite('find and replace (browser)', [
         `),
     },
     {
+        // The setting changes what the cells show, so it changes what find
+        // matches. The counter and the marks kept the old matches until the
+        // next search. A cell that showed Berlin stayed marked for two spaces
+        // and Replace then found nothing to change.
+        name: 'switching Hide spaces around values searches again',
+        csv: 'k,v\na,  Berlin  \nb,New York\nc,   \nd,plain',
+        settings: { trimDisplay: false },
+        steps: steps(`
+            await t.init(csv);
+            await find(t, '  ', 'X');
+            t.check(count() === '1 / 2' && marks(t.cell(0, 1)) === 'active', 'two spaces are found around Berlin (' + count() + ', ' + marks(t.cell(0, 1)) + ')');
+            await t.setSetting('trimDisplay', true);
+            t.check(count() === '0 matches', 'with the spaces hidden nothing matches (' + count() + ')');
+            t.check(marks(t.cell(0, 1)) === 'none' && marks(t.cell(2, 1)) === 'none',
+                'and no cell stays marked (' + marks(t.cell(0, 1)) + ', ' + marks(t.cell(2, 1)) + ')');
+            await t.setSetting('trimDisplay', false);
+            t.check(count() === '1 / 2', 'shown again, the spaces are found again (' + count() + ')');
+        `),
+    },
+    {
         // With no rows left there is no grid to search, and the search used to
         // stop before it touched the counter.
         name: 'an outside change that empties the file',
