@@ -46,6 +46,9 @@ let failNextWrite = false;
 // Runs inside the next write, before it lands or fails, so a test can make
 // something happen while a save is still on its way to the disk.
 let duringNextWrite = null;
+// The same for the next read of a file, which a save makes once it has the
+// value being typed (see saveCustomDocument).
+let duringNextRead = null;
 
 class EventEmitter {
     constructor() { this.listeners = []; this.event = l => { this.listeners.push(l); return { dispose() {} }; }; }
@@ -73,7 +76,15 @@ const vscodeStub = {
     workspace: {
         fs: {
             stat: async uri => ({ size: fakeSize ?? readUri(uri).length }),
-            readFile: async uri => new Uint8Array(readUri(uri)),
+            readFile: async uri => {
+                const bytes = new Uint8Array(readUri(uri));
+                if (duringNextRead) {
+                    const during = duringNextRead;
+                    duringNextRead = null;
+                    await during();
+                }
+                return bytes;
+            },
             writeFile: async (uri, bytes) => {
                 if (duringNextWrite) {
                     const during = duringNextWrite;
@@ -307,6 +318,7 @@ async function test(name, fn) {
     quickPickChoice = null;
     failNextWrite = false;
     duringNextWrite = null;
+    duringNextRead = null;
     openWithFails = false;
     windowOnly = 0;
     group.tabs.length = 0;
@@ -1731,6 +1743,30 @@ async function main() {
         assert.strictEqual(t.updates().length, 0);
     });
 
+    // A backup or an auto-save asked for the value right after it was typed
+    // back to the cell's own and before the grid said so. The answer then
+    // came without a text and the value deleted in the diff reached the
+    // grid tab when the diff closed.
+    for (const [name, ask] of [
+        ['a backup', t => t.backup(path.join(tmpDir, 'typed-deleted.backup'))],
+        ['a save', t => t.save()],
+    ]) {
+        await test(`a value typed back to the cell's own before ${name} asked for it is not handed over`, async () => {
+            const p = file(`typed-deleted-${name.length}.csv`, 'h\n1\n');
+            const t = await open(p);
+            const diff = await t.openSecondEditor();
+            await diff.typing();
+            await diff.typedText('h\n1X\n');
+            const asking = ask(t);
+            await tick();
+            await diff.flushed();
+            await asking;
+            diff.close();
+            assert.strictEqual(t.doc.content, 'h\n1\n', 'the value deleted again came back');
+            assert.strictEqual(t.updates().length, 0);
+        });
+    }
+
     // Don't Save on the question VS Code asks when a tab closes reverts the
     // document. The value being typed goes with it.
     await test('a revert drops the value being typed', async () => {
@@ -1954,6 +1990,24 @@ async function main() {
         assert.strictEqual(t.tab.isDirty, true, 'the newer value sits behind a tab that looks saved');
     });
 
+    // With auto-save after a delay on a file of a few MB, the next key
+    // reached the extension while the save read the file once more after
+    // the grid's answer. The tab ended up saved with only part of the value
+    // in the file and Ctrl+W threw the rest away.
+    await test('a value typed while a save reads the file again leaves the tab unsaved', async () => {
+        const p = file('typing-during-read.csv', 'h\n1\n');
+        const t = await open(p);
+        await t.typing();
+        const saving = t.save();
+        await tick();
+        duringNextRead = () => t.typing();
+        await t.flushed('h\nTYP\n');
+        await saving;
+        await tick();
+        assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\nTYP\n');
+        assert.strictEqual(t.tab.isDirty, true, 'the rest of the value sits behind a tab that looks saved');
+    });
+
     await test('a save with nothing new leaves the tab saved', async () => {
         const t = await open(file('typing-clean.csv', 'h\n1\n'));
         await t.edit('h\n2\n');
@@ -2082,6 +2136,80 @@ async function main() {
         const after = await open(p, { backupId: backup.id });
         assert.strictEqual(after.doc.content, 'h\nTYPED\n', 'the restored tab lost the value');
         assert.deepStrictEqual(warnings.map(w => w.msg), [], 'the file nobody changed was reported as changed');
+    });
+
+    // The grid writes out the whole file for its answer. On a busy machine
+    // or a larger file that took longer than the second a save waits, so
+    // the backup was written without the value and the restart lost it.
+    await test('a hot exit backup waits longer for the value being typed than a save', async () => {
+        const p = file('typing-backup-slow.csv', 'h\n1\n');
+        const t = await open(p);
+        await t.typing();
+        const backupPath = path.join(tmpDir, 'typing-backup-slow.backup');
+        const backingUp = t.backup(backupPath);
+        await new Promise(r => setTimeout(r, 1500));
+        await t.flushed('h\nTYPED\n');
+        await backingUp;
+        assert.strictEqual(fs.readFileSync(backupPath, 'utf8'), 'h\nTYPED\n', 'the backup gave up on the value');
+    });
+
+    await test('a save while a backup waits for the value still gives up after its own time', async () => {
+        const t = await open(file('typing-backup-save.csv', 'h\n1\n'));
+        await t.typing();
+        const backupPath = path.join(tmpDir, 'typing-backup-save.backup');
+        const backingUp = t.backup(backupPath);
+        await tick();
+        const start = Date.now();
+        await t.save();
+        const took = Date.now() - start;
+        assert.ok(took >= 900 && took < 3000, 'the save took ' + took + ' ms');
+        await tick();
+        assert.strictEqual(t.tab.isDirty, true, 'the value the save did not get sits behind a tab that looks saved');
+        assert.strictEqual(t.flushes().length, 1, 'the grid was asked to write out the file twice');
+        await t.flushed('h\nTYPED\n');
+        await backingUp;
+        assert.strictEqual(fs.readFileSync(backupPath, 'utf8'), 'h\nTYPED\n');
+    });
+
+    await test('a backup does not wait for an editor that was closed', async () => {
+        const t = await open(file('typing-backup-closed.csv', 'h\n1\n'));
+        await t.edit('h\n2\n');
+        await t.typing();
+        const backupPath = path.join(tmpDir, 'typing-backup-closed.backup');
+        const start = Date.now();
+        const backingUp = t.backup(backupPath);
+        await tick();
+        t.close();
+        await backingUp;
+        assert.ok(Date.now() - start < 500, 'the backup waited ' + (Date.now() - start) + ' ms');
+        assert.strictEqual(fs.readFileSync(backupPath, 'utf8'), 'h\n2\n');
+    });
+
+    // Writing out a file above the size where the extension asks how to open
+    // it holds the grid up for a noticeable moment, over a second at 94 MB.
+    // VS Code backs a file up after every pause in the typing, so the grid
+    // froze each time the user went on. Such a backup keeps what the
+    // document has. A save still takes the value.
+    await test('a backup of a large file does not ask for the value being typed', async () => {
+        const text = 'h\n' + '1234567890\n'.repeat(1000000);
+        quickPickChoice = 'full';
+        const p = file('typing-backup-large.csv', text);
+        const t = await open(p);
+        assert.strictEqual(t.doc.isPreview, false, 'the test did not open the whole file');
+        await t.edit(text + 'NEW\n');
+        await t.typing();
+        const backupPath = path.join(tmpDir, 'typing-backup-large.backup');
+        const start = Date.now();
+        await t.backup(backupPath);
+        assert.ok(Date.now() - start < 900, 'the backup waited ' + (Date.now() - start) + ' ms');
+        assert.strictEqual(t.flushes().length, 0, 'the backup asked the grid to write out the whole file');
+        assert.ok(fs.readFileSync(backupPath, 'utf8') === text + 'NEW\n', 'the backup lost the edit');
+        const saving = t.save();
+        await tick();
+        assert.strictEqual(t.flushes().length, 1, 'the save did not ask for the value');
+        await t.flushed(text + 'TYPED\n');
+        await saving;
+        assert.ok(fs.readFileSync(p, 'utf8') === text + 'TYPED\n', 'the save wrote the file without the value');
     });
 
     await test('an unchanged document still reloads silently', async () => {

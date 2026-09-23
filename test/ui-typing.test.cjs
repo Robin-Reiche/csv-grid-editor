@@ -53,9 +53,19 @@ const HELPERS = `
 
 const steps = (body) => `async (t, csv) => { ${HELPERS} await t.init(csv); ${body} }`;
 
+// A file of more than 1 MB of text. While another editor shows a file this
+// large, the grid sends it once the typing pauses instead of with every
+// change (multiline-cell-editor.ts).
+const BIG = 'name,city\nAnna,Berlin\nBen,Oslo\n'
+    + Array.from({ length: 70000 }, (_, i) => `row ${i},city ${i}`).join('\n') + '\n';
+
 runSuite('typing (browser)', [
+    // VS Code backs a file up and auto-saves it a moment after the last
+    // change it was told of. Told only of the first change, it took a backup
+    // or a save about every second in the middle of the typing. Each had the
+    // grid write out the whole file.
     {
-        name: 'a changed value is reported once',
+        name: 'each change of the value is reported',
         csv: 'name,city\nAnna,Berlin\nBen,Oslo\n',
         steps: steps(`
             const ta = await t.open(0, 1);
@@ -67,7 +77,10 @@ runSuite('typing (browser)', [
             t.check(t.sent('typing').length === 1, 'the first change is reported (' + t.sent('typing').length + ')');
             t.input(ta, 'Berlinxy');
             t.input(ta, 'Berlin');
-            t.check(t.sent('typing').length === 1, 'and only once (' + t.sent('typing').length + ')');
+            t.check(t.sent('typing').length === 3, 'and every one after it (' + t.sent('typing').length + ')');
+            t.input(ta, 'Berlin');
+            t.check(t.sent('typing').length === 3, 'but not an input that changes nothing (' + t.sent('typing').length + ')');
+            t.check(t.sent('typing').every(m => Object.keys(m).length === 1), 'without the file (' + JSON.stringify(t.sent('typing')) + ')');
             await t.key(ta, 'Escape');
             t.check(!t.editor(), 'Escape closes the editor');
             t.check(t.ended().length === 1 && !('text' in t.ended()[0]), 'the end is reported without a text ('
@@ -122,7 +135,7 @@ runSuite('typing (browser)', [
             t.input(ta, 'TYPED2');
             t.check(t.sent('typing').length === 2, 'the next change is reported again (' + t.sent('typing').length + ')');
             t.input(ta, 'TYPED23');
-            t.check(t.sent('typing').length === 2, 'once (' + t.sent('typing').length + ')');
+            t.check(t.sent('typing').length === 3, 'and the one after it (' + t.sent('typing').length + ')');
             const g = await t.flush();
             t.check(!!g && g.text === 'name,city\\nAnna,TYPED23\\nBen,Oslo\\n', 'a second save takes the newer value ('
                 + JSON.stringify(g) + ')');
@@ -296,9 +309,62 @@ runSuite('typing (browser)', [
             t.check(t.sent('typedText').length === 0, 'the file was sent for nobody (' + t.sent('typedText').length + ')');
         `),
     },
+    // The diff's close button can be clicked right after the last key. The
+    // value typed was lost when the pause before the grid sent it had not
+    // run out yet.
     {
-        name: 'with another editor on the file the value is sent once the typing pauses',
+        name: 'with another editor on a small file the value is sent with every change',
         csv: 'name,city\nAnna,Berlin\nBen,Oslo\n',
+        steps: steps(`
+            window.postMessage({ type: 'shared', value: true }, '*');
+            await t.wait(50);
+            const ta = await t.open(0, 1);
+            if (!ta) return;
+            // Sent right after the key, not after a pause.
+            t.input(ta, 'T');
+            await t.wait(1);
+            let sent = t.sent('typedText');
+            t.check(sent.length === 1 && sent[0].text === 'name,city\\nAnna,T\\nBen,Oslo\\n', 'the first change is sent at once ('
+                + JSON.stringify(sent) + ')');
+            t.input(ta, 'TY');
+            await t.wait(1);
+            sent = t.sent('typedText');
+            t.check(sent.length === 2 && sent[1].text === 'name,city\\nAnna,TY\\nBen,Oslo\\n', 'and the next one ('
+                + JSON.stringify(sent) + ')');
+            t.input(ta, 'Berlin');
+            await t.wait(1);
+            sent = t.sent('typedText');
+            t.check(sent.length === 3 && !('text' in sent[2]), 'the value typed back to the cell is sent at once without a text ('
+                + JSON.stringify(sent) + ')');
+            t.input(ta, 'X');
+            await t.wait(500);
+            t.check(t.sent('typedText').length === 4, 'and nothing again after the pause (' + t.sent('typedText').length + ')');
+            await t.flush();
+            await t.wait(500);
+            t.check(t.sent('typedText').length === 4, 'the value a save took is not sent again (' + t.sent('typedText').length + ')');
+            t.check(t.editor() === ta && document.activeElement === ta, 'the editor stays open and keeps the keyboard');
+            t.check(t.sent('edit').length === 0, 'nothing is written into the grid');
+        `),
+    },
+    {
+        name: 'with another editor on a small file a letter that opens the editor is sent at once',
+        csv: 'name,city\nAnna,Berlin\nBen,Oslo\n',
+        steps: steps(`
+            window.postMessage({ type: 'shared', value: true }, '*');
+            await t.wait(50);
+            await t.focusCell(0, 1);
+            document.querySelector('#grid-container .ag-cell-focus').dispatchEvent(new KeyboardEvent('keydown',
+                { key: 'x', code: 'KeyX', keyCode: 88, bubbles: true, cancelable: true }));
+            await t.wait(1);
+            if (!t.editor()) { t.check(false, 'the letter opens the editor'); return; }
+            const sent = t.sent('typedText');
+            t.check(sent.length === 1 && sent[0].text === 'name,city\\nAnna,x\\nBen,Oslo\\n', 'the value is sent ('
+                + JSON.stringify(sent) + ')');
+        `),
+    },
+    {
+        name: 'with another editor on a large file the value is sent once the typing pauses',
+        csv: BIG,
         steps: steps(`
             window.postMessage({ type: 'shared', value: true }, '*');
             await t.wait(50);
@@ -312,8 +378,8 @@ runSuite('typing (browser)', [
                 + t.sent('typedText').length + ')');
             await t.wait(500);
             const sent = t.sent('typedText');
-            t.check(sent.length === 1 && sent[0].text === 'name,city\\nAnna,TY\\nBen,Oslo\\n', 'the file with the value is sent once ('
-                + JSON.stringify(sent) + ')');
+            t.check(sent.length === 1 && sent[0].text === csv.replace('Anna,Berlin', 'Anna,TY'), 'the file with the value is sent once ('
+                + JSON.stringify(sent.map(m => m.text && m.text.slice(0, 40))) + ')');
             t.check(t.editor() === ta && document.activeElement === ta, 'the editor stays open and keeps the keyboard');
             t.check(t.sent('edit').length === 0, 'nothing is written into the grid');
             t.check(t.cell(0, 1).textContent === 'Berlin', 'the cell under the editor is unchanged');
@@ -321,7 +387,7 @@ runSuite('typing (browser)', [
     },
     {
         name: 'a key with Ctrl sends the value at once',
-        csv: 'name,city\nAnna,Berlin\nBen,Oslo\n',
+        csv: BIG,
         steps: `async (t, csv) => { ${HELPERS}
             window.postMessage({ type: 'init', text: csv, delimiter: ',', shared: true }, '*');
             await t.wait(900);
@@ -331,8 +397,8 @@ runSuite('typing (browser)', [
             // Ctrl+W closes the diff right away, before any pause.
             ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'w', code: 'KeyW', keyCode: 87, ctrlKey: true, bubbles: true, cancelable: true }));
             const sent = t.sent('typedText');
-            t.check(sent.length === 1 && sent[0].text === 'name,city\\nAnna,X\\nBen,Oslo\\n', 'the value is sent before the key reaches VS Code ('
-                + JSON.stringify(sent) + ')');
+            t.check(sent.length === 1 && sent[0].text === csv.replace('Anna,Berlin', 'Anna,X'), 'the value is sent before the key reaches VS Code ('
+                + JSON.stringify(sent.map(m => m.text && m.text.slice(0, 40))) + ')');
             await t.wait(600);
             t.check(t.sent('typedText').length === 1, 'and not again after the pause (' + t.sent('typedText').length + ')');
         }`,
@@ -356,7 +422,7 @@ runSuite('typing (browser)', [
     },
     {
         name: 'nothing is sent once the cell is closed',
-        csv: 'name,city\nAnna,Berlin\nBen,Oslo\n',
+        csv: BIG,
         steps: steps(`
             window.postMessage({ type: 'shared', value: true }, '*');
             await t.wait(50);
@@ -390,7 +456,7 @@ runSuite('typing (browser)', [
     },
     {
         name: 'a save that takes the value leaves nothing to send',
-        csv: 'name,city\nAnna,Berlin\nBen,Oslo\n',
+        csv: BIG,
         steps: steps(`
             window.postMessage({ type: 'shared', value: true }, '*');
             await t.wait(50);

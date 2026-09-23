@@ -138,10 +138,15 @@ export function stepHistory(h: TextHistory, delta: -1 | 1): string | null {
 // A value typed into a cell reaches the file only when the cell is committed.
 // Until then VS Code knew nothing of it. Ctrl+W or the tab's close button
 // closed the tab without asking and the value was lost. Auto-save and Save All
-// saved the file without it. So the editor says 'typing' on the first change,
+// saved the file without it. So the editor says 'typing' on every change,
 // which marks the tab unsaved. A save then asks for the value and gets the
 // file with it in (flushOpenEditor in grid/builder.ts). The cell stays open.
 // When the cell closes the extension is told with 'typingEnded'.
+//
+// Told only of the first change, VS Code took a backup or an auto-save about
+// every second while the typing went on. Each had the grid write out the
+// whole file, a pause on a large one. Told of every change, VS Code waits
+// until the typing pauses, as it does for its own editor.
 //
 // Whether the extension was told about the editor that is open now. Kept here
 // and not in the editor: the editor is gone by the time the grid reports it
@@ -193,6 +198,12 @@ export function handedOverBefore(): boolean {
 // closes. Writing out a large file takes a moment, so a lone editor never
 // does it.
 const SEND_DELAY_MS = 300;
+// A click on the diff's close button within that pause after the last key
+// lost the whole value. A file of up to 1 MB of text is sent with every
+// change instead, right after the key. At 0.9 MB each change reached the
+// extension within 25 ms and no key was held up. A larger file keeps the
+// pause.
+const SEND_AT_ONCE_CHARS = 1024 * 1024;
 let shared = false;
 let sendTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -202,9 +213,11 @@ export function setShared(value: boolean): void {
     else if (typingReported) sendSoon();
 }
 
+// Right after the key rather than in it: a letter that opens the editor
+// comes before the grid knows the editor, so the value could not be found.
 function sendSoon(): void {
     if (sendTimer !== null) clearTimeout(sendTimer);
-    sendTimer = setTimeout(sendNow, SEND_DELAY_MS);
+    sendTimer = setTimeout(sendNow, state.rawCsvText.length <= SEND_AT_ONCE_CHARS ? 0 : SEND_DELAY_MS);
 }
 
 // Sends what waits to be sent. Without a text when the value is the cell's
@@ -229,9 +242,10 @@ export class MultilineCellEditor {
     private originalValue = '';
     private history: TextHistory = newHistory('');
     private eGridCell: HTMLElement | null = null;
-    // The value a change is measured against: the one the editor opened with
-    // or the one the last save took (handOver). Null once the change is told.
-    private unreported: string | null = null;
+    // The value a change is measured against: the one the editor opened
+    // with, the one of the last change told or the one the last save took
+    // (handOver).
+    private reported = '';
 
     init(params: any): void {
         const value = params.value == null ? '' : String(params.value);
@@ -275,20 +289,20 @@ export class MultilineCellEditor {
         this.reportFrom(value);
     }
 
-    // Tells the extension once the value differs from `from`, now or on a
-    // later change.
+    // Tells the extension of every change of the value, the first one
+    // measured from `from`, now or later.
     reportFrom(from: string): void {
-        this.unreported = from;
+        this.reported = from;
         this.reportChange();
     }
 
     private reportChange(): void {
-        if (this.unreported !== null && this.getValue() !== this.unreported) {
-            this.unreported = null;
-            typingReported = true;
-            vscodeApi.postMessage({ type: 'typing' });
-        }
-        if (shared && typingReported) sendSoon();
+        const value = this.getValue();
+        if (value === this.reported) return;
+        this.reported = value;
+        typingReported = true;
+        vscodeApi.postMessage({ type: 'typing' });
+        if (shared) sendSoon();
     }
 
     getGui(): HTMLElement {
