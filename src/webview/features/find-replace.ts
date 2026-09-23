@@ -17,26 +17,35 @@ function isCaseSensitive(): boolean {
 
 // ── cell class rules (called by AG Grid on every cell render) ─────────────────
 
+// Whether match m is on the cell AG Grid is drawing. The frozen rows count 0,
+// 1, 2 in their band above the grid, the same numbers the rows below them
+// start with. The band has to agree too, otherwise a match in one marked the
+// cell of the other.
+function isOnCell(m: FindMatch | undefined, p: any): boolean {
+    return !!m && m.rowIndex === p.rowIndex && !!m.pinned === !!p.node?.rowPinned
+        && m.colField === p.column.getColId();
+}
+
 export function getFindCellClassRules(): Record<string, (p: any) => boolean> {
     return {
-        'cell-find-match': (p: any) =>
-            state.findMatches.some(m => m.rowIndex === p.rowIndex && m.colField === p.column.getColId()),
+        'cell-find-match': (p: any) => state.findMatches.some(m => isOnCell(m, p)),
         'cell-find-active': (p: any) =>
-            state.findMatchIndex >= 0 &&
-            !!state.findMatches[state.findMatchIndex] &&
-            state.findMatches[state.findMatchIndex].rowIndex === p.rowIndex &&
-            state.findMatches[state.findMatchIndex].colField === p.column.getColId(),
+            state.findMatchIndex >= 0 && isOnCell(state.findMatches[state.findMatchIndex], p),
     };
 }
 
 // ── selective refresh — only touch rows that gained / lost match status ───────
 
-function refreshRows(rowIndices: Set<number>): void {
-    if (!state.gridApi || rowIndices.size === 0) return;
-    const nodes = Array.from(rowIndices)
-        .map(ri => state.gridApi.getDisplayedRowAtIndex(ri))
-        .filter(Boolean);
-    if (nodes.length) state.gridApi.refreshCells({ rowNodes: nodes, force: true });
+function refreshRows(matches: FindMatch[]): void {
+    if (!state.gridApi || matches.length === 0) return;
+    const nodes = new Set<any>();
+    for (const m of matches) {
+        const node = m.pinned
+            ? state.gridApi.getPinnedTopRow(m.rowIndex)
+            : state.gridApi.getDisplayedRowAtIndex(m.rowIndex);
+        if (node) nodes.add(node);
+    }
+    if (nodes.size) state.gridApi.refreshCells({ rowNodes: [...nodes], force: true });
 }
 
 // ── core search (runs after debounce) ─────────────────────────────────────────
@@ -52,6 +61,26 @@ function searchCols(): any[] {
         .map(c => c.getColDef());
 }
 
+// The grid row that shows state.data[dataIndex], null when the grid has none.
+// A frozen row sits in the band above the others, which AG Grid's lookup by
+// row id does not reach, so the band is looked through first.
+function rowNodeFor(dataIndex: number): any {
+    const api = state.gridApi;
+    if (!api) return null;
+    for (let i = 0; i < api.getPinnedTopRowCount(); i++) {
+        const frozen = api.getPinnedTopRow(i);
+        if (Number(frozen?.data?._origIndex) === dataIndex) return frozen;
+    }
+    const node = api.getRowNode(String(dataIndex));
+    return node?.data && Number(node.data._origIndex) === dataIndex ? node : null;
+}
+
+// A row's place on screen, counted from the top. The frozen rows sit above
+// row 0 of the others, so they count from -pinnedCount up to -1.
+function screenRow(rowIndex: number, pinned: boolean | undefined, pinnedCount: number): number {
+    return pinned ? rowIndex - pinnedCount : rowIndex;
+}
+
 // `anchor` carries the position over from the last search. The new search
 // lands on the anchor itself when `keep` is set and it is still a match,
 // otherwise on the first match past it in screen order. A replace passes the
@@ -59,7 +88,7 @@ function searchCols(): any[] {
 // top or landing on the same cell again. Showing or hiding a column passes the
 // active match with `keep`, so the position survives a change that did not
 // touch it.
-function execFind(anchor?: { rowIndex: number; origIndex?: number; colField: string }, keep = false): void {
+function execFind(anchor?: { rowIndex: number; origIndex?: number; colField: string; pinned?: boolean }, keep = false): void {
     // A search that runs now makes a pending one pointless. Letting that one
     // fire later would throw away the position this one sets.
     if (debounceTimer !== null) clearTimeout(debounceTimer);
@@ -70,13 +99,13 @@ function execFind(anchor?: { rowIndex: number; origIndex?: number; colField: str
     const cs      = isCaseSensitive();
     const countEl = document.getElementById('find-count')!;
 
-    const prevRows = new Set(state.findMatches.map(m => m.rowIndex));
+    const prevMatches = state.findMatches;
     state.findMatches    = [];
     state.findMatchIndex = -1;
 
     if (!needle) {
         countEl.textContent = '';
-        refreshRows(prevRows);
+        refreshRows(prevMatches);
         return;
     }
 
@@ -85,7 +114,7 @@ function execFind(anchor?: { rowIndex: number; origIndex?: number; colField: str
 
     const lowerNeedle = cs ? '' : needle.toLowerCase();
 
-    state.gridApi.forEachNodeAfterFilterAndSort((node: any) => {
+    const search = (node: any, rowIndex: number, pinned: boolean): void => {
         for (const col of cols) {
             const raw = node.data[col.field];
             if (raw == null) continue;
@@ -94,13 +123,23 @@ function execFind(anchor?: { rowIndex: number; origIndex?: number; colField: str
                 // Capture _origIndex now so a later replace writes to the right
                 // state.data row even if the user changes sort/filter meanwhile.
                 state.findMatches.push({
-                    rowIndex: node.rowIndex,
+                    rowIndex,
                     origIndex: Number(node.data._origIndex),
                     colField: col.field,
+                    pinned,
                 });
             }
         }
-    });
+    };
+    // The frozen rows first, the way they sit above the others on screen.
+    // They are on screen the whole time, but the walk over the grid's rows
+    // below leaves them out.
+    const pinnedCount = state.gridApi.getPinnedTopRowCount();
+    for (let i = 0; i < pinnedCount; i++) {
+        const node = state.gridApi.getPinnedTopRow(i);
+        if (node?.data) search(node, i, true);
+    }
+    state.gridApi.forEachNodeAfterFilterAndSort((node: any) => search(node, node.rowIndex, false));
 
     if (state.findMatches.length) {
         state.findMatchIndex = 0;
@@ -111,15 +150,17 @@ function execFind(anchor?: { rowIndex: number; origIndex?: number; colField: str
             // at may then belong to another row, so the row is looked up by its
             // place in the data. A row a filter hides has no display index and
             // keeps the old one.
-            const anchorRow = anchor.origIndex != null
-                ? state.gridApi.getRowNode(String(anchor.origIndex))?.rowIndex ?? anchor.rowIndex
-                : anchor.rowIndex;
+            const node = anchor.origIndex != null ? rowNodeFor(anchor.origIndex) : null;
+            const anchorRow = node?.rowIndex != null
+                ? screenRow(node.rowIndex, !!node.rowPinned, pinnedCount)
+                : screenRow(anchor.rowIndex, anchor.pinned, pinnedCount);
             const colPos = new Map<string, number>(cols.map((c, i) => [c.field, i]));
             const anchorCol = colPos.get(anchor.colField) ?? -1;
             const next = state.findMatches.findIndex(m => {
+                const row = screenRow(m.rowIndex, m.pinned, pinnedCount);
                 const col = colPos.get(m.colField) ?? -1;
-                return m.rowIndex > anchorRow
-                    || (m.rowIndex === anchorRow && (keep ? col >= anchorCol : col > anchorCol));
+                return row > anchorRow
+                    || (row === anchorRow && (keep ? col >= anchorCol : col > anchorCol));
             });
             if (next >= 0) state.findMatchIndex = next;
         }
@@ -128,12 +169,11 @@ function execFind(anchor?: { rowIndex: number; origIndex?: number; colField: str
         ? (state.findMatchIndex + 1) + ' / ' + state.findMatches.length
         : '0 matches';
 
-    if (state.findMatchIndex >= 0) {
-        state.gridApi.ensureIndexVisible(state.findMatches[state.findMatchIndex].rowIndex, 'middle');
-    }
+    // A frozen row is on screen already.
+    const active = state.findMatches[state.findMatchIndex];
+    if (active && !active.pinned) state.gridApi.ensureIndexVisible(active.rowIndex, 'middle');
 
-    const newRows = new Set(state.findMatches.map(m => m.rowIndex));
-    refreshRows(new Set([...prevRows, ...newRows]));
+    refreshRows([...prevMatches, ...state.findMatches]);
 }
 
 // Public: debounced version used by input events
@@ -157,16 +197,17 @@ export function refreshFindIfOpen(): void {
 
 export function navigateFind(dir: 1 | -1): void {
     if (!state.findMatches.length) return;
-    const prevRow = state.findMatchIndex >= 0 ? state.findMatches[state.findMatchIndex].rowIndex : -1;
+    const prev = state.findMatches[state.findMatchIndex];
     state.findMatchIndex = (state.findMatchIndex + dir + state.findMatches.length) % state.findMatches.length;
-    const nextRow = state.findMatches[state.findMatchIndex].rowIndex;
+    const next = state.findMatches[state.findMatchIndex];
 
-    state.gridApi?.ensureIndexVisible(nextRow, 'middle');
+    // A frozen row is on screen already.
+    if (!next.pinned) state.gridApi?.ensureIndexVisible(next.rowIndex, 'middle');
     const countEl = document.getElementById('find-count');
     if (countEl) countEl.textContent = (state.findMatchIndex + 1) + ' / ' + state.findMatches.length;
 
     // Only refresh the two rows whose active-highlight status changed
-    refreshRows(new Set([prevRow, nextRow].filter(r => r >= 0)));
+    refreshRows(prev ? [prev, next] : [next]);
 }
 
 // ── open / close ──────────────────────────────────────────────────────────────
@@ -179,10 +220,10 @@ export function openFindBar(): void {
 export function closeFindBar(): void {
     document.getElementById('find-bar')?.classList.add('hidden');
     if (debounceTimer !== null) { clearTimeout(debounceTimer); debounceTimer = null; }
-    const prevRows = new Set(state.findMatches.map(m => m.rowIndex));
+    const prevMatches = state.findMatches;
     state.findMatches    = [];
     state.findMatchIndex = -1;
-    refreshRows(prevRows);
+    refreshRows(prevMatches);
     // The find input had the browser focus, so closing the bar would otherwise
     // leave it on nothing and the arrow keys dead until a cell was clicked.
     focusCell(state.focusedCellRowIndex, state.focusedCellColId);
@@ -199,12 +240,9 @@ function replaceInCell(m: FindMatch, edit: (old: string) => string): any {
     const dataIndex = dataRowIndexForFindMatch(m);
     const newVal = edit(String(state.data[dataIndex][colIdx] ?? ''));
     state.data[dataIndex][colIdx] = newVal;
-    const node = state.gridApi?.getRowNode(String(dataIndex));
-    if (node?.data && Number(node.data._origIndex) === dataIndex) {
-        node.data[m.colField] = newVal;
-        return node;
-    }
-    return null;
+    const node = rowNodeFor(dataIndex);
+    if (node) node.data[m.colField] = newVal;
+    return node;
 }
 
 // A cell can hold the search text more than once. Replace used to take the

@@ -3,7 +3,8 @@
 // These drive the real webview in headless Chrome (test/ui/harness.cjs). What
 // they hold the bar to: a replace shows up in the grid at once and the counter
 // moves on, the replacement text is inserted exactly as typed and find only
-// sees the columns the user sees.
+// sees the columns the user sees. It sees every row on screen, a frozen row
+// included.
 //
 // Run after `tsc -p ./`:  node test/find-replace-view.test.cjs
 
@@ -22,6 +23,19 @@ const FIND = `
   const count = () => document.getElementById('find-count').textContent;
   const col = (t, c, n) => { const out = []; for (let r = 0; r < n; r++) out.push(t.cell(r, c).textContent); return out.join(','); };
   async function press(t, id) { t.click(document.getElementById(id)); await t.wait(300); }
+  async function freezeRow(t, row) {
+    const c = t.cell(row, 0);
+    const r = c.getBoundingClientRect();
+    c.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 5, clientY: r.top + 5 }));
+    await t.wait(200);
+    const item = [...document.querySelectorAll('#row-context-menu .row-ctx-item')].find(i => i.textContent === 'Freeze row');
+    if (!item) { t.check(false, 'the row menu offers Freeze row'); return; }
+    item.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await t.wait(300);
+  }
+  const frozen = (c) => document.querySelector('#grid-container .ag-floating-top .ag-cell[col-id="col_' + c + '"]');
+  const marks = (el) => !el ? '-' : el.classList.contains('cell-find-active') ? 'active'
+    : el.classList.contains('cell-find-match') ? 'match' : 'none';
 `;
 
 function steps(body) {
@@ -239,6 +253,53 @@ runSuite('find and replace (browser)', [
             t.check(count() === '2 / 4', 'the counter moves on to the row after it in file order (' + count() + ')');
             await press(t, 'replace-one');
             t.check(t.lastEdit() === 'k,v\\nc,x\\nb,y\\na,y\\nb,x\\na,x', 'the next Replace takes that row (' + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
+    {
+        // A frozen row stays on screen above the others. Find only went
+        // through the rows below it, so the counter left it out and Replace
+        // All did not touch it.
+        name: 'a frozen row is searched too',
+        csv: 'k,v\nb,1\nx,2\nb,3\n',
+        steps: steps(`
+            await t.init(csv);
+            await freezeRow(t, 0);
+            t.check(!!frozen(0) && frozen(0).textContent === 'b', 'the first row is frozen');
+            await find(t, 'b', 'Q');
+            t.check(count() === '1 / 2', 'find counts the frozen row (' + count() + ')');
+            t.check(marks(frozen(0)) === 'active', 'the frozen row, on top, is the first match (' + marks(frozen(0)) + ')');
+            t.check(marks(t.cell(0, 0)) === 'none' && marks(t.cell(1, 0)) === 'match',
+                'below it, only the b row is marked (' + marks(t.cell(0, 0)) + ', ' + marks(t.cell(1, 0)) + ')');
+            await press(t, 'find-next');
+            t.check(count() === '2 / 2' && marks(t.cell(1, 0)) === 'active' && marks(frozen(0)) === 'match',
+                'Next moves on to the b row below (' + count() + ')');
+            await press(t, 'replace-all');
+            t.check(t.lastEdit() === 'k,v\\nQ,1\\nx,2\\nQ,3\\n', 'Replace All takes both rows (' + JSON.stringify(t.lastEdit()) + ')');
+            t.check(frozen(0).textContent === 'Q' && t.cell(1, 0).textContent === 'Q',
+                'the grid shows both new values (' + frozen(0).textContent + ', ' + t.cell(1, 0).textContent + ')');
+            t.check(count() === '0 matches', 'nothing is left to find (' + count() + ')');
+        `),
+    },
+    {
+        name: 'replace one in a frozen row',
+        csv: 'k,v\nb,1\nx,2\nb,3\n',
+        steps: steps(`
+            await t.init(csv);
+            await freezeRow(t, 0);
+            // Row 0 below the frozen row holds x. The marks must not spill
+            // from one onto the other, the two being row 0 of their own band.
+            // The click repaints every cell, the frozen ones included.
+            await find(t, 'x', 'y');
+            await t.focusCell(1, 1);
+            t.check(count() === '1 / 1' && marks(t.cell(0, 0)) === 'active' && marks(frozen(0)) === 'none',
+                'a match in the first row below marks that row only (' + count() + ', ' + marks(frozen(0)) + ')');
+            await find(t, 'b', 'Q');
+            await press(t, 'replace-one');
+            t.check(t.lastEdit() === 'k,v\\nQ,1\\nx,2\\nb,3\\n', 'Replace takes the frozen row first (' + JSON.stringify(t.lastEdit()) + ')');
+            t.check(frozen(0).textContent === 'Q', 'the frozen row shows the new value (' + frozen(0).textContent + ')');
+            t.check(count() === '1 / 1' && marks(t.cell(1, 0)) === 'active', 'the counter moves on to the row below (' + count() + ')');
+            await press(t, 'replace-one');
+            t.check(t.lastEdit() === 'k,v\\nQ,1\\nx,2\\nQ,3\\n', 'the next Replace takes that row (' + JSON.stringify(t.lastEdit()) + ')');
         `),
     },
 ]);
