@@ -87,30 +87,50 @@ function onGridShortcut(e: KeyboardEvent): void {
     run();
 }
 
+// The row and column of the cell Ctrl+C copies. The grid tracks the focused
+// cell of the body only (onCellFocused in grid/builder.ts), so a focused cell
+// in a frozen row is asked of AG Grid. That one copied nothing, although the
+// frozen row's menu copies its value.
+function copiedCell(): { node: any; colId: string } | null {
+    const api = state.gridApi;
+    if (!api) return null;
+    let node: any;
+    let colId: string | null | undefined;
+    if (state.focusedCellColId !== null && state.focusedCellRowIndex !== null) {
+        node = api.getDisplayedRowAtIndex(state.focusedCellRowIndex);
+        colId = state.focusedCellColId;
+    } else {
+        const f = api.getFocusedCell();
+        if (f?.rowPinned !== 'top') return null;
+        node = api.getPinnedTopRow(f.rowIndex);
+        colId = f.column?.getColId?.();
+    }
+    if (!node?.data || colId == null || colId === 'row-index') return null;
+    return { node, colId };
+}
+
 export function setupKeyboard(): void {
     document.addEventListener('keydown', onGridShortcut, true /* capture */);
 
     document.addEventListener('keydown', e => {
         // Single-cell copy. Multi-cell range copy is handled in capture phase by
         // range-select.ts, which stops propagation before this listener runs.
-        if ((e.ctrlKey || e.metaKey) && e.key === 'c' && !state.isCellEditing) {
-            if (state.gridApi
-                    && state.focusedCellColId !== null
-                    && state.focusedCellColId !== 'row-index'
-                    && state.focusedCellRowIndex !== null) {
-                const rowNode = state.gridApi.getDisplayedRowAtIndex(state.focusedCellRowIndex);
-                if (rowNode?.data) {
-                    const val = rowNode.data[state.focusedCellColId];
-                    // Quote the same way the range copy does (range-select.ts).
-                    // Without it a cell holding a line break arrives in Excel as
-                    // three separate cells, and pasting it back into the grid
-                    // creates three rows. tsvCell leaves ordinary values alone.
-                    // The value goes as the cell shows it, the way Export
-                    // writes it. With "Hide spaces around values" on, the
-                    // hidden spaces stay off the clipboard.
-                    writeToClipboard(val != null ? tsvCell(shownValue(String(val))) : '');
-                    e.preventDefault();
-                }
+        // In the find box and the other text boxes the key copies the text
+        // selected there, which the browser does. The grid's focused cell went
+        // to the clipboard instead.
+        if ((e.ctrlKey || e.metaKey) && e.key === 'c' && !state.isCellEditing && !isOtherTextInput(e.target)) {
+            const cell = copiedCell();
+            if (cell) {
+                const val = cell.node.data[cell.colId];
+                // Quote the same way the range copy does (range-select.ts).
+                // Without it a cell holding a line break arrives in Excel as
+                // three separate cells and pasting it back into the grid
+                // creates three rows. tsvCell leaves ordinary values alone.
+                // The value goes as the cell shows it, the way Export
+                // writes it. With "Hide spaces around values" on, the
+                // hidden spaces stay off the clipboard.
+                writeToClipboard(val != null ? tsvCell(shownValue(String(val))) : '');
+                e.preventDefault();
             }
         }
 
