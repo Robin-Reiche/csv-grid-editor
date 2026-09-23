@@ -37,6 +37,13 @@ export function markValueListsStale(): void {
     rowsVersion++;
 }
 
+// How many values the list draws. A column can hold far more different values
+// than anyone scrolls through. Drawing them all would take seconds. Only the
+// drawing stops here. The filter keeps a tick for every value, so the ones
+// not drawn pass until the user unticks them, through Select all or by
+// searching the list for them.
+const LIST_CAP = 2000;
+
 export function createCombinedFilter(colType: ColType): any {
     return class {
         params: any;
@@ -46,7 +53,6 @@ export function createCombinedFilter(colType: ColType): any {
         conditions: Condition[] = [{ type: 'none', value: '', join: 'and' }];
         eGui!: HTMLElement;
         _searchQuery = '';
-        truncated = false;
         _renderValuesList: (() => void) | null = null;
         _displayedValues: string[] = [];
         // The trimDisplay setting the keys above were made under. See _syncKeys.
@@ -87,8 +93,7 @@ export function createCombinedFilter(colType: ColType): any {
             } else {
                 arr.sort(collator.compare);
             }
-            this.allValues = arr.slice(0, 2000);
-            this.truncated = arr.length > 2000;
+            this.allValues = arr;
             this._ticksChanged();
         }
 
@@ -455,7 +460,9 @@ export function createCombinedFilter(colType: ColType): any {
                 this._valuesPassingCondition().forEach(v => items.push({ label: v, value: v, isBlank: false }));
                 if (q) items = items.filter(it => it.label.toLowerCase().includes(q));
 
+                // Select all goes by these, the values past the drawn ones too.
                 this._displayedValues = items.map(it => it.value);
+                const drawn = items.slice(0, LIST_CAP + (items[0]?.isBlank ? 1 : 0));
 
                 if (items.length === 0) {
                     const empty = document.createElement('div');
@@ -467,7 +474,7 @@ export function createCombinedFilter(colType: ColType): any {
                     syncMaster();
                     return;
                 }
-                items.forEach(item => {
+                drawn.forEach(item => {
                     const row = document.createElement('label');
                     row.className = 'csv-filter-value-row';
                     const cb = document.createElement('input');
@@ -487,10 +494,10 @@ export function createCombinedFilter(colType: ColType): any {
                     row.appendChild(span);
                     listDiv.appendChild(row);
                 });
-                if (this.truncated && !q) {
+                if (drawn.length < items.length) {
                     const note = document.createElement('div');
                     note.className = 'csv-filter-empty';
-                    note.textContent = 'Showing first 2000 unique values';
+                    note.textContent = `Showing first ${LIST_CAP} unique values`;
                     listDiv.appendChild(note);
                 }
                 syncMaster();

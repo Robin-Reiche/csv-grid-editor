@@ -139,6 +139,66 @@ runSuite('filter value list (browser)', [
         `),
     },
     {
+        // The list draws the first 2000 values. The ticks stopped there too,
+        // so unticking one value also hid every row whose value came after
+        // the first 2000, with nothing on screen to say so or to tick them
+        // back with.
+        name: 'a column with more values than the list draws',
+        csv: 'id,name\n' + Array.from({ length: 2100 }, (_, i) => i + ',n' + String(i).padStart(4, '0')).join('\n'),
+        steps: steps(`
+            const info = () => document.getElementById('info').textContent;
+            const search = async (q) => {
+                const inp = document.querySelector('.csv-filter-panel .csv-filter-values-list').previousElementSibling.previousElementSibling;
+                inp.value = q;
+                inp.dispatchEvent(new Event('input', { bubbles: true }));
+                await t.wait(100);
+            };
+            const master = () => document.querySelector('.csv-filter-panel .csv-filter-master input');
+            await t.init(csv);
+            await openFilter(1);
+            t.check(rows().length === 2000, 'the list draws 2000 values (' + rows().length + ')');
+            t.check(/Showing first 2000/.test(document.querySelector('.csv-filter-panel').textContent), 'and says it stops there');
+            await untick('n0005');
+            await closeFilter();
+            t.check(/^2099 of 2100 rows/.test(info()), 'unticking one value hides one row (' + info() + ')');
+            await openFilter(1);
+            await search('n2050');
+            t.check(labels() === '["n2050"]' && ticked() === '["n2050"]', 'a value past the first 2000 can be found and is ticked (' + labels() + ')');
+            await untick('n2050');
+            await closeFilter();
+            t.check(/^2098 of 2100 rows/.test(info()), 'and unticked (' + info() + ')');
+            await openFilter(1);
+            await search('');
+            const box = master();
+            box.checked = false;
+            box.dispatchEvent(new Event('change', { bubbles: true }));
+            await t.wait(250);
+            t.check(/^0 of 2100 rows/.test(info()), 'Select all unticks every value, the ones not drawn too (' + info() + ')');
+            box.checked = true;
+            box.dispatchEvent(new Event('change', { bubbles: true }));
+            await t.wait(250);
+            t.check(/^2100 rows/.test(info()) && !filterOn(), 'and ticks them all again (' + info() + ')');
+        `),
+    },
+    {
+        name: 'a column with more values than the list draws, without a header row',
+        csv: 'id,name\n' + Array.from({ length: 2100 }, (_, i) => i + ',n' + String(i).padStart(4, '0')).join('\n'),
+        steps: steps(`
+            const info = () => document.getElementById('info').textContent;
+            await t.init(csv);
+            await t.setSetting('firstRowIsHeader', false);
+            await t.wait(300);
+            await closeFilter();
+            await openFilter(1);
+            t.check(rows().length === 2000 && labelOf(rows()[0]) === 'n0000', 'the list draws 2000 values (' + rows().length + ')');
+            await untick('n0005');
+            await closeFilter();
+            // The file's first row reads name, which sorts after every n0000.
+            t.check(/^2100 of 2101 rows/.test(info()), 'unticking one value hides one row (' + info() + ')');
+            t.check(t.cell(0, 1) && t.cell(0, 1).textContent === 'name', 'the first row of the file is still shown');
+        `),
+    },
+    {
         // Replace and Delete write into the rows past the grid's own editing.
         // Undo and an outside change swap the rows. The list has to follow
         // each of them.
