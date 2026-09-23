@@ -450,6 +450,9 @@ export function buildGrid(): void {
             markValueListsStale();
             notifyChange();
             scheduleRecomputeColTypes();
+            // The cell may have gained or lost a match. A checkbox click
+            // writes through here too.
+            refreshFindInPlace();
         },
     };
 

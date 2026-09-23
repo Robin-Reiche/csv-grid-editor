@@ -6,6 +6,7 @@ import type { ClipboardFormat } from '../utils/csv';
 import { closeAllPopups } from './popups';
 import { shownValue } from '../grid/control-char-cell';
 import { markValueListsStale } from '../grid/filter';
+import { refreshFindInPlace } from './find-replace';
 
 // ── Excel-style range selection for the main grid ─────────────────────────────
 // AG Grid Community has no built-in cell-range selection (Enterprise only), so
@@ -277,6 +278,9 @@ function clearSelectedCells(): void {
     markValueListsStale();
     recomputeColTypes();
     notifyChange();
+    // An emptied cell matches nothing. Left alone, find kept it marked and
+    // counted it.
+    refreshFindInPlace();
 }
 
 // ── selection entry points ────────────────────────────────────────────────────
