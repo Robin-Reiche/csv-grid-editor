@@ -11,6 +11,9 @@
 //   permanent.
 // - A UTF-8 byte order mark. Reading dropped it and saving never wrote it
 //   back, so Excel opened the saved file as ANSI and umlauts came out garbled.
+// - A save that fails (the file is locked or read-only). The provider took
+//   the unsaved edits for what the disk holds, so the next outside change or
+//   change event replaced them without a word.
 //
 // This drives the real provider against a stubbed vscode API on top of the
 // real file system, in a temp folder.
@@ -32,6 +35,8 @@ let quickPickChoice = null;
 // Lets a test pretend a small file is a large one, so the preview modes can be
 // reached without writing 50 MB to disk.
 let fakeSize = null;
+// The next write fails the way a file Excel holds open does on Windows.
+let failNextWrite = false;
 
 class EventEmitter {
     constructor() { this.listeners = []; this.event = l => { this.listeners.push(l); return { dispose() {} }; }; }
@@ -53,7 +58,13 @@ const vscodeStub = {
         fs: {
             stat: async uri => ({ size: fakeSize ?? fs.statSync(uri.fsPath).size }),
             readFile: async uri => new Uint8Array(fs.readFileSync(uri.fsPath)),
-            writeFile: async (uri, bytes) => fs.writeFileSync(uri.fsPath, bytes),
+            writeFile: async (uri, bytes) => {
+                if (failNextWrite) {
+                    failNextWrite = false;
+                    throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' });
+                }
+                fs.writeFileSync(uri.fsPath, bytes);
+            },
             copy: async (from, to) => fs.copyFileSync(from.fsPath, to.fsPath),
             delete: async uri => fs.rmSync(uri.fsPath, { force: true }),
         },
@@ -89,6 +100,7 @@ async function test(name, fn) {
     warnings.length = 0;
     fakeSize = null;
     quickPickChoice = null;
+    failNextWrite = false;
     try { await fn(); console.log('  ✓ ' + name); }
     catch (e) { failures++; console.error('  ✗ ' + name + '\n      ' + e.message); }
 }
@@ -257,6 +269,30 @@ async function main() {
         await t.save();
         await t.fireWatcher();                          // the echo of that save
         assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\nmine\n');
+        assert.strictEqual(t.updates().length, 0);
+    });
+
+    await test('an outside change after a failed save does not replace the edits', async () => {
+        const p = file('locked.csv', 'h\n1\n');
+        const t = await open(p);
+        await t.edit('h\nMY EDIT\n');
+        failNextWrite = true;
+        await assert.rejects(t.save(), /EBUSY/, 'the failed write did not reach VS Code');
+        fs.writeFileSync(p, 'h\nEXCEL\n');
+        await t.fireWatcher();
+        assert.strictEqual(t.doc.content, 'h\nMY EDIT\n', 'the outside change replaced the unsaved edit');
+        assert.strictEqual(t.updates().length, 0, 'the grid was reloaded over the unsaved edit');
+        assert.strictEqual(warnings.length, 1, 'the user was not told the file changed on disk');
+    });
+
+    await test('a change event after a failed save leaves the edits alone', async () => {
+        const p = file('locked-event.csv', 'h\n1\n');
+        const t = await open(p);
+        await t.edit('h\nMY EDIT\n');
+        failNextWrite = true;
+        await assert.rejects(t.save(), /EBUSY/);
+        await t.fireWatcher();                          // the file itself did not change
+        assert.strictEqual(t.doc.content, 'h\nMY EDIT\n', 'the grid went back to the old disk text');
         assert.strictEqual(t.updates().length, 0);
     });
 

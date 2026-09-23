@@ -530,9 +530,18 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             return;
         }
         // Recorded before the write, so the watcher event it causes is known as
-        // ours however late it arrives (see reload in resolveCustomEditor).
+        // ours however late it arrives (see reload in resolveCustomEditor). A
+        // write that fails (the file is locked or read-only) puts it back. The
+        // disk still holds the old text. Taking the edits for it let the next
+        // outside change or change event replace them without a warning.
+        const diskText = document.diskText;
         document.diskText = document.content;
-        await vscode.workspace.fs.writeFile(document.uri, document.encode());
+        try {
+            await vscode.workspace.fs.writeFile(document.uri, document.encode());
+        } catch (e) {
+            document.diskText = diskText;
+            throw e;
+        }
     }
 
     async saveCustomDocumentAs(document: CsvDocument, destination: vscode.Uri, _cancellation: vscode.CancellationToken): Promise<void> {
