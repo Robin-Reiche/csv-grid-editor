@@ -231,4 +231,19 @@ runSuite('delimiter switch (browser)', [
             t.check(rows() === '1 rows × 2 columns', 'and when the file is read again (' + rows() + ')');
         `),
     },
+    {
+        // Detection reads the header when the file is opened again. Written
+        // without its quotes, "Name, Vorname";Stadt tied one comma against
+        // one semicolon, so the saved file opened as a comma file split in
+        // the wrong places.
+        name: 'a quoted header name keeps its quotes on an edit',
+        csv: '"Name, Vorname";Stadt\r\n"Müller, Jörg";Köln\r\n"Schmidt, Anna";Wien\r\n',
+        steps: `async (t, csv) => { ${HELPERS}
+            await t.init(csv, ';');
+            t.check(t.names() === 'Name, Vorname|Stadt|-|-', 'the header splits on the semicolon (' + t.names() + ')');
+            await t.edit(0, 1, 'Düsseldorf');
+            t.check(t.lastEdit() === '"Name, Vorname";Stadt\\r\\nMüller, Jörg;Düsseldorf\\r\\nSchmidt, Anna;Wien\\r\\n',
+                'the header line is written with its quotes (' + JSON.stringify(t.lastEdit()) + ')');
+        }`,
+    },
 ]);

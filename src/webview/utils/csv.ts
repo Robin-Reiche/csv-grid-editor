@@ -219,6 +219,43 @@ export function firstLineOf(text: string): string {
     return firstCr >= 0 ? text.slice(0, firstCr) : text;
 }
 
+// The delimiter a file's first line points to, by its semicolons, commas and
+// tabs. More tabs than either of the others make a tab file, more semicolons
+// than commas a semicolon file and anything else a comma file. A separator
+// inside a quoted value is part of the value and does not count, so
+// "Name, Vorname";Stadt is a semicolon file. Quotes are told apart the way
+// firstLineOf tells them: a quote opens a value only at the start of a field.
+// An inch mark further into a name is a character like any other. Taking any
+// two quotes for a pair hid the semicolon in Breite (");Höhe ("), and that
+// file opened as a single comma column. The extension detects every file
+// with this. The grid asks it before it writes the header (toCsv).
+export function delimiterOfFirstLine(line: string): string {
+    let semicolons = 0;
+    let commas = 0;
+    let tabs = 0;
+    let inQuotes = false;
+    let fieldStart = true;
+    for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (inQuotes) {
+            if (ch === '"') {
+                if (line[i + 1] === '"') i++;
+                else inQuotes = false;
+            }
+            continue;
+        }
+        if (ch === '"' && fieldStart) { inQuotes = true; continue; }
+        if (ch === ';') semicolons++;
+        else if (ch === ',') commas++;
+        else if (ch === '\t') tabs++;
+        if (ch === ',' || ch === ';' || ch === '\t' || ch === '|' || ch === '\r') fieldStart = true;
+        else if (ch !== ' ') fieldStart = false;
+    }
+    if (tabs > commas && tabs > semicolons) return '\t';
+    if (semicolons > commas) return ';';
+    return ',';
+}
+
 // Reads the line format from the text parseCsv is about to split into rows. It
 // counts only the breaks that end a row, so it tracks quotes exactly the way
 // parseCsv does and has to stay in step with it. A break inside a quoted value
@@ -334,14 +371,31 @@ export function toCsv(rows: CsvRow[], delimiter: string, format?: LineFormat): s
     // there and the next read of the file dropped it again. A line break
     // after it keeps it a row, the way every row above it is kept.
     const breakAfterLast = !!format && !finalNewline && last >= 0 && readsAsEmptyLine(rows[last], last === 0);
-    const text = rows.map((row, r) =>
+    const line = (row: CsvRow, r: number, quoteSeparators: boolean) =>
         row.map(cell => {
             const s = String(cell);
             let quote = s.includes(delimiter) || s.includes('"') || s.includes('\n') || s.includes('\r');
             if (!quote && quoteLastSpaces && r === last) quote = s !== '';
+            if (!quote && quoteSeparators) quote = s.includes(',') || s.includes(';') || s.includes('\t');
             return quote ? '"' + s.replace(/"/g, '""') + '"' : s;
-        }).join(delimiter)
-    ).join(eol);
+        }).join(delimiter);
+    // The first row written is what detection reads when the file is opened
+    // again (delimiterOfFirstLine). A value goes in quotes only when it has
+    // to, so "Name, Vorname";Stadt lost its quotes on the first save. That
+    // left one comma against one semicolon. The file opened again as a
+    // comma file split in the wrong places. When the row written plainly
+    // points to another delimiter, its values that hold a comma, a semicolon
+    // or a tab keep quotes, as long as that brings the delimiter back. A row
+    // that needs none is written as before. So is a row of one value. Quotes
+    // cannot make it point to a semicolon or a tab. In a file split on commas
+    // by mistake they kept the header in one piece once the right delimiter
+    // was picked. The clipboard passes no format and gets none of this.
+    let first = last >= 0 ? line(rows[0], 0, false) : '';
+    if (format && last >= 0 && rows[0].length > 1 && delimiterOfFirstLine(first) !== delimiter) {
+        const quoted = line(rows[0], 0, true);
+        if (delimiterOfFirstLine(quoted) === delimiter) first = quoted;
+    }
+    const text = rows.map((row, r) => r === 0 ? first : line(row, r, false)).join(eol);
     return finalNewline || breakAfterLast ? text + eol : text;
 }
 

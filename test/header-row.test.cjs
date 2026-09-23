@@ -131,6 +131,17 @@ test('an undo step moves to the other mode and back unchanged', () => {
     assert.deepStrictEqual(snapshotInHeaderMode(off, false), snap);
 });
 
+// Detection reads the first line of the file, which without a header is row 1,
+// not the letters. Written without its quotes, "Name, Vorname";Stadt tied one
+// comma against one semicolon and the file opened again as a comma file.
+test('the first line of the file keeps the quotes that tell its delimiter', () => {
+    const text = '"Name, Vorname";Stadt\r\n"Müller, Jörg";Köln\r\n';
+    const data = withVirtualHeader(parseCsv(text, ';', false, true), true);
+    data[2][1] = 'Wien';
+    const written = toCsv(fileRows(data, true), ';', detectLineFormat(text, ';'));
+    assert.strictEqual(written, '"Name, Vorname";Stadt\r\nMüller, Jörg;Wien\r\n');
+});
+
 test('a frozen row that becomes the header is no longer frozen', () => {
     const snap = { data: [['A', 'B'], ['h1', 'h2'], ['1', '2']], frozenRowIdx: [1, 2], pinnedCols: [] };
     const on = snapshotInHeaderMode(snap, false);

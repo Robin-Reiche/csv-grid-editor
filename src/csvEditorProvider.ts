@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { createHash } from 'crypto';
 import { getWebviewContent } from './webview';
-import { firstLineOf } from './webview/utils/csv';
+import { firstLineOf, delimiterOfFirstLine } from './webview/utils/csv';
 import { SETTING_DEFAULTS, isSettingKey, type Settings, type SettingKey } from './webview/settings';
 import {
     RowPageIndex,
@@ -908,14 +908,6 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         // counting to an LF in a classic Mac file counted the separators of the
         // whole file, and cutting at any CR split a header whose quoted name
         // holds one.
-        // Separators inside a quoted name are part of the name and do not
-        // count: "Name, Vorname";Stadt is a semicolon file.
-        const firstLine = firstLineOf(content).replace(/"(?:[^"]|"")*"/g, '');
-        const semicolons = (firstLine.match(/;/g) || []).length;
-        const commas     = (firstLine.match(/,/g) || []).length;
-        const tabs       = (firstLine.match(/\t/g) || []).length;
-        if (tabs > commas && tabs > semicolons) return '\t';
-        if (semicolons > commas) return ';';
-        return ',';
+        return delimiterOfFirstLine(firstLineOf(content));
     }
 }
