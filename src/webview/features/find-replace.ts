@@ -27,9 +27,33 @@ function isOnCell(m: FindMatch | undefined, p: any): boolean {
         && m.colField === p.column.getColId();
 }
 
+// A cell as isOnCell tells them apart: its band, its row and its column.
+function cellKey(pinned: boolean, rowIndex: number, colId: string): string {
+    return (pinned ? 't' : 'b') + rowIndex + ':' + colId;
+}
+
+// The cells of state.findMatches, made once for each new list of matches.
+// The rule below runs for every cell the grid draws. A sort, a filter or a
+// scroll draws them all again. Going through the matches for each of them
+// took over a second per sort with a search like 'e' that matches most cells.
+let matchCells: { of: FindMatch[]; size: number; keys: Set<string> } | null = null;
+
+function isMatchCell(p: any): boolean {
+    const list = state.findMatches;
+    // Let go of a closed search's matches, which can run into the hundreds
+    // of thousands.
+    if (!list.length) { matchCells = null; return false; }
+    if (matchCells?.of !== list || matchCells.size !== list.length) {
+        const keys = new Set<string>();
+        for (const m of list) keys.add(cellKey(!!m.pinned, m.rowIndex, m.colField));
+        matchCells = { of: list, size: list.length, keys };
+    }
+    return matchCells.keys.has(cellKey(!!p.node?.rowPinned, p.rowIndex, p.column.getColId()));
+}
+
 export function getFindCellClassRules(): Record<string, (p: any) => boolean> {
     return {
-        'cell-find-match': (p: any) => state.findMatches.some(m => isOnCell(m, p)),
+        'cell-find-match': isMatchCell,
         'cell-find-active': (p: any) =>
             state.findMatchIndex >= 0 && isOnCell(state.findMatches[state.findMatchIndex], p),
     };
