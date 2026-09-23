@@ -1031,14 +1031,18 @@ body.spaces-shown .csv-filter-value-label {
     border-color: var(--vscode-textLink-foreground, #4db6f0);
     opacity: 1;
 }
-/* OR stands out by its border and full strength. Its text keeps the menu
-   foreground: the link color belongs to the editor background and was hard to
-   read on a menu of the other lightness. Add condition below keeps it for the
-   same reason. */
+/* OR stands out filled with the menu's own selection pair, which reads on any
+   menu. A link-colored border alone was also what a hovered AND showed. The
+   link color belongs to the editor background and was hard to read as text on
+   a menu of the other lightness. Add condition below keeps the menu foreground
+   for the same reason. */
 .csv-filter-join-toggle[data-join="or"] {
     opacity: 1;
-    border-color: var(--vscode-textLink-foreground, #4db6f0);
+    border-color: var(--vscode-menu-selectionBackground, #094771);
+    background: var(--vscode-menu-selectionBackground, #094771);
+    color: var(--vscode-menu-selectionForeground, #fff);
 }
+.csv-filter-join-toggle[data-join="or"]:hover { border-color: var(--vscode-textLink-foreground, #4db6f0); }
 .csv-filter-remove-btn {
     flex-shrink: 0;
     width: 20px; height: 20px;

@@ -265,9 +265,24 @@ runSuite('popover colors (browser)', each(`
         t.readable('column filter, AND', filter, rows());
         const join = filter.querySelector('.csv-filter-join-toggle');
         t.check(!!join, 'a second condition brings the AND/OR switch');
-        if (join) join.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        // A hovered AND and an OR at rest have to look apart. Otherwise the
+        // switch seems to flip as soon as the pointer is on it.
+        const look = el => {
+            const s = getComputedStyle(el);
+            return [s.backgroundColor, s.borderTopColor, s.color, s.opacity].join(' ');
+        };
+        let andHovered = '';
+        if (join) {
+            join.classList.add('__hover');
+            andHovered = look(join);
+            join.classList.remove('__hover');
+            join.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        }
         await t.wait(100);
         t.readable('column filter, OR', filter, rows());
+        const or = filter.querySelector('.csv-filter-join-toggle[data-join="or"]');
+        t.check(!!or && look(or) !== andHovered, 'OR at rest looks unlike a hovered AND ('
+            + andHovered + ' against ' + (or && look(or)) + ')');
     }
     await t.shut();
 
