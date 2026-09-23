@@ -206,7 +206,10 @@ runSuite('line endings (browser)', [
             }
             key('Enter', { ctrlKey: true });
             await t.wait(400);
-            t.check(t.lastEdit() === 'a,b\\r\\n,', 'the added row is written with CRLF (' + JSON.stringify(t.lastEdit()) + ')');
+            // The empty row gets a break after it as well. This used to expect
+            // 'a,b\\r\\n,', which the next read of the file took for a trailing
+            // blank line, so the row was gone again (test/empty-table.test.cjs).
+            t.check(t.lastEdit() === 'a,b\\r\\n,\\r\\n', 'the added row is written with CRLF (' + JSON.stringify(t.lastEdit()) + ')');
         `),
     },
 ]);

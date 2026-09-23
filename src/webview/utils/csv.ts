@@ -270,6 +270,16 @@ function readsAsBlankLine(row: CsvRow, onlyRow: boolean): boolean {
     return spaces;
 }
 
+// Whether this row is one parseCsv would drop as a trailing blank line even
+// in quotes, as the last line of a file with no line break after it: a row of
+// empty values. The only line of a file is kept anyway once it has a
+// delimiter. A row with no cells at all is what deleting every column leaves,
+// with no value that could be kept.
+function readsAsEmptyLine(row: CsvRow, onlyRow: boolean): boolean {
+    if (row.length === 0 || (onlyRow && row.length > 1)) return false;
+    return row.every(cell => String(cell) === '');
+}
+
 // Without a line format the rows are joined with LF and nothing follows the
 // last one. The clipboard wants exactly that. The grid writes the file with
 // the format it was read with (state.lineFormat).
@@ -290,6 +300,10 @@ export function toCsv(rows: CsvRow[], delimiter: string, format?: LineFormat): s
     // can only hold them because they were quoted in the file or typed in.
     // Written bare, the next read after an edit dropped the row.
     const quoteLastSpaces = !!format && !finalNewline && last >= 0 && readsAsBlankLine(rows[last], last === 0);
+    // A last row of empty values cannot be saved by quotes. Add row put one
+    // there and the next read of the file dropped it again. A line break
+    // after it keeps it a row, the way every row above it is kept.
+    const breakAfterLast = !!format && !finalNewline && last >= 0 && readsAsEmptyLine(rows[last], last === 0);
     const text = rows.map((row, r) =>
         row.map(cell => {
             const s = String(cell);
@@ -298,7 +312,7 @@ export function toCsv(rows: CsvRow[], delimiter: string, format?: LineFormat): s
             return quote ? '"' + s.replace(/"/g, '""') + '"' : s;
         }).join(delimiter)
     ).join(eol);
-    return finalNewline ? text + eol : text;
+    return finalNewline || breakAfterLast ? text + eol : text;
 }
 
 // TSV-quote a single cell — matches Excel's clipboard format. Wraps the value

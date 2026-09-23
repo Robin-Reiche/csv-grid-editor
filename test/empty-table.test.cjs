@@ -92,6 +92,34 @@ test('a trailing blank line after real rows is still dropped', () => {
     assert.deepStrictEqual(parseCsv('', ','), []);
 });
 
+// The grid adds a row of empty values when asked to. The rule above took it
+// for a trailing blank line on the next read. A file without a line break at
+// its end lost the row that way, quoted or not. A break after that row keeps
+// it. Nothing else in the file changes.
+test('an empty last row keeps its row in a file without a final line break', () => {
+    const noBreak = { eol: '\n', finalNewline: false };
+    const added = [['a', 'b'], ['', '']];
+    assert.strictEqual(toCsv(added, ',', noBreak), 'a,b\n,\n');
+    assert.deepStrictEqual(parseCsv(toCsv(added, ',', noBreak), ',', false, true), added);
+    const cleared = [['h'], ['v1'], ['']];
+    assert.strictEqual(toCsv(cleared, ',', noBreak), 'h\nv1\n\n');
+    assert.deepStrictEqual(parseCsv(toCsv(cleared, ',', noBreak), ',', false, true), cleared);
+    const crlf = { eol: '\r\n', finalNewline: false };
+    assert.strictEqual(toCsv([['a', 'b'], ['1', '2'], ['', '']], ',', crlf), 'a,b\r\n1,2\r\n,\r\n');
+    // Without a header the file's only line can be such a row.
+    assert.deepStrictEqual(parseCsv(toCsv([['']], ',', noBreak), ',', false, true), [['']]);
+    // A file that ends with a break already has one, a row with a value needs
+    // none and the clipboard gets the rows as they are.
+    assert.strictEqual(toCsv(added, ',', { eol: '\n', finalNewline: true }), 'a,b\n,\n');
+    assert.strictEqual(toCsv([['a', 'b'], ['', 'x']], ',', noBreak), 'a,b\n,x');
+    assert.strictEqual(toCsv(added, ','), 'a,b\n,');
+    // A single line of unnamed columns is kept as a header anyway. An empty
+    // table or rows left with no cells at all are not rows to keep.
+    assert.strictEqual(toCsv([['', '', '']], ',', noBreak), ',,');
+    assert.strictEqual(toCsv([], ',', noBreak), '');
+    assert.strictEqual(toCsv([[], []], ',', noBreak), '\n');
+});
+
 test('a table started from nothing saves and reopens as what was typed', () => {
     // Add column, rename it, Add row, type a value: what reaches the file has to
     // come back as the same table.

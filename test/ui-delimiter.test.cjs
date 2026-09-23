@@ -171,4 +171,25 @@ runSuite('delimiter switch (browser)', [
                 + JSON.stringify(t.lastEdit()) + ')');
         `),
     },
+    {
+        // Add row wrote the empty row bare at the end of a file without a
+        // final line break. Every read after that took it for a trailing blank
+        // line, a switch as well as the file read again.
+        name: 'an empty last row',
+        csv: 'a,b',
+        steps: steps(`
+            const rows = () => document.getElementById('info').textContent;
+            const add = document.querySelector('#grid-container .empty-state button');
+            if (!add) { t.check(false, 'a header alone offers Add row'); return; }
+            t.click(add);
+            await t.wait(400);
+            t.check(t.lastEdit() === 'a,b\\n,\\n', 'the row is written with a break after it ('
+                + JSON.stringify(t.lastEdit()) + ')');
+            await t.delim(';');
+            await t.delim(',');
+            t.check(rows() === '1 rows × 2 columns', 'the row is still there after a switch (' + rows() + ')');
+            await t.update(t.lastEdit());
+            t.check(rows() === '1 rows × 2 columns', 'and when the file is read again (' + rows() + ')');
+        `),
+    },
 ]);
