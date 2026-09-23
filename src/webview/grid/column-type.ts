@@ -1,4 +1,4 @@
-import { state } from '../state';
+import { state, getNumCols } from '../state';
 import type { CsvRow, ColType } from '../types';
 import { BOOL_PAIRS, boolPairIndex } from '../utils/bool-values';
 import { syncColumnHeaders } from './refresh';
@@ -64,7 +64,9 @@ export function recomputeColTypes(): void {
     typeRecomputeTimer = null;
     if (!state.data || state.data.length < 2) return;
     const bodyRows = state.data.slice(1);
-    const numCols  = state.data[0]?.length ?? 0;
+    // A row can be wider than the header row. The columns past the header have
+    // no name but hold values like any other. buildGrid gives them a type too.
+    const numCols  = getNumCols(state.data);
     const changed: string[] = [];
     for (let c = 0; c < numCols; c++) {
         const newType = getColumnType(bodyRows, c);

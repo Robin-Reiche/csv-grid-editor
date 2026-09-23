@@ -6,7 +6,9 @@
 // old columns: a restored column stayed invisible, a removed one stayed on
 // screen and renamed headers kept their old names. The type badge and the
 // header tooltip went stale after an undo, a rename or the "Hide spaces"
-// switch, while the cells already used the new type.
+// switch, while the cells already used the new type. A column with no name in
+// the header row lost its type on every row swap: its badge read Text and its
+// checkboxes turned back into words.
 //
 // Run after `tsc -p ./`:  node test/ui-columns.test.cjs
 
@@ -47,6 +49,16 @@ const HELPERS = `
     };
     t.button = async (id) => {
         document.getElementById(id).dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        await t.wait(400);
+    };
+    t.rowMenu = async (row, col, label) => {
+        const c = t.cell(row, col);
+        const r = c.getBoundingClientRect();
+        c.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 5, clientY: r.top + 5 }));
+        await t.wait(200);
+        const item = [...document.querySelectorAll('#row-context-menu .row-ctx-item')].find(i => i.textContent === label);
+        if (!item) { t.check(false, 'the row menu offers ' + label); return; }
+        item.dispatchEvent(new MouseEvent('click', { bubbles: true }));
         await t.wait(400);
     };
     t.edit = async (row, col, value) => {
@@ -222,6 +234,29 @@ runSuite('columns (browser)', [
             await t.setSetting('trimDisplay', false);
             t.check(t.names() === 'k| v |-|-', 'the header shows its spaces (' + JSON.stringify(t.names()) + ')');
             t.check(t.types() === 'string|integer|-|-', 'and keeps its badge (' + t.types() + ')');
+        `),
+    },
+    {
+        // The second column has values but no name in the header row.
+        name: 'type badge of a column wider than the header',
+        csv: 'a\nx,1\ny,2\nz,3',
+        steps: steps(`
+            t.check(t.types() === 'string|integer|-|-', 'the types at open (' + t.types() + ')');
+            await t.rowMenu(0, 0, 'Delete row');
+            t.check(t.lastEdit() === 'a\\ny,2\\nz,3', 'the row is deleted (' + JSON.stringify(t.lastEdit()) + ')');
+            t.check(t.types() === 'string|integer|-|-', 'the column keeps its badge (' + t.types() + ')');
+            const tip = await t.tip(1);
+            t.check(tip === 'Integer', 'and its tooltip (' + tip + ')');
+        `),
+    },
+    {
+        name: 'checkboxes in a column wider than the header',
+        csv: 'a\nx,true\ny,false\nz,true',
+        settings: { boolCheckboxes: true },
+        steps: steps(`
+            t.check(t.boxesIn(1) === 3, 'the column is drawn as checkboxes at open (' + t.boxesIn(1) + ')');
+            await t.rowMenu(0, 0, 'Delete row');
+            t.check(t.boxesIn(1) === 2, 'and still after a row is deleted (' + t.boxesIn(1) + ')');
         `),
     },
 ]);
