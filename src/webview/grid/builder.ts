@@ -130,13 +130,16 @@ export function makeComparator(colType: string): (a: string, b: string) => numbe
 // listener must be attached once — not re-added on every buildGrid call.
 let dblclickWired = false;
 
-// The toolbar's Clear filters button is up while any filter is on. A grid built
-// fresh has no column filters but raises no filter change to say so. buildGrid
-// calls this itself for that reason. Otherwise the button would stay up after a
-// rebuild dropped the filters: insert or delete column, a delimiter switch, an
-// outside change or an undo that alters the columns.
+// The toolbar's Clear filters button is up while a column filter is on. It
+// clears the column filters only, so the "Show only duplicates" view does not
+// count. That view hides rows through a filter of its own. The button came up
+// for it and did nothing when clicked. A grid built fresh has no column
+// filters but raises no filter change to say so. buildGrid calls this itself
+// for that reason. Otherwise the button would stay up after a rebuild dropped
+// the filters: insert or delete column, a delimiter switch, an outside change
+// or an undo that alters the columns.
 function syncClearFiltersButton(): void {
-    const on  = !!state.gridApi?.isAnyFilterPresent();
+    const on  = !!state.gridApi?.isColumnFilterPresent();
     const btn = document.getElementById('btn-clear-filters');
     const sep = document.getElementById('sep-filters');
     if (btn) btn.style.display = on ? '' : 'none';
