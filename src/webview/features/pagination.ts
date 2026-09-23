@@ -44,7 +44,7 @@ export function handlePageData(msg: { pageNumber: number; totalPages: number; te
     // held, which sent you back to page 1 while the bar still said page 6 (#34).
     state.rawCsvText = msg.text;
     state.data = loadRows(parseCsv(msg.text, state.currentDelimiter, false, true));
-    state.lineFormat = detectLineFormat(msg.text, state.currentDelimiter);
+    state.lineFormat = detectLineFormat(msg.text, state.currentDelimiter, state.lineFormat);
     buildGrid();
     hideLoader();
 }

@@ -52,9 +52,8 @@ runSuite('settings menu (browser)', [
             await t.openSettings();
             const items = document.querySelectorAll('#settings-list .settings-item');
             const groups = [...document.querySelectorAll('#settings-list .settings-group')].map(g => g.textContent);
-            // The eight settings every file shares. Above them sits the one that
-            // belongs to this file alone, "First row is the header". Eight and
-            // View|Editing were right until the menu gained that group.
+            // Eight settings every file shares, and above them the one that
+            // belongs to this file alone, "First row is the header".
             t.check(items.length === 9, 'the menu has nine switches (' + items.length + ')');
             t.check(groups.join('|') === 'This file|View|Editing', 'grouped as This file, View and Editing ('
                 + groups.join('|') + ')');

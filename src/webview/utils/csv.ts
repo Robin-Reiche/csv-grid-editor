@@ -99,9 +99,13 @@ const LF_NO_FINAL_BREAK: LineFormat = { eol: '\n', finalNewline: false };
 // parseCsv does and has to stay in step with it. A break inside a quoted value
 // belongs to the value and is written back as it is, CRLF or LF (issue #31).
 // A file that mixes both gets the one most of its rows end with, so the
-// fewest bytes change on the next edit. A tie and a file with no row break at
-// all get LF with nothing at the end.
-export function detectLineFormat(text: string, delimiter: string): LineFormat {
+// fewest bytes change on the next edit. A tie goes to LF.
+//
+// Text with no row break at all says nothing about its line ending. It keeps
+// the one of `previous` when there is one: a CRLF file trimmed to a single
+// line and read again stays CRLF, so a row added later does not bring LF into
+// it. Without `previous` it gets LF.
+export function detectLineFormat(text: string, delimiter: string, previous?: LineFormat): LineFormat {
     let crlf = 0;
     let lf = 0;
     let inQuotes = false;
@@ -135,8 +139,9 @@ export function detectLineFormat(text: string, delimiter: string): LineFormat {
             blank = false;
         }
     }
+    const unknown = crlf + lf === 0;
     return {
-        eol: crlf > lf ? '\r\n' : '\n',
+        eol: unknown && previous ? previous.eol : crlf > lf ? '\r\n' : '\n',
         finalNewline: !inQuotes && text.endsWith('\n'),
     };
 }

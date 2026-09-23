@@ -64,7 +64,7 @@ export function setupMessaging(): void {
             state.rawCsvText = msg.text;
             state.data = loadRows(parseCsv(msg.text, state.currentDelimiter, false, true));
             // An outside change or a revert can bring other line endings.
-            state.lineFormat = detectLineFormat(msg.text, state.currentDelimiter);
+            state.lineFormat = detectLineFormat(msg.text, state.currentDelimiter, state.lineFormat);
             reanchorFrozenRows(frozen);
             // Existing dup highlights now point at stale rows. Leaving the
             // "Show only duplicates" view already rebuilds the rows from

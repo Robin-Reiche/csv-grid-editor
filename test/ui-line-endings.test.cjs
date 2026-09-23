@@ -114,4 +114,29 @@ runSuite('line endings (browser)', [
             t.same(csv.replace('a;', 'b;'), 'the rows keep CRLF and the value keeps its LF');
         `),
     },
+    {
+        // Deleting the only row leaves a CRLF file with no row break to read.
+        // A delimiter switch reads the text again and fell back to LF, so the
+        // next added row went into the file with LF.
+        name: 'a delimiter switch on a file cut to one line',
+        csv: 'a,b\r\n1,2',
+        steps: steps(`
+            const key = (k, mods) => document.dispatchEvent(new KeyboardEvent('keydown',
+                Object.assign({ key: k, bubbles: true, cancelable: true }, mods)));
+            await t.focusCell(0, 0);
+            key('K', { ctrlKey: true, shiftKey: true });
+            await t.wait(400);
+            t.check(t.lastEdit() === 'a,b', 'the only row is deleted (' + JSON.stringify(t.lastEdit()) + ')');
+            for (const d of [';', ',']) {
+                document.getElementById('delim-badge').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+                await t.wait(150);
+                document.querySelector('.delim-option[data-delim="' + d + '"]')
+                    .dispatchEvent(new MouseEvent('click', { bubbles: true }));
+                await t.wait(400);
+            }
+            key('Enter', { ctrlKey: true });
+            await t.wait(400);
+            t.check(t.lastEdit() === 'a,b\\r\\n,', 'the added row is written with CRLF (' + JSON.stringify(t.lastEdit()) + ')');
+        `),
+    },
 ]);

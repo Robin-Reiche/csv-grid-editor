@@ -40,7 +40,7 @@ export function setupDelimiterBadge(): void {
             state.data = loadRows(parseCsv(state.rawCsvText, state.currentDelimiter, false, true));
             // Which line breaks end a row depends on where quoted values start.
             // That depends on the delimiter.
-            state.lineFormat = detectLineFormat(state.rawCsvText, state.currentDelimiter);
+            state.lineFormat = detectLineFormat(state.rawCsvText, state.currentDelimiter, state.lineFormat);
             reanchorFrozenRows(frozen);
             state.hiddenCols.clear(); // re-parse may change the column set — drop index-based hide state
             state.autoFitCache = null;

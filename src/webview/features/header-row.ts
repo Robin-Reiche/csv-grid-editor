@@ -49,8 +49,12 @@ export function rowsInFile(): number {
 // either way, only the first one moves in or out.
 export function setFirstRowIsHeader(on: boolean): void {
     if (state.firstRowIsHeader === on) return;
-    // A value being typed belongs to the row it is typed in. It is written
-    // there before that row moves.
+    // The switch sits behind the gear, and clicking the gear takes the focus out
+    // of the grid, which saves a value being typed right there
+    // (stopEditingWhenCellsLoseFocus in grid/builder.ts). So no editor is open
+    // here in practice. Should one be, it is closed before the rows move under
+    // it. What it holds is not kept: the grid reports the value after this
+    // function has already rebuilt it.
     if (state.isCellEditing) state.gridApi?.stopEditing();
     // Both hold rows by the place they are shown at, which is about to change.
     clearRangeSelection();

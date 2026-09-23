@@ -107,5 +107,18 @@ test('a file read and written unchanged comes back byte for byte', () => {
     }
 });
 
+test('text with no row break keeps the line ending it had before', () => {
+    // A CRLF file trimmed to its header line has no break left to count. Read
+    // again after a delimiter switch or an outside change, it used to fall back
+    // to LF, and the next added row was written with LF into a CRLF file.
+    const before = { eol: '\r\n', finalNewline: true };
+    assert.deepStrictEqual(detectLineFormat('a,b', ',', before), { eol: '\r\n', finalNewline: false });
+    assert.deepStrictEqual(detectLineFormat('', ',', before), { eol: '\r\n', finalNewline: false });
+    // Text that does have breaks decides for itself.
+    assert.deepStrictEqual(detectLineFormat('a\nb', ',', before), { eol: '\n', finalNewline: false });
+    // Without an earlier format there is nothing to keep.
+    assert.deepStrictEqual(detectLineFormat('a,b', ','), { eol: '\n', finalNewline: false });
+});
+
 console.log(failures === 0 ? '\nAll line ending tests passed.' : `\n${failures} test(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);

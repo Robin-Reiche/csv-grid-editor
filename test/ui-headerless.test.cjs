@@ -198,6 +198,19 @@ runSuite('first row is the header (browser)', [
         `),
     },
     {
+        // Only the first line has a third field. Deleting it takes the third
+        // column away, and the letters have to follow the rows that are left.
+        name: 'deleting the only wide row',
+        csv: '1,2,3\n4,5',
+        steps: steps(`
+            await t.header1(false);
+            t.check(t.names() === 'A|B|C|-', 'three columns while the wide row is there (' + t.names() + ')');
+            await t.rowMenu(0, 0, 'Delete row');
+            t.check(t.lastEdit() === '4,5', 'the wide row leaves the file (' + JSON.stringify(t.lastEdit()) + ')');
+            t.check(t.names() === 'A|B|-|-', 'and its column leaves the grid (' + t.names() + ')');
+        `),
+    },
+    {
         name: 'rename and copy with header are not offered',
         csv: 'a,b\n1,2\n3,4',
         steps: steps(`
