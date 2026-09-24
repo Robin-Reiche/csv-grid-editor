@@ -2,7 +2,7 @@
 
 All notable changes to CSV Grid Editor are documented here.
 
-## [1.23.0] - 2026-09-23
+## [1.23.0] - 2026-09-24
 
 ### Added
 - **A settings menu in the toolbar** - The gear at the right end of the toolbar opens a small menu for the switches that are a matter of taste. It sits in the editor rather than in the VS Code settings, where a switch is findable only by someone who already knows it is there. Every entry is remembered across files and sessions and has a line saying what it does. The gear is marked while anything in it differs from the default, so a grid that looks different says why. None of the switches changes a value in the file.
