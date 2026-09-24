@@ -111,10 +111,10 @@ function saveWait(document: CsvDocument): number {
     return FLUSH_TIMEOUT_MS + document.content.length / FLUSH_CHARS_PER_MS;
 }
 
-// When the file or folder `uri` was last changed. Undefined when there is
-// none.
-function changedAt(uri: vscode.Uri): Promise<number | undefined> {
-    return Promise.resolve(vscode.workspace.fs.stat(uri)).then(stat => stat.mtime, () => undefined);
+// What is under `uri` now, a file or a folder. Undefined when there is
+// nothing.
+function statOf(uri: vscode.Uri): Promise<vscode.FileStat | undefined> {
+    return Promise.resolve(vscode.workspace.fs.stat(uri)).catch(() => undefined);
 }
 
 // Told after a save that could not keep the file in Windows-1252, see
@@ -211,9 +211,13 @@ interface Renaming {
     // The edits renameFailed gave back to their document, should VS Code
     // tell of the rename after all (see renamed).
     failed: Map<string, Carried>;
-    // When each new name in `files` was last changed as VS Code told of the
-    // rename, undefined for a name nothing was under (see copying).
-    targets: (number | undefined)[];
+    // What each new name in `files` held as VS Code told of the rename and
+    // at the last look since, undefined for a name nothing was under (see
+    // copying).
+    targets: (vscode.FileStat | undefined)[];
+    looked: (vscode.FileStat | undefined)[];
+    // When the edits handed on for it are given up (see renameFailed).
+    until: number;
 }
 
 // Whether a grid tab of the file `key` is open, shown or not.
@@ -494,11 +498,11 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
     // wrote it, the file under the new name came up half written and was
     // reported as changed on disk.
     private async carryEdits(files: readonly { readonly oldUri: vscode.Uri; readonly newUri: vscode.Uri }[]): Promise<void> {
-        const renaming: Renaming = { files, carried: new Map(), from: new Map(), failed: new Map(), targets: [] };
+        const renaming: Renaming = { files, carried: new Map(), from: new Map(), failed: new Map(), targets: [], looked: [], until: 0 };
         this.followCarried(files, renaming);
         // Looked at before the wait below, after which VS Code moves the
         // files (see copying).
-        const targets = Promise.all(files.map(({ newUri }) => changedAt(newUri)));
+        const targets = Promise.all(files.map(({ newUri }) => statOf(newUri)));
         await Promise.all([...this._documents].map(async ([key, document]) => {
             const to = renamedTo(key, files);
             if (to === undefined || document.isPreview) return;
@@ -511,6 +515,8 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         }));
         if (renaming.carried.size === 0) return;
         renaming.targets = await targets;
+        renaming.looked = [...renaming.targets];
+        renaming.until = Date.now() + CARRY_MS;
         this._renaming.add(renaming);
         setTimeout(() => void this.renameFailed(renaming), FAILED_MS);
         setTimeout(() => this._renaming.delete(renaming), CARRY_MS);
@@ -625,10 +631,12 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
     // unsaved again and auto-save wrote the file while VS Code copied it.
     // The move then never finished and left a damaged copy. For a folder
     // the file was copied already and its edits were lost. So a rename is
-    // looked at again later while VS Code copies for it.
+    // looked at again later while VS Code copies for it. Shortly before its
+    // edits are given up (CARRY_MS) it counts as failed all the same: a
+    // folder under the new name counts as a copy under way until then.
     private async renameFailed(renaming: Renaming): Promise<void> {
         if (!this._renaming.has(renaming)) return;
-        if (await this.copying(renaming)) {
+        if (await this.copying(renaming, true) && Date.now() + 2 * FAILED_MS < renaming.until) {
             setTimeout(() => void this.renameFailed(renaming), FAILED_MS);
             return;
         }
@@ -663,13 +671,24 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
 
     // Whether VS Code still copies files for `renaming`: the old name of one
     // is still there and its new name holds something that was not there
-    // when VS Code told of the rename or has changed since. A file that was
-    // under the new name before is no copy. A rename onto it that failed
-    // left it as it was.
-    private async copying(renaming: Renaming): Promise<boolean> {
+    // when VS Code told of the rename. A file there is still copied while it
+    // changed since the last look or is smaller than the old one. VS Code
+    // copied a file, could not delete the old one and gave up: a folder
+    // without write access, a file another program holds open on Windows.
+    // Taken for a copy under way for good, the tab stayed marked saved and
+    // closing it lost the edits. A folder's own date does not change while a
+    // large file in it is copied, so a folder there counts as a copy under
+    // way until renameFailed gives up on it. A file that was under the new
+    // name before is no copy. A rename onto it that failed left it as it
+    // was. With `look` what the new names hold now is kept for the next look.
+    private async copying(renaming: Renaming, look = false): Promise<boolean> {
         const copies = await Promise.all(renaming.files.map(async ({ oldUri, newUri }, i) => {
-            const [source, target] = await Promise.all([changedAt(oldUri), changedAt(newUri)]);
-            return source !== undefined && target !== undefined && target !== renaming.targets[i];
+            const [source, target] = await Promise.all([statOf(oldUri), statOf(newUri)]);
+            const last = renaming.looked[i];
+            if (look) renaming.looked[i] = target;
+            if (!source || !target) return false;
+            const was = (stat: vscode.FileStat | undefined) => stat?.size === target.size && stat?.mtime === target.mtime;
+            return !was(renaming.targets[i]) && (!was(last) || target.type !== vscode.FileType.File || target.size < source.size);
         }));
         return copies.includes(true);
     }
@@ -1778,7 +1797,7 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         // back next to the new one, which the edits had gone on to. So no
         // save writes to a name no editor shows the document under any more
         // or whose file is gone.
-        if (flushed?.closed && (this._documents.get(document.uri.toString()) !== document || await changedAt(document.uri) === undefined)) {
+        if (flushed?.closed && (this._documents.get(document.uri.toString()) !== document || await statOf(document.uri) === undefined)) {
             throw new Error(TYPED_NOT_SAVED);
         }
         // The changes are counted as they were when the answer came (see

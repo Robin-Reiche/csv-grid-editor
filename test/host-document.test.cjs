@@ -77,13 +77,15 @@ const vscodeStub = {
         joinPath: (base, ...parts) => uriFile([base.fsPath, ...parts].join('/')),
     },
     RelativePattern: class { constructor(base, pattern) { this.base = base; this.pattern = pattern; } },
+    FileType: { File: 1, Directory: 2 },
     workspace: {
         fs: {
             // A folder too: a rename or move of one is looked at.
             stat: async uri => {
-                if (uri.scheme === 'git') return { size: fakeSize ?? readUri(uri).length, mtime: 0 };
+                if (uri.scheme === 'git') return { type: 1, size: fakeSize ?? readUri(uri).length, mtime: 0 };
                 const stats = fs.statSync(uri.fsPath);
-                return { size: stats.isDirectory() ? 0 : fakeSize ?? readUri(uri).length, mtime: stats.mtimeMs };
+                if (stats.isDirectory()) return { type: 2, size: 0, mtime: stats.mtimeMs };
+                return { type: 1, size: fakeSize ?? readUri(uri).length, mtime: stats.mtimeMs };
             },
             readFile: async uri => {
                 const bytes = new Uint8Array(readUri(uri));
@@ -3940,10 +3942,11 @@ async function main() {
             await t.backUpLikeVsCode();
             t.tab.isDirty = false;
             const changes = t.changes();
-            // VS Code starts to copy.
+            // VS Code starts to copy. Other writes to a slow drive hold the
+            // copy up for longer than two seconds at times.
             if (what === 'file') fs.writeFileSync(to, 'h\n');
             else fs.mkdirSync(to);
-            await new Promise(r => setTimeout(r, 2500));
+            await new Promise(r => setTimeout(r, 4500));
             assert.strictEqual(t.changes(), changes, 'the tab was marked unsaved while VS Code copied the file, so auto-save wrote it');
             // The copy is through and VS Code deletes the old one.
             fs.cpSync(from, to, { recursive: true });
@@ -3958,10 +3961,39 @@ async function main() {
         });
     }
 
-    // A file that was there under the new name already is no copy under way.
+    // A copy can have the size of the old file before all of it is written.
+    // It is under way as long as it changes.
+    await test('a move to another drive whose copy has the full size and still changes is not taken for a failed one', async () => {
+        const provider = registerProvider();
+        const p = file('ren-copy-full.csv', 'h\n1\n');
+        const t = await open(p, {}, uriFile(p), provider);
+        await t.edit('h\nCOPIED\n');
+        const to = path.join(tmpDir, 'ren-copy-full-other', 'ren-copy-full.csv');
+        fs.mkdirSync(path.dirname(to));
+        await willRenameFiles([[p, to]]);
+        await t.backUpLikeVsCode();
+        t.tab.isDirty = false;
+        const changes = t.changes();
+        fs.writeFileSync(to, '\0\0\0\0');
+        await new Promise(r => setTimeout(r, 3000));
+        fs.writeFileSync(to, 'h\n\0\0');
+        await new Promise(r => setTimeout(r, 1500));
+        assert.strictEqual(t.changes(), changes, 'the tab was marked unsaved while VS Code copied the file, so auto-save wrote it');
+        fs.copyFileSync(p, to);
+        fs.rmSync(p);
+        t.close();
+        const after = await open(to, {}, uriFile(to), provider, undefined, () => didRenameFiles([[p, to]]));
+        group.tabs.splice(group.tabs.indexOf(t.tab), 1);
+        for (const l of tabsChanged) l({ opened: [], closed: [t.tab], changed: [] });
+        assert.strictEqual(after.doc.content, 'h\nCOPIED\n', 'the moved file lost the edits');
+        assert.strictEqual(after.tab.isDirty, true);
+    });
+
+    // A file that was there under the new name already is no copy under way,
+    // smaller than the old one or not.
     await test('a rename onto an existing file that fails marks the tab unsaved again', async () => {
         const provider = registerProvider();
-        const p = file('ren-over-fails.csv', 'h\n1\n');
+        const p = file('ren-over-fails.csv', 'h\nlonger than the other file\n');
         const dest = file('ren-over-fails-target.csv', 'h\ntarget\n');
         const t = await open(p, {}, uriFile(p), provider);
         await t.edit('h\nKEEPME\n');
@@ -3972,6 +4004,66 @@ async function main() {
         await new Promise(r => setTimeout(r, 2500));
         assert.strictEqual(t.tab.isDirty, true, 'the tab looks saved and closing it loses the edits');
     });
+
+    // VS Code copied the file to another drive and then could not delete it:
+    // a folder without write access, a file another program holds open on
+    // Windows. The move fails and leaves both files. Taken for a copy under
+    // way for good, the tab stayed marked saved and closing it lost the edits.
+    await test('a move to another drive that fails after the copy marks the tab unsaved again', async () => {
+        const provider = registerProvider();
+        const p = file('ren-copy-fails.csv', 'h\n1\n');
+        const t = await open(p, {}, uriFile(p), provider);
+        await t.edit('h\nKEEPME\n');
+        const to = path.join(tmpDir, 'ren-copy-fails-other', 'ren-copy-fails.csv');
+        fs.mkdirSync(path.dirname(to));
+        await willRenameFiles([[p, to]]);
+        await t.backUpLikeVsCode();
+        t.tab.isDirty = false;
+        // The move fails and VS Code tells of no rename.
+        fs.copyFileSync(p, to);
+        await new Promise(r => setTimeout(r, 4500));
+        assert.strictEqual(t.tab.isDirty, true, 'the tab looks saved and closing it loses the edits');
+        assert.strictEqual(t.doc.content, 'h\nKEEPME\n');
+        const other = await open(to, {}, uriFile(to), provider);
+        assert.strictEqual(other.doc.content, 'h\n1\n', 'the edits of the failed move turned up in the copy');
+        assert.strictEqual(other.changes(), 0);
+    });
+
+    // A folder's own date does not change while a large file in it is copied,
+    // so a folder under the new name counts as a copy under way until shortly
+    // before the edits are given up (CARRY_MS in csvEditorProvider.ts). So
+    // does a file that stays smaller than the old one: a copy that failed
+    // halfway, on a full drive.
+    for (const what of ['folder', 'file']) {
+        await test(`a move of a ${what} to another drive that fails during or after the copy marks the tab unsaved again in the end`, async () => {
+            const provider = registerProvider();
+            const n = `ren-copy-${what}-fails`;
+            const from = what === 'file' ? file(`${n}.csv`, 'h\n1\n') : path.join(tmpDir, n);
+            if (what === 'folder') fs.mkdirSync(from);
+            const p = what === 'file' ? from : file(`${n}/a.csv`, 'h\n1\n');
+            const t = await open(p, {}, uriFile(p), provider);
+            await t.edit('h\nKEEPME\n');
+            const to = path.join(tmpDir, `${n}-other`, path.basename(from));
+            fs.mkdirSync(path.dirname(to));
+            await willRenameFiles([[from, to]]);
+            await t.backUpLikeVsCode();
+            t.tab.isDirty = false;
+            // The move fails and VS Code tells of no rename.
+            if (what === 'file') fs.writeFileSync(to, 'h\n');
+            else fs.cpSync(from, to, { recursive: true });
+            await new Promise(r => setTimeout(r, 2500));
+            assert.strictEqual(t.tab.isDirty, false, 'the test did not reach a move taken for a copy under way');
+            const now = Date.now;
+            Date.now = () => now() + 60000;
+            try {
+                await new Promise(r => setTimeout(r, 2000));
+            } finally {
+                Date.now = now;
+            }
+            assert.strictEqual(t.tab.isDirty, true, 'the tab looks saved and closing it loses the edits');
+            assert.strictEqual(t.doc.content, 'h\nKEEPME\n');
+        });
+    }
 
     // The edits of a tab behind another wait under the name an earlier rename
     // gave the file. A move of that file failed and left them waiting under
