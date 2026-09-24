@@ -2241,6 +2241,28 @@ async function main() {
         assert.strictEqual(t.tab.isDirty, true, 'the key typed after the answer sits behind a tab that looks saved');
     });
 
+    // A save that gave up on the grid's answer is followed by one that asks
+    // again. The late answer to the first question, a key and the answer to
+    // the second can then come in that one read. The save takes the first
+    // answer, so the key is not in the file. Counted at the second answer,
+    // it looked saved all the same.
+    await test('a key typed between two answers in one read leaves the tab unsaved', async () => {
+        const p = file('typing-same-task-late.csv', 'h\n1\n');
+        const t = await open(p);
+        await t.typing();
+        await assert.rejects(t.save(), /not saved yet/);
+        const saving = t.save();
+        await tick();
+        assert.strictEqual(t.flushes().length, 2, 'the second save did not ask again');
+        t.flushed('h\nT1\n');
+        t.typing();
+        t.flushed('h\nT12\n');
+        await saving;
+        await tick();
+        assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\nT1\n');
+        assert.strictEqual(t.tab.isDirty, true, 'the key typed between the answers sits behind a tab that looks saved');
+    });
+
     await test('a save with nothing new leaves the tab saved', async () => {
         const t = await open(file('typing-clean.csv', 'h\n1\n'));
         await t.edit('h\n2\n');
@@ -3541,6 +3563,36 @@ async function main() {
             assert.strictEqual(later.changes(), 0, 'the tab was marked unsaved');
         });
     }
+
+    // Cancel on VS Code's question at a folder rename keeps the grid open
+    // under the old folder name with its own edits, next to the tab of the
+    // new name, which took them too. Ctrl+Z then brings the old name back
+    // while that grid is still open. The edits of the tab of the new name
+    // were carried to it all the same. Nothing opened that name again to
+    // take them, so they waited as long as the grid stayed open. The next
+    // rename brought them back over a save made since and reported the file
+    // changed on disk.
+    await test('an undone folder rename carries nothing to a grid still open under the old name', async () => {
+        const provider = registerProvider();
+        const dir = path.join(tmpDir, 'ren-dir-undo-open');
+        fs.mkdirSync(dir);
+        const a = await open(file('ren-dir-undo-open/a.csv', 'h\na\n'), {}, undefined, provider);
+        await a.edit('h\nAAA\n');
+        // Cancel: the grid of the old name stays open.
+        await renameFiles(provider, [[dir, dir + '-2']], []);
+        const na = await unshownTab(provider, path.join(dir + '-2', 'a.csv')).show();
+        assert.ok(na.tab.isDirty && na.doc.content === 'h\nAAA\n', 'the test did not reach the renamed tab with the edits');
+        fs.renameSync(dir + '-2', dir);
+        didRenameFiles([[dir + '-2', dir]]);
+        await na.closeTab({ revert: true });
+        await a.edit('h\nNEW\n');
+        await a.save();
+        const [later] = await renameFiles(provider, [[dir, dir + '-3']], [a]);
+        await tick();
+        assert.strictEqual(later.doc.content, 'h\nNEW\n', 'the edits of the other tab came back over the save');
+        assert.strictEqual(later.changes(), 0, 'the tab was marked unsaved');
+        assert.deepStrictEqual(warnings.map(w => w.msg), [], 'a file nobody changed was reported as changed on disk');
+    });
 
     await test('edits carried to a tab closed before it was shown are dropped', async () => {
         const provider = registerProvider();

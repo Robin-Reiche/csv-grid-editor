@@ -531,11 +531,15 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
     // them into a copy of the folder the undo had taken away and the tab of
     // the name it brought back came up saved. Cancel left them only in a tab
     // of the vanished name. So the edits of such a grid wait under the name
-    // the undo brings back now, the way carryEdits hands them on.
+    // the undo brings back now, the way carryEdits hands them on. A grid
+    // still open under that name keeps its own edits: Cancel at the rename
+    // left it open. Nothing opened that name again to take the edits carried
+    // there, so they waited as long as its tab stayed open. The next rename
+    // brought them back over a save made since.
     private carryOpen(files: readonly { readonly oldUri: vscode.Uri; readonly newUri: vscode.Uri }[]): void {
         for (const [key, document] of this._documents) {
             const to = renamedTo(key, files);
-            if (to === undefined || document.isPreview || !document.hasUnsavedEdits()) continue;
+            if (to === undefined || document.isPreview || !document.hasUnsavedEdits() || this._documents.has(to)) continue;
             if ([...this._carried.values()].some(edits => edits.document === document)) continue;
             this.carry(to, carried(document));
         }
@@ -1233,10 +1237,14 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
 
             } else if (msg.type === 'flushed') {
                 // The changes are counted the moment the answer comes (see
-                // flushTyping).
+                // flushTyping). The late answer to a save that gave up can
+                // come in one read with the answer to the next save and a key
+                // between them. The save takes the first of them, so a key
+                // after it is not in the file. Counted again at the second
+                // answer, that key looked saved.
                 const flush = document.flushes.get(webviewPanel);
                 if (flush) {
-                    flush.changes = document.changes;
+                    if (flush.changes === undefined) flush.changes = document.changes;
                     flush.take(msg.text);
                 }
                 // The value the save took replaces an older one kept from
