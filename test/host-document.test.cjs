@@ -2041,9 +2041,10 @@ async function main() {
         await t.edit('h\n2\n');
         await t.typing();
         const start = Date.now();
-        await t.save();
+        const error = await t.save().then(() => null, e => e);
         const took = Date.now() - start;
         assert.ok(took >= 900 && took < 3000, 'the save took ' + took + ' ms');
+        assert.ok(error instanceof Error, 'the save reported the file saved without the value being typed');
         assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\n2\n', 'what the document held was not written');
         await tick();
         assert.strictEqual(t.tab.isDirty, true, 'the value the save did not get sits behind a tab that looks saved');
@@ -2063,6 +2064,60 @@ async function main() {
         // The closed editor is not asked again.
         await t.save();
         assert.strictEqual(t.flushes().length, 1);
+    });
+
+    // Ctrl+W asks whether to save. The question takes the focus from the
+    // grid, which commits the open cell and writes out the whole file first.
+    // On a file of 26 MB that took longer than the save waited for the
+    // value. The save wrote the file without it and VS Code closed the tab
+    // once the save was through. The value came a moment later, to a tab
+    // that was gone.
+    await test('a save that did not get the value being typed fails, so closing keeps the tab', async () => {
+        const p = file('typing-late.csv', 'h\n1\n');
+        const t = await open(p);
+        await t.edit('h\n2\n');
+        await t.typing();
+        // Save on the question: VS Code closes the tab once the save is through.
+        let closed = false;
+        const saving = t.save().then(() => { t.closeTab(); closed = true; }, e => e);
+        await new Promise(r => setTimeout(r, 1500));
+        if (!closed) {
+            await t.edit('h\nTYPED\n');
+            await t.typingEnded();
+            await t.flushed();
+        }
+        const error = await saving;
+        assert.strictEqual(closed, false, 'the tab was closed with the value being typed not in the file');
+        assert.ok(error instanceof Error && /typed/.test(error.message), 'the save gave no reason (' + error + ')');
+        assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\n2\n', 'what the document held was not written');
+        assert.strictEqual(t.tab.isDirty, true, 'the tab looks saved');
+        assert.strictEqual(t.doc.content, 'h\nTYPED\n', 'the value that came late is not in the document');
+        await t.save();
+        assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\nTYPED\n', 'the next save did not write the value');
+    });
+
+    await test('Save As that did not get the value being typed fails', async () => {
+        const t = await open(file('typing-late-as.csv', 'h\n1\n'));
+        await t.edit('h\n2\n');
+        await t.typing();
+        const dest = path.join(tmpDir, 'typing-late-as-copy.csv');
+        const error = await t.saveAs(dest).then(() => null, e => e);
+        assert.ok(error instanceof Error && /typed/.test(error.message), 'Save As reported the copy saved without the value being typed');
+    });
+
+    // The grid writes out the whole file for its answer, a moment on a
+    // large one. After Ctrl+W it first commits the cell, which took 1.75 s
+    // at 26 MB and 28 s at 94 MB.
+    await test('a save of a large file waits longer for the value being typed', async () => {
+        const text = 'h\n' + '1234567890\n'.repeat(500000);
+        const p = file('typing-large-wait.csv', text);
+        const t = await open(p);
+        await t.typing();
+        const saving = t.save();
+        await new Promise(r => setTimeout(r, 2000));
+        await t.flushed(text + 'TYPED\n');
+        await saving;
+        assert.ok(fs.readFileSync(p, 'utf8') === text + 'TYPED\n', 'the save gave up on the value');
     });
 
     await test('an edit that brings the text the document holds changes nothing', async () => {
@@ -2302,9 +2357,10 @@ async function main() {
         const backingUp = t.backup(backupPath);
         await tick();
         const start = Date.now();
-        await t.save();
+        const error = await t.save().then(() => null, e => e);
         const took = Date.now() - start;
         assert.ok(took >= 900 && took < 3000, 'the save took ' + took + ' ms');
+        assert.ok(error instanceof Error, 'the save reported the file saved without the value being typed');
         await tick();
         assert.strictEqual(t.tab.isDirty, true, 'the value the save did not get sits behind a tab that looks saved');
         assert.strictEqual(t.flushes().length, 1, 'the grid was asked to write out the file twice');
