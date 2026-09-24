@@ -210,9 +210,12 @@ const SEND_DELAY_MS = 300;
 // lost the whole value. A file of up to 1 MB of text is sent with every
 // change instead, right after the key. At 0.9 MB each change reached the
 // extension within 25 ms and no key was held up. A larger file keeps the
-// pause.
+// pause. So does any file while the extension runs on another machine. Every
+// copy then goes over the network. On a slow upload the copies of a few keys
+// held a save up for seconds.
 const SEND_AT_ONCE_CHARS = 1024 * 1024;
 let shared = false;
+let remote = false;
 let sendTimer: ReturnType<typeof setTimeout> | null = null;
 
 export function setShared(value: boolean): void {
@@ -221,11 +224,16 @@ export function setShared(value: boolean): void {
     else if (typingEditor !== null) sendSoon();
 }
 
+// Whether the extension runs on another machine (the init message says so).
+export function setRemote(value: boolean): void {
+    remote = value;
+}
+
 // Right after the key rather than in it: a letter that opens the editor
 // comes before the grid knows the editor, so the value could not be found.
 function sendSoon(): void {
     if (sendTimer !== null) clearTimeout(sendTimer);
-    sendTimer = setTimeout(sendNow, state.rawCsvText.length <= SEND_AT_ONCE_CHARS ? 0 : SEND_DELAY_MS);
+    sendTimer = setTimeout(sendNow, !remote && state.rawCsvText.length <= SEND_AT_ONCE_CHARS ? 0 : SEND_DELAY_MS);
 }
 
 // Sends what waits to be sent. Without a text when the value is the cell's

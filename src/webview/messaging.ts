@@ -2,7 +2,7 @@ import { state } from './state';
 import { parseCsv, detectLineFormat } from './utils/csv';
 import { applyZoom } from './features/zoom';
 import { buildGrid, flushOpenEditor } from './grid/builder';
-import { setShared } from './grid/multiline-cell-editor';
+import { setShared, setRemote } from './grid/multiline-cell-editor';
 import { refreshGrid } from './grid/refresh';
 import { hideLoader } from './utils/loader';
 import { updateDelimiterBadge } from './features/delimiter';
@@ -83,6 +83,7 @@ export function setupMessaging(): void {
         const msg = event.data;
         if (msg.type === 'init') {
             initWithData(msg.text, msg.delimiter, msg.firstRowIsHeader !== false);
+            setRemote(msg.remote === true);
             setShared(msg.shared === true);
         } else if (msg.type === 'shared') {
             // Whether another editor shows the file (multiline-cell-editor.ts).
