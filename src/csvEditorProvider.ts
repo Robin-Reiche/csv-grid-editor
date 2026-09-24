@@ -178,6 +178,12 @@ function carried(document: CsvDocument): Carried {
 interface Renaming {
     files: readonly { readonly oldUri: vscode.Uri; readonly newUri: vscode.Uri }[];
     carried: Map<string, Carried>;
+    // For edits that waited for a tab VS Code had not shown since an earlier
+    // rename, the name they waited under before (see renameFailed).
+    from: Map<string, string>;
+    // The edits renameFailed gave back to their document, should VS Code
+    // tell of the rename after all (see renamed).
+    failed: Map<string, Carried>;
 }
 
 // Whether a grid tab of the file `key` is open, shown or not.
@@ -445,7 +451,7 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
     // came after the edits had gone on without it and the value was lost
     // with the grid VS Code closed.
     private async carryEdits(files: readonly { readonly oldUri: vscode.Uri; readonly newUri: vscode.Uri }[]): Promise<void> {
-        const renaming: Renaming = { files, carried: new Map() };
+        const renaming: Renaming = { files, carried: new Map(), from: new Map(), failed: new Map() };
         this.followCarried(files, renaming);
         await Promise.all([...this._documents].map(async ([key, document]) => {
             const to = renamedTo(key, files);
@@ -465,19 +471,35 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
     // VS Code tells of a rename or move. The edits carryEdits handed on for
     // it already wait under the name they end up with. Those of grids VS
     // Code closed for it or has not shown since an earlier rename go along
-    // (see followCarried).
+    // (see followCarried). A rename can take longer than FAILED_MS when
+    // another extension is slow over its part of it. It then counted as
+    // failed and its edits went back to their document (see renameFailed).
+    // They go to the new name now, as the document holds them. For a file
+    // only a Source Control diff showed, VS Code closed the diff, no tab
+    // opened and the edits were gone at once. A failed rename tried again
+    // is told of beforehand once more, so the rename told of now is the last
+    // of those.
     private renamed(files: readonly { readonly oldUri: vscode.Uri; readonly newUri: vscode.Uri }[]): void {
-        const renaming = [...this._renaming].find(told => told.files.length === files.length && told.files.every((file, i) =>
+        const told = [...this._renaming].filter(renaming => renaming.files.length === files.length && renaming.files.every((file, i) =>
             file.oldUri.toString() === files[i].oldUri.toString() && file.newUri.toString() === files[i].newUri.toString()));
-        if (renaming) this._renaming.delete(renaming);
+        for (const renaming of told) this._renaming.delete(renaming);
+        const renaming = told[told.length - 1];
         this.followCarried(files, renaming);
-        if (renaming) this.openDiffOnly(renaming);
+        if (renaming) {
+            for (const [key, { document, diffOnly }] of renaming.failed) {
+                if (this._carried.has(key) || !document.hasUnsavedEdits()) continue;
+                const edits: Carried = { ...carried(document), diffOnly };
+                this.carry(key, edits);
+                renaming.carried.set(key, edits);
+            }
+            this.openDiffOnly(renaming);
+        }
         const waiting = this._renamed;
         this._renamed = undefined;
         waiting?.resolve();
     }
 
-    // Resolves once VS Code tells of the next rename, or after `ms`.
+    // Resolves once VS Code tells of the next rename or once `ms` have passed.
     private nextRename(ms: number): Promise<void> {
         if (!this._renamed) {
             let resolve!: () => void;
@@ -515,15 +537,19 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
     // editor. The grid still showed the edits and closing its tab lost them
     // without a word. So a document still in an editor, with its file still
     // under the old name, is marked unsaved again. The edits handed on for
-    // the new name are dropped, a file of that name opened later is another
-    // one. A move that only takes longer keeps them all the same: VS Code
-    // closes the editor once the file moved and the edits then wait for the
-    // new name (see keepClosed).
+    // the new name are taken back, a file of that name opened later is
+    // another one. A rename that only takes longer brings them to the new
+    // name when VS Code tells of it (see renamed). Edits that waited for a
+    // tab VS Code had not shown since an earlier rename go back to the name
+    // of that tab. Left under the name of the failed move, they were lost to
+    // that tab, which showed the file saved from disk. They go back after
+    // the others: in a swap the edits of another file can wait under that
+    // name for the failed rename.
     private async renameFailed(renaming: Renaming): Promise<void> {
         if (!this._renaming.has(renaming)) return;
         for (const [key, edits] of [...renaming.carried]) {
             const { document } = edits;
-            if (document.panels.size === 0 || !document.hasUnsavedEdits()) continue;
+            if (renaming.from.has(key) || document.panels.size === 0 || !document.hasUnsavedEdits()) continue;
             try {
                 await vscode.workspace.fs.stat(document.uri);
             } catch {
@@ -531,8 +557,22 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             }
             if (!this._renaming.has(renaming) || document.panels.size === 0) continue;
             renaming.carried.delete(key);
+            renaming.failed.set(key, edits);
             if (this._carried.get(key) === edits) this._carried.delete(key);
             this.fireChange(document);
+        }
+        for (const [key, edits] of [...renaming.carried]) {
+            const from = renaming.from.get(key);
+            if (from === undefined || this._carried.get(key) !== edits) continue;
+            try {
+                await vscode.workspace.fs.stat(vscode.Uri.parse(from));
+            } catch {
+                continue;
+            }
+            if (!this._renaming.has(renaming) || this._carried.get(key) !== edits) continue;
+            renaming.carried.delete(key);
+            this._carried.delete(key);
+            if (!this._carried.has(from)) this.carry(from, edits);
         }
     }
 
@@ -591,17 +631,18 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
     // name they end up with already. Moved once more, the edits of a swap
     // through a third name went back to the name they came from.
     private followCarried(files: readonly { readonly oldUri: vscode.Uri; readonly newUri: vscode.Uri }[], renaming?: Renaming): void {
-        const move = (to: string, edits: Carried) => {
+        const move = (to: string, edits: Carried, from?: string) => {
             if (this._carried.has(to)) return;
             this.carry(to, edits);
             renaming?.carried.set(to, edits);
+            if (from !== undefined) renaming?.from.set(to, from);
         };
         for (const kept of [this._carried, this._closed]) {
             for (const [key, edits] of [...kept]) {
                 const to = renaming?.carried.get(key) === edits ? undefined : renamedTo(key, files);
                 if (to === undefined) continue;
                 kept.delete(key);
-                move(to, edits);
+                move(to, edits, kept === this._carried ? key : undefined);
             }
         }
         for (const [key, { document, from }] of [...this._taking]) {

@@ -3502,6 +3502,57 @@ async function main() {
         assert.strictEqual(opened.tab.isDirty, true);
     });
 
+    // Another extension took 2.5 s over its part of the rename before VS Code
+    // moved the file. The rename counted as failed and the edits went back to
+    // the diff. VS Code then moved the file and closed the diff, no tab of the
+    // new name opened and the edits were gone at once.
+    await test('edits made only in a Source Control diff come to the new name when the rename takes over two seconds', async () => {
+        const provider = registerProvider();
+        const p = file('ren-diff-slow.csv', 'h\n1\n');
+        const t = await open(p, {}, uriFile(p), provider);
+        t.tab.input = undefined;
+        t.tab.uri = t.uri;
+        await t.edit('h\nDIFF EDIT\n');
+        const dest = path.join(tmpDir, 'ren-diff-slow-2.csv');
+        await willRenameFiles([[p, dest]]);
+        await new Promise(r => setTimeout(r, 2500));
+        // The diff shows the edits unsaved again and takes one more.
+        await t.edit('h\nDIFF EDIT AGAIN\n');
+        await t.backUpLikeVsCode();
+        fs.renameSync(p, dest);
+        t.close();
+        didRenameFiles([[p, dest]]);
+        group.tabs.splice(group.tabs.indexOf(t.tab), 1);
+        assert.deepStrictEqual(openedWith.map(o => [o.uri.fsPath, o.viewType, o.options]),
+            [[dest, 'csvViewer.grid', { preview: false, preserveFocus: true }]], 'no grid tab of the new name was opened');
+        const opened = await open(dest, {}, uriFile(dest), provider);
+        assert.strictEqual(opened.doc.content, 'h\nDIFF EDIT AGAIN\n', 'the new tab lost the edits');
+        assert.strictEqual(opened.tab.isDirty, true);
+    });
+
+    // A rename that failed was tried again and worked. VS Code told of it and
+    // the failed try was taken for the one it told of. No tab of the new name
+    // opened and the edits made only in the diff were gone a minute later.
+    await test('a rename tried again after it failed brings edits made only in a Source Control diff to the new name', async () => {
+        const provider = registerProvider();
+        const p = file('ren-diff-retry.csv', 'h\n1\n');
+        const t = await open(p, {}, uriFile(p), provider);
+        t.tab.input = undefined;
+        t.tab.uri = t.uri;
+        await t.edit('h\nRETRIED\n');
+        const dest = path.join(tmpDir, 'ren-diff-retry-2.csv');
+        await willRenameFiles([[p, dest]]);
+        // The move fails and VS Code tells of no rename.
+        await new Promise(r => setTimeout(r, 2500));
+        const [after] = await renameFiles(provider, [[p, dest]], [t]);
+        assert.strictEqual(after, null, 'the test did not reach a rename that opens nothing');
+        assert.deepStrictEqual(openedWith.map(o => [o.uri.fsPath, o.viewType, o.options]),
+            [[dest, 'csvViewer.grid', { preview: false, preserveFocus: true }]], 'no grid tab of the new name was opened');
+        const opened = await open(dest, {}, uriFile(dest), provider);
+        assert.strictEqual(opened.doc.content, 'h\nRETRIED\n', 'the new tab lost the edits');
+        assert.strictEqual(opened.tab.isDirty, true);
+    });
+
     await test('a rename opens no grid tab of its own for a file with a grid tab', async () => {
         const provider = registerProvider();
         const p = file('ren-grid-tab.csv', 'h\n1\n');
@@ -3549,6 +3600,56 @@ async function main() {
         const changes = t.changes();
         await new Promise(r => setTimeout(r, 2500));
         assert.strictEqual(t.changes(), changes, 'the tab was marked unsaved again');
+    });
+
+    // The edits of a tab behind another wait under the name an earlier rename
+    // gave the file. A move of that file failed and left them waiting under
+    // the name of the move. The tab then showed the file from disk and looked
+    // saved. Another file moved to that name took them.
+    await test('a failed move of a file whose tab was not shown since a rename leaves the edits to that tab', async () => {
+        const provider = registerProvider();
+        const p = file('ren-unshown-fails.csv', 'h\nDISK\n');
+        const t = await open(p, {}, uriFile(p), provider);
+        await t.edit('h\nBEHIND\n');
+        await open(file('ren-unshown-fails-front.csv', 'h\nF\n'), {}, undefined, provider);
+        const second = path.join(tmpDir, 'ren-unshown-fails-2.csv');
+        const [later] = await renameFiles(provider, [[p, second]], [t]);
+        assert.ok(later.unshown, 'the test did not reach a tab behind another');
+        const third = path.join(tmpDir, 'ren-unshown-fails-dir', 'ren-unshown-fails-3.csv');
+        await willRenameFiles([[second, third]]);
+        // The move fails and VS Code tells of no rename.
+        await new Promise(r => setTimeout(r, 2500));
+        fs.mkdirSync(path.dirname(third));
+        fs.writeFileSync(third, 'h\nOTHER FILE\n');
+        const other = await open(third, {}, uriFile(third), provider);
+        assert.strictEqual(other.doc.content, 'h\nOTHER FILE\n', 'the edits of the failed move turned up in another file');
+        assert.strictEqual(other.changes(), 0);
+        const shown = await later.show();
+        assert.strictEqual(shown.doc.content, 'h\nBEHIND\n', 'the tab lost the edits');
+        assert.strictEqual(shown.tab.isDirty, true, 'the tab looks saved and closing it loses the edits');
+    });
+
+    // The same in a swap through a third name that failed. The edits of the
+    // other file waited under the name of that tab for the swap.
+    await test('a failed swap leaves the edits to a tab not shown since a rename', async () => {
+        const provider = registerProvider();
+        const px = file('ren-swap-fails-x.csv', 'h\nX-DISK\n');
+        const pb = file('ren-swap-fails-b.csv', 'h\nB-DISK\n');
+        const x = await open(px, {}, uriFile(px), provider);
+        await x.edit('h\nXEDIT\n');
+        const b = await open(pb, {}, uriFile(pb), provider);
+        await b.edit('h\nBEDIT\n');
+        const pa = path.join(tmpDir, 'ren-swap-fails-a.csv');
+        const [later] = await renameFiles(provider, [[px, pa]], [x]);
+        assert.ok(later.unshown, 'the test did not reach a tab behind another');
+        const pt = path.join(tmpDir, 'ren-swap-fails-t.csv');
+        await willRenameFiles([[pa, pt], [pb, pa], [pt, pb]]);
+        // The swap fails and VS Code tells of no rename.
+        await new Promise(r => setTimeout(r, 2500));
+        const shown = await later.show();
+        assert.strictEqual(shown.doc.content, 'h\nXEDIT\n', 'the tab lost the edits');
+        assert.strictEqual(shown.tab.isDirty, true, 'the tab looks saved and closing it loses the edits');
+        assert.strictEqual(b.doc.content, 'h\nBEDIT\n');
     });
 
     // VS Code moves the files of one edit one after the other. An extension
