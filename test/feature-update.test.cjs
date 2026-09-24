@@ -7,6 +7,7 @@ const assert = require('assert');
 const { isFeatureUpdate } = require('../out/featureUpdate');
 
 assert.strictEqual(isFeatureUpdate(undefined, '1.23.0'), false, 'first install');
+assert.strictEqual(isFeatureUpdate(undefined, '1.23.0', true), true, 'update from a version that did not store its version');
 assert.strictEqual(isFeatureUpdate('1.23.0', '1.23.1'), false, 'bug-fix release');
 assert.strictEqual(isFeatureUpdate('1.23.1', '1.24.0'), true, 'new minor version');
 assert.strictEqual(isFeatureUpdate('1.23.0', '2.0.0'), true, 'new major version');
