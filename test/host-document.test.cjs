@@ -51,6 +51,9 @@ let duringNextWrite = null;
 let duringNextRead = null;
 // Runs while the next size question is open, before it is answered.
 let duringQuickPick = null;
+// How long a look at the disk takes in ms. With the extension on another
+// machine each one waits for a round trip to the VS Code window first.
+let statDelay = 0;
 // What the extension asked VS Code to open in a grid that no tab showed.
 const openedWith = [];
 
@@ -82,6 +85,7 @@ const vscodeStub = {
         fs: {
             // A folder too: a rename or move of one is looked at.
             stat: async uri => {
+                if (statDelay) await new Promise(r => setTimeout(r, statDelay));
                 if (uri.scheme === 'git') return { type: 1, size: fakeSize ?? readUri(uri).length, mtime: 0 };
                 const stats = fs.statSync(uri.fsPath);
                 if (stats.isDirectory()) return { type: 2, size: 0, mtime: stats.mtimeMs };
@@ -355,6 +359,7 @@ async function test(name, fn) {
     duringNextWrite = null;
     duringNextRead = null;
     duringQuickPick = null;
+    statDelay = 0;
     openedWith.length = 0;
     openWithFails = false;
     windowOnly = 0;
@@ -3919,6 +3924,84 @@ async function main() {
         const changes = t.changes();
         await new Promise(r => setTimeout(r, 2500));
         assert.strictEqual(t.changes(), changes, 'the tab was marked unsaved again');
+    });
+
+    // With the extension on another machine (Remote SSH, a tunnel) VS Code
+    // needs several round trips to it for a rename. At 350 ms a round trip
+    // the file moved over three seconds after the edits were handed on. The
+    // rename counted as failed after two, right after VS Code had marked the
+    // tab saved for the move. The tab was marked unsaved again, VS Code asked
+    // whether to save the file under its old name and Save wrote it there
+    // again next to the renamed one.
+    await test('a rename on a slow connection that takes over two seconds is not taken for a failed one', async () => {
+        const provider = registerProvider();
+        const p = file('ren-slow-link.csv', 'h\n1\n');
+        const t = await open(p, {}, uriFile(p), provider);
+        await t.edit('h\nSLOW\n');
+        const dest = path.join(tmpDir, 'ren-slow-link-2.csv');
+        statDelay = 200;
+        await willRenameFiles([[p, dest]]);
+        await t.backUpLikeVsCode();
+        t.tab.isDirty = false;
+        const changes = t.changes();
+        await new Promise(r => setTimeout(r, 3000));
+        assert.strictEqual(t.changes(), changes, 'the tab was marked unsaved before VS Code moved the file, so VS Code asks to save the old name');
+        fs.renameSync(p, dest);
+        t.close();
+        const after = await open(dest, {}, uriFile(dest), provider, undefined, () => didRenameFiles([[p, dest]]));
+        group.tabs.splice(group.tabs.indexOf(t.tab), 1);
+        for (const l of tabsChanged) l({ opened: [], closed: [t.tab], changed: [] });
+        assert.strictEqual(after.doc.content, 'h\nSLOW\n', 'the renamed file lost the edits');
+        assert.strictEqual(after.tab.isDirty, true);
+        assert.strictEqual(fs.existsSync(p), false);
+    });
+
+    // A rename that fails there is still found, only later.
+    await test('a rename on a slow connection that fails marks the tab unsaved again', async () => {
+        const provider = registerProvider();
+        const p = file('ren-slow-fails.csv', 'h\n1\n');
+        const t = await open(p, {}, uriFile(p), provider);
+        await t.edit('h\nKEEPME\n');
+        const dest = path.join(tmpDir, 'ren-slow-fails-2.csv');
+        statDelay = 200;
+        await willRenameFiles([[p, dest]]);
+        await t.backUpLikeVsCode();
+        t.tab.isDirty = false;
+        // The move fails and VS Code tells of no rename.
+        for (let waited = 0; waited < 8000 && !t.tab.isDirty; waited += 100) await new Promise(r => setTimeout(r, 100));
+        assert.strictEqual(t.tab.isDirty, true, 'the tab looks saved and closing it loses the edits');
+        assert.strictEqual(t.doc.content, 'h\nKEEPME\n');
+    });
+
+    // A look at the disk took 1.7 s at 300 ms each way while VS Code backed
+    // up the file. Waited for twenty times that, the rename would count as
+    // failed only after its edits were given up (CARRY_MS in
+    // csvEditorProvider.ts), which then no longer happened.
+    await test('a rename on a very slow connection that fails marks the tab unsaved again before its edits are given up', async () => {
+        const provider = registerProvider();
+        const p = file('ren-slowest-fails.csv', 'h\n1\n');
+        const t = await open(p, {}, uriFile(p), provider);
+        await t.edit('h\nKEEPME\n');
+        const dest = path.join(tmpDir, 'ren-slowest-fails-2.csv');
+        const later = [];
+        const setTimeoutBefore = global.setTimeout;
+        global.setTimeout = (f, ms, ...args) => ms >= 10000 ? (later.push({ f, ms }), 0) : setTimeoutBefore(f, ms, ...args);
+        statDelay = 3100;
+        try {
+            await willRenameFiles([[p, dest]]);
+        } finally {
+            global.setTimeout = setTimeoutBefore;
+            statDelay = 0;
+        }
+        await t.backUpLikeVsCode();
+        t.tab.isDirty = false;
+        // The move fails and VS Code tells of no rename. The timers run in
+        // the order they are due.
+        for (const { f } of later.sort((a, b) => a.ms - b.ms)) {
+            f();
+            await new Promise(r => setTimeout(r, 100));
+        }
+        assert.strictEqual(t.tab.isDirty, true, 'the tab looks saved and closing it loses the edits');
     });
 
     // A move to another drive copies the file or folder and deletes it only

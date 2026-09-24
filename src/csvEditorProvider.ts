@@ -62,8 +62,11 @@ const CARRY_MS               = 60000;
 // a few milliseconds after it closed the grid.
 const CLOSED_MS              = 1000;
 // How long VS Code has to tell of a rename after the extension handed on the
-// unsaved edits for it before it counts as failed (see renameFailed).
+// unsaved edits for it before it counts as failed (see renameFailed). With
+// the extension on another machine it is that many round trips to the VS
+// Code window when that is longer (see carryEdits).
 const FAILED_MS              = 2000;
+const FAILED_TRIPS           = 20;
 
 // A hot exit backup is written as UTF-8, which holds any edit whatever the
 // file's encoding, but for one thing: a lone surrogate, which it turns into
@@ -501,8 +504,15 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         const renaming: Renaming = { files, carried: new Map(), from: new Map(), failed: new Map(), targets: [], looked: [], until: 0 };
         this.followCarried(files, renaming);
         // Looked at before the wait below, after which VS Code moves the
-        // files (see copying).
-        const targets = Promise.all(files.map(({ newUri }) => statOf(newUri)));
+        // files (see copying). Each look at the disk first asks the VS Code
+        // window, so it takes one round trip to it, a millisecond when both
+        // run on the same machine.
+        const asked = Date.now();
+        let trip = 0;
+        const targets = Promise.all(files.map(({ newUri }) => statOf(newUri))).then(stats => {
+            trip = Date.now() - asked;
+            return stats;
+        });
         await Promise.all([...this._documents].map(async ([key, document]) => {
             const to = renamedTo(key, files);
             if (to === undefined || document.isPreview) return;
@@ -518,7 +528,18 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         renaming.looked = [...renaming.targets];
         renaming.until = Date.now() + CARRY_MS;
         this._renaming.add(renaming);
-        setTimeout(() => void this.renameFailed(renaming), FAILED_MS);
+        // With the extension on another machine (Remote SSH, a tunnel) VS
+        // Code needs several round trips to it for the rename after this. At
+        // 350 ms a round trip it moved the file over three seconds later.
+        // Taken for failed after FAILED_MS, the tab was marked unsaved again
+        // right after VS Code had marked it saved for the move. VS Code then
+        // asked whether to save the file under its old name and Save wrote it
+        // there again next to the renamed one. So the wait is FAILED_TRIPS
+        // round trips when that is longer, 7 s at 350 ms a round trip. A
+        // rename that fails there looks saved for that much longer. The wait
+        // is half of CARRY_MS at most, so a failed rename is still found
+        // before its edits are given up.
+        setTimeout(() => void this.renameFailed(renaming), Math.min(Math.max(FAILED_MS, FAILED_TRIPS * trip), CARRY_MS / 2));
         setTimeout(() => this._renaming.delete(renaming), CARRY_MS);
     }
 
@@ -611,7 +632,7 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         }
     }
 
-    // A rename VS Code has not told of FAILED_MS after the edits were handed
+    // A rename VS Code has not told of in time after the edits were handed
     // on: a folder without write access, a file another program holds open
     // on Windows. VS Code marks the grid tab saved right before it moves the
     // file and puts the mark back after a failed move only for its own text
@@ -1056,7 +1077,7 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
     // A tab VS Code had not shown since an earlier rename is shown while a
     // later move of its file runs. The move handed its edits on to the new
     // name already (see followCarried) and one that fails gives them back
-    // only FAILED_MS later (see renameFailed). The tab showed the file from
+    // only seconds later (see renameFailed). The tab showed the file from
     // disk and looked saved. The edits went back under its name after it had
     // opened and closing it lost them. So it takes them back. Should the move
     // go through after all, they go along with the grid VS Code closes for it
