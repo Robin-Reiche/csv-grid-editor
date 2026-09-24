@@ -28,8 +28,12 @@ const roundTrip = raw => {
 console.log('reading and writing a file in its own encoding');
 
 test('Windows-1252 reads every byte the way the Encoding Standard does', () => {
+    // The Encoding Standard's characters for 0x80 to 0x9F, written out. Not
+    // TextDecoder: Node 20.20 decodes windows-1252 as Latin-1 there.
+    const high = '€\x81‚ƒ„…†‡ˆ‰Š‹Œ\x8DŽ\x8F\x90‘’“”•–—˜™š›œ\x9DžŸ';
     const all = Buffer.from(Array.from({ length: 256 }, (_, i) => i));
-    assert.strictEqual(decodeWindows1252(all), new TextDecoder('windows-1252').decode(all));
+    const latin1 = all.toString('latin1');
+    assert.strictEqual(decodeWindows1252(all), latin1.slice(0, 0x80) + high + latin1.slice(0xA0));
 });
 
 test('every byte of a Windows-1252 file comes back as it was', () => {
