@@ -77,9 +77,16 @@ const vscodeStub = {
         joinPath: (base, ...parts) => uriFile([base.fsPath, ...parts].join('/')),
     },
     RelativePattern: class { constructor(base, pattern) { this.base = base; this.pattern = pattern; } },
+    FileType: { File: 1, Directory: 2 },
     workspace: {
         fs: {
-            stat: async uri => ({ size: fakeSize ?? readUri(uri).length }),
+            // A folder too: a rename or move of one is looked at.
+            stat: async uri => {
+                if (uri.scheme === 'git') return { type: 1, size: fakeSize ?? readUri(uri).length, mtime: 0 };
+                const stats = fs.statSync(uri.fsPath);
+                if (stats.isDirectory()) return { type: 2, size: 0, mtime: stats.mtimeMs };
+                return { type: 1, size: fakeSize ?? readUri(uri).length, mtime: stats.mtimeMs };
+            },
             readFile: async uri => {
                 const bytes = new Uint8Array(readUri(uri));
                 if (duringNextRead) {
@@ -2068,6 +2075,9 @@ async function main() {
         assert.strictEqual(t.tab.isDirty, true, 'the value the save did not get sits behind a tab that looks saved');
     });
 
+    // The value being typed went with the editor. With no editor left the
+    // save writes nothing (see the rename below), the next one writes what
+    // the document holds.
     await test('a save does not wait for an editor that was closed', async () => {
         const p = file('typing-closed.csv', 'h\n1\n');
         const t = await open(p);
@@ -2077,11 +2087,29 @@ async function main() {
         const saving = t.save();
         await tick();
         t.close();
-        await saving;
+        await assert.rejects(saving, /typed/, 'the save reported the file saved without the value being typed');
         assert.ok(Date.now() - start < 500, 'the save waited ' + (Date.now() - start) + ' ms');
+        assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\n1\n', 'the save wrote the file for a document no editor shows');
         // The closed editor is not asked again.
         await t.save();
         assert.strictEqual(t.flushes().length, 1);
+        assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\n2\n');
+    });
+
+    // A Source Control diff closes without asking while the grid tab stays
+    // open. The value typed in it goes to the grid tab (see above), so a
+    // save that waited for it has it.
+    await test('a save that waits while the other editor closes writes the value that editor handed over', async () => {
+        const p = file('typing-closed-diff.csv', 'h\n1\n');
+        const t = await open(p);
+        const diff = await t.openSecondEditor();
+        await diff.typing();
+        await diff.typedText('h\nTYPED\n');
+        const saving = t.save();
+        await tick();
+        diff.close();
+        await saving;
+        assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\nTYPED\n');
     });
 
     // Ctrl+W asks whether to save. The question takes the focus from the
@@ -3401,6 +3429,25 @@ async function main() {
         assert.strictEqual(after.tab.isDirty, true);
     });
 
+    // VS Code closes the grid of a file a rename writes over only after it
+    // told of the rename beforehand.
+    await test('a tab not shown since a rename keeps the edits through a rename onto a file open in a grid', async () => {
+        const provider = registerProvider();
+        const p = file('ren-unshown-over.csv', 'h\nmine\n');
+        const dest = file('ren-unshown-over-target.csv', 'h\ntarget\n');
+        const target = await open(dest, {}, uriFile(dest), provider);
+        const t = await open(p, {}, uriFile(p), provider);
+        await t.edit('h\nMINE EDITED\n');
+        await open(file('ren-unshown-over-front.csv', 'h\nF\n'), {}, undefined, provider);
+        const second = path.join(tmpDir, 'ren-unshown-over-2.csv');
+        const [later] = await renameFiles(provider, [[p, second]], [t]);
+        assert.ok(later.unshown, 'the test did not reach a tab behind another');
+        const [last] = await renameFiles(provider, [[second, dest]], [later], { overwritten: [target] });
+        const after = await last.show();
+        assert.strictEqual(after.doc.content, 'h\nMINE EDITED\n', 'the edits were lost');
+        assert.strictEqual(after.tab.isDirty, true);
+    });
+
     // The revert of Don't Save ends only after VS Code closed the tab and its
     // editor. Kept for the undo of a rename, the edits it threw away came
     // back when the file was renamed later. They took the place of a save
@@ -3605,6 +3652,31 @@ async function main() {
         fs.renameSync(dir + '-2', dir);
         didRenameFiles([[dir + '-2', dir]]);
         await na.closeTab({ revert: true });
+        await a.edit('h\nNEW\n');
+        await a.save();
+        const [later] = await renameFiles(provider, [[dir, dir + '-3']], [a]);
+        await tick();
+        assert.strictEqual(later.doc.content, 'h\nNEW\n', 'the edits of the other tab came back over the save');
+        assert.strictEqual(later.changes(), 0, 'the tab was marked unsaved');
+        assert.deepStrictEqual(warnings.map(w => w.msg), [], 'a file nobody changed was reported as changed on disk');
+    });
+
+    // The same with the tab of the new name not shown before Ctrl+Z. The
+    // edits waiting for it went back to the old name, where the grid is
+    // still open.
+    await test('an undone folder rename moves no edits to a grid still open under the old name', async () => {
+        const provider = registerProvider();
+        const dir = path.join(tmpDir, 'ren-dir-undo-unshown');
+        fs.mkdirSync(dir);
+        const a = await open(file('ren-dir-undo-unshown/a.csv', 'h\na\n'), {}, undefined, provider);
+        await a.edit('h\nAAA\n');
+        // Cancel: the grid of the old name stays open, the tab of the new
+        // name opens behind it.
+        await renameFiles(provider, [[dir, dir + '-2']], []);
+        const na = unshownTab(provider, path.join(dir + '-2', 'a.csv'));
+        fs.renameSync(dir + '-2', dir);
+        didRenameFiles([[dir + '-2', dir]]);
+        na.close();
         await a.edit('h\nNEW\n');
         await a.save();
         const [later] = await renameFiles(provider, [[dir, dir + '-3']], [a]);
@@ -3849,6 +3921,150 @@ async function main() {
         assert.strictEqual(t.changes(), changes, 'the tab was marked unsaved again');
     });
 
+    // A move to another drive copies the file or folder and deletes it only
+    // then. On a large file or a slow drive that took over two seconds and
+    // the move was taken for a failed one. The tab was marked unsaved again
+    // and auto-save wrote the file while VS Code copied it. The move hung for
+    // good with a damaged copy. For a folder a.csv was copied already and its
+    // edits were gone.
+    for (const what of ['file', 'folder']) {
+        await test(`a move of a ${what} to another drive that takes over two seconds is not taken for a failed one`, async () => {
+            const provider = registerProvider();
+            const n = `ren-copy-${what}`;
+            const from = what === 'file' ? file(`${n}.csv`, 'h\n1\n') : path.join(tmpDir, n);
+            if (what === 'folder') fs.mkdirSync(from);
+            const p = what === 'file' ? from : file(`${n}/a.csv`, 'h\n1\n');
+            const t = await open(p, {}, uriFile(p), provider);
+            await t.edit('h\nCOPIED\n');
+            const to = path.join(tmpDir, `${n}-other`, path.basename(from));
+            fs.mkdirSync(path.dirname(to));
+            await willRenameFiles([[from, to]]);
+            await t.backUpLikeVsCode();
+            t.tab.isDirty = false;
+            const changes = t.changes();
+            // VS Code starts to copy. Other writes to a slow drive hold the
+            // copy up for longer than two seconds at times.
+            if (what === 'file') fs.writeFileSync(to, 'h\n');
+            else fs.mkdirSync(to);
+            await new Promise(r => setTimeout(r, 4500));
+            assert.strictEqual(t.changes(), changes, 'the tab was marked unsaved while VS Code copied the file, so auto-save wrote it');
+            // The copy is through and VS Code deletes the old one.
+            fs.cpSync(from, to, { recursive: true });
+            fs.rmSync(from, { recursive: true });
+            t.close();
+            const moved = what === 'file' ? to : path.join(to, 'a.csv');
+            const after = await open(moved, {}, uriFile(moved), provider, undefined, () => didRenameFiles([[from, to]]));
+            group.tabs.splice(group.tabs.indexOf(t.tab), 1);
+            for (const l of tabsChanged) l({ opened: [], closed: [t.tab], changed: [] });
+            assert.strictEqual(after.doc.content, 'h\nCOPIED\n', 'the moved file lost the edits');
+            assert.strictEqual(after.tab.isDirty, true);
+        });
+    }
+
+    // A copy can have the size of the old file before all of it is written.
+    // It is under way as long as it changes.
+    await test('a move to another drive whose copy has the full size and still changes is not taken for a failed one', async () => {
+        const provider = registerProvider();
+        const p = file('ren-copy-full.csv', 'h\n1\n');
+        const t = await open(p, {}, uriFile(p), provider);
+        await t.edit('h\nCOPIED\n');
+        const to = path.join(tmpDir, 'ren-copy-full-other', 'ren-copy-full.csv');
+        fs.mkdirSync(path.dirname(to));
+        await willRenameFiles([[p, to]]);
+        await t.backUpLikeVsCode();
+        t.tab.isDirty = false;
+        const changes = t.changes();
+        fs.writeFileSync(to, '\0\0\0\0');
+        await new Promise(r => setTimeout(r, 3000));
+        fs.writeFileSync(to, 'h\n\0\0');
+        await new Promise(r => setTimeout(r, 1500));
+        assert.strictEqual(t.changes(), changes, 'the tab was marked unsaved while VS Code copied the file, so auto-save wrote it');
+        fs.copyFileSync(p, to);
+        fs.rmSync(p);
+        t.close();
+        const after = await open(to, {}, uriFile(to), provider, undefined, () => didRenameFiles([[p, to]]));
+        group.tabs.splice(group.tabs.indexOf(t.tab), 1);
+        for (const l of tabsChanged) l({ opened: [], closed: [t.tab], changed: [] });
+        assert.strictEqual(after.doc.content, 'h\nCOPIED\n', 'the moved file lost the edits');
+        assert.strictEqual(after.tab.isDirty, true);
+    });
+
+    // A file that was there under the new name already is no copy under way,
+    // smaller than the old one or not.
+    await test('a rename onto an existing file that fails marks the tab unsaved again', async () => {
+        const provider = registerProvider();
+        const p = file('ren-over-fails.csv', 'h\nlonger than the other file\n');
+        const dest = file('ren-over-fails-target.csv', 'h\ntarget\n');
+        const t = await open(p, {}, uriFile(p), provider);
+        await t.edit('h\nKEEPME\n');
+        await willRenameFiles([[p, dest]]);
+        await t.backUpLikeVsCode();
+        t.tab.isDirty = false;
+        // The move fails and VS Code tells of no rename.
+        await new Promise(r => setTimeout(r, 2500));
+        assert.strictEqual(t.tab.isDirty, true, 'the tab looks saved and closing it loses the edits');
+    });
+
+    // VS Code copied the file to another drive and then could not delete it:
+    // a folder without write access, a file another program holds open on
+    // Windows. The move fails and leaves both files. Taken for a copy under
+    // way for good, the tab stayed marked saved and closing it lost the edits.
+    await test('a move to another drive that fails after the copy marks the tab unsaved again', async () => {
+        const provider = registerProvider();
+        const p = file('ren-copy-fails.csv', 'h\n1\n');
+        const t = await open(p, {}, uriFile(p), provider);
+        await t.edit('h\nKEEPME\n');
+        const to = path.join(tmpDir, 'ren-copy-fails-other', 'ren-copy-fails.csv');
+        fs.mkdirSync(path.dirname(to));
+        await willRenameFiles([[p, to]]);
+        await t.backUpLikeVsCode();
+        t.tab.isDirty = false;
+        // The move fails and VS Code tells of no rename.
+        fs.copyFileSync(p, to);
+        await new Promise(r => setTimeout(r, 4500));
+        assert.strictEqual(t.tab.isDirty, true, 'the tab looks saved and closing it loses the edits');
+        assert.strictEqual(t.doc.content, 'h\nKEEPME\n');
+        const other = await open(to, {}, uriFile(to), provider);
+        assert.strictEqual(other.doc.content, 'h\n1\n', 'the edits of the failed move turned up in the copy');
+        assert.strictEqual(other.changes(), 0);
+    });
+
+    // A folder's own date does not change while a large file in it is copied,
+    // so a folder under the new name counts as a copy under way until shortly
+    // before the edits are given up (CARRY_MS in csvEditorProvider.ts). So
+    // does a file that stays smaller than the old one: a copy that failed
+    // halfway, on a full drive.
+    for (const what of ['folder', 'file']) {
+        await test(`a move of a ${what} to another drive that fails during or after the copy marks the tab unsaved again in the end`, async () => {
+            const provider = registerProvider();
+            const n = `ren-copy-${what}-fails`;
+            const from = what === 'file' ? file(`${n}.csv`, 'h\n1\n') : path.join(tmpDir, n);
+            if (what === 'folder') fs.mkdirSync(from);
+            const p = what === 'file' ? from : file(`${n}/a.csv`, 'h\n1\n');
+            const t = await open(p, {}, uriFile(p), provider);
+            await t.edit('h\nKEEPME\n');
+            const to = path.join(tmpDir, `${n}-other`, path.basename(from));
+            fs.mkdirSync(path.dirname(to));
+            await willRenameFiles([[from, to]]);
+            await t.backUpLikeVsCode();
+            t.tab.isDirty = false;
+            // The move fails and VS Code tells of no rename.
+            if (what === 'file') fs.writeFileSync(to, 'h\n');
+            else fs.cpSync(from, to, { recursive: true });
+            await new Promise(r => setTimeout(r, 2500));
+            assert.strictEqual(t.tab.isDirty, false, 'the test did not reach a move taken for a copy under way');
+            const now = Date.now;
+            Date.now = () => now() + 60000;
+            try {
+                await new Promise(r => setTimeout(r, 2000));
+            } finally {
+                Date.now = now;
+            }
+            assert.strictEqual(t.tab.isDirty, true, 'the tab looks saved and closing it loses the edits');
+            assert.strictEqual(t.doc.content, 'h\nKEEPME\n');
+        });
+    }
+
     // The edits of a tab behind another wait under the name an earlier rename
     // gave the file. A move of that file failed and left them waiting under
     // the name of the move. The tab then showed the file from disk and looked
@@ -3874,6 +4090,88 @@ async function main() {
         const shown = await later.show();
         assert.strictEqual(shown.doc.content, 'h\nBEHIND\n', 'the tab lost the edits');
         assert.strictEqual(shown.tab.isDirty, true, 'the tab looks saved and closing it loses the edits');
+    });
+
+    // The same with the tab shown right after the move failed, before the
+    // edits went back to its name. It showed the file from disk and looked
+    // saved.
+    await test('a tab not shown since a rename shows the edits when shown right after a later move of it failed', async () => {
+        const provider = registerProvider();
+        const p = file('ren-shown-fails.csv', 'h\nDISK\n');
+        const t = await open(p, {}, uriFile(p), provider);
+        await t.edit('h\nBEHIND\n');
+        await open(file('ren-shown-fails-front.csv', 'h\nF\n'), {}, undefined, provider);
+        const second = path.join(tmpDir, 'ren-shown-fails-2.csv');
+        const [later] = await renameFiles(provider, [[p, second]], [t]);
+        assert.ok(later.unshown, 'the test did not reach a tab behind another');
+        const third = path.join(tmpDir, 'ren-shown-fails-dir', 'ren-shown-fails-3.csv');
+        await willRenameFiles([[second, third]]);
+        // The move fails and VS Code tells of no rename.
+        const shown = await later.show();
+        assert.strictEqual(shown.doc.content, 'h\nBEHIND\n', 'the tab showed the file from disk');
+        assert.strictEqual(shown.tab.isDirty, true, 'the tab looks saved and closing it loses the edits');
+        await new Promise(r => setTimeout(r, 2500));
+        assert.strictEqual(shown.doc.content, 'h\nBEHIND\n');
+        fs.mkdirSync(path.dirname(third));
+        fs.writeFileSync(third, 'h\nOTHER FILE\n');
+        const other = await open(third, {}, uriFile(third), provider);
+        assert.strictEqual(other.doc.content, 'h\nOTHER FILE\n', 'the edits of the failed move turned up in another file');
+        assert.strictEqual(other.changes(), 0);
+    });
+
+    // A tab shown while the move still runs takes the edits back all the
+    // same. They go on to the new name when the move goes through.
+    await test('a tab not shown since a rename and shown during a later move of it hands the edits on when the move goes through', async () => {
+        const provider = registerProvider();
+        const p = file('ren-shown-moves.csv', 'h\nDISK\n');
+        const t = await open(p, {}, uriFile(p), provider);
+        await t.edit('h\nBEHIND\n');
+        await open(file('ren-shown-moves-front.csv', 'h\nF\n'), {}, undefined, provider);
+        const second = path.join(tmpDir, 'ren-shown-moves-2.csv');
+        const [later] = await renameFiles(provider, [[p, second]], [t]);
+        assert.ok(later.unshown, 'the test did not reach a tab behind another');
+        const third = path.join(tmpDir, 'ren-shown-moves-dir', 'ren-shown-moves-3.csv');
+        await willRenameFiles([[second, third]]);
+        const shown = await later.show();
+        assert.strictEqual(shown.doc.content, 'h\nBEHIND\n', 'the test did not reach a tab that took the edits back');
+        // The move goes through. VS Code closes the grid, opens the file in
+        // front under its new name, tells of the rename meanwhile and closes
+        // the tab of the old name last.
+        fs.mkdirSync(path.dirname(third));
+        fs.renameSync(second, third);
+        shown.close();
+        const moved = await open(third, {}, uriFile(third), provider, undefined, () => didRenameFiles([[second, third]]));
+        group.tabs.splice(group.tabs.indexOf(shown.tab), 1);
+        for (const l of tabsChanged) l({ opened: [], closed: [shown.tab], changed: [] });
+        assert.strictEqual(moved.doc.content, 'h\nBEHIND\n', 'the edits stayed behind under the old name');
+        assert.strictEqual(moved.tab.isDirty, true);
+    });
+
+    // Not while VS Code copies the file to another drive, though: the tab
+    // marked unsaved had auto-save write the file during the copy.
+    await test('a tab not shown since a rename and shown while a later move copies its file is not marked unsaved', async () => {
+        const provider = registerProvider();
+        const p = file('ren-shown-copies.csv', 'h\nDISK\n');
+        const t = await open(p, {}, uriFile(p), provider);
+        await t.edit('h\nBEHIND\n');
+        await open(file('ren-shown-copies-front.csv', 'h\nF\n'), {}, undefined, provider);
+        const second = path.join(tmpDir, 'ren-shown-copies-2.csv');
+        const [later] = await renameFiles(provider, [[p, second]], [t]);
+        assert.ok(later.unshown, 'the test did not reach a tab behind another');
+        const third = path.join(tmpDir, 'ren-shown-copies-other', 'ren-shown-copies-2.csv');
+        fs.mkdirSync(path.dirname(third));
+        await willRenameFiles([[second, third]]);
+        fs.writeFileSync(third, 'h\n');
+        const shown = await later.show();
+        assert.strictEqual(shown.changes(), 0, 'the tab was marked unsaved while VS Code copied the file, so auto-save wrote it');
+        fs.copyFileSync(second, third);
+        fs.rmSync(second);
+        shown.close();
+        const moved = await open(third, {}, uriFile(third), provider, undefined, () => didRenameFiles([[second, third]]));
+        group.tabs.splice(group.tabs.indexOf(shown.tab), 1);
+        for (const l of tabsChanged) l({ opened: [], closed: [shown.tab], changed: [] });
+        assert.strictEqual(moved.doc.content, 'h\nBEHIND\n', 'the moved file lost the edits');
+        assert.strictEqual(moved.tab.isDirty, true);
     });
 
     // The same in a swap through a third name that failed. The edits of the
@@ -3974,6 +4272,77 @@ async function main() {
         assert.strictEqual(after.tab.isDirty, true);
     });
 
+    // Enter in a cell of a large file keeps the grid busy while it commits
+    // the value, 15 s at 88 MB. The rename waited five seconds for it, went
+    // on without it and the value was lost with the grid VS Code closed.
+    await test('a rename of a file of several MB waits for the value being typed as long as a save', async () => {
+        const provider = registerProvider();
+        const text = 'h\n' + '1234567890\n'.repeat(500000);
+        const p = file('ren-typing-mb.csv', text);
+        const t = await open(p, {}, uriFile(p), provider);
+        await t.typing();
+        const dest = path.join(tmpDir, 'ren-typing-mb-2.csv');
+        const renaming = renameFiles(provider, [[p, dest]], [t]);
+        await new Promise(r => setTimeout(r, 5500));
+        await t.flushed(text + 'TYPED\n');
+        await tick();
+        await t.flushed(text + 'TYPED\n');
+        const [after] = await renaming;
+        assert.ok(after.doc.content === text + 'TYPED\n', 'the value was lost');
+        assert.strictEqual(after.tab.isDirty, true);
+    });
+
+    // A save waited for the value being typed in a large file when VS Code
+    // moved the file and closed the grid. The save then wrote the text
+    // without the value to the old name: the file the user renamed away
+    // came back next to the new one.
+    await test('a save that waits for the value being typed writes nothing under the old name of a renamed file', async () => {
+        const provider = registerProvider();
+        const p = file('ren-saving.csv', 'h\n1\n');
+        const t = await open(p, {}, uriFile(p), provider);
+        await t.edit('h\n2\n');
+        await t.typing();
+        const saving = t.save();
+        await tick();
+        const dest = path.join(tmpDir, 'ren-saving-2.csv');
+        fs.renameSync(p, dest);
+        t.close();
+        await assert.rejects(saving, /typed/, 'the save reported the file saved');
+        assert.strictEqual(fs.existsSync(p), false, 'the save wrote the file under the name it was renamed away from');
+    });
+
+    // Once the rename waited for the value as long as a save, auto-save got
+    // the same answer at the same moment. VS Code moved the file while that
+    // save wrote it. The file under the new name came up half written and
+    // was reported as changed on disk.
+    await test('a rename waits for a save of the file that is under way', async () => {
+        const provider = registerProvider();
+        const p = file('ren-save-first.csv', 'h\n1\n');
+        const t = await open(p, {}, uriFile(p), provider);
+        await t.edit('h\nSAVED\n');
+        let write;
+        duringNextWrite = () => new Promise(r => { write = r; });
+        const saving = t.save();
+        await tick();
+        assert.ok(write, 'the test did not reach the write');
+        const dest = path.join(tmpDir, 'ren-save-first-2.csv');
+        let told = false;
+        const telling = willRenameFiles([[p, dest]]).then(() => { told = true; });
+        await tick();
+        assert.strictEqual(told, false, 'VS Code moved the file while the save wrote it');
+        write();
+        await saving;
+        await telling;
+        fs.renameSync(p, dest);
+        t.close();
+        const after = await open(dest, {}, uriFile(dest), provider, undefined, () => didRenameFiles([[p, dest]]));
+        group.tabs.splice(group.tabs.indexOf(t.tab), 1);
+        for (const l of tabsChanged) l({ opened: [], closed: [t.tab], changed: [] });
+        assert.strictEqual(after.doc.content, 'h\nSAVED\n');
+        assert.strictEqual(after.changes(), 0, 'the file holds the edits, yet the tab was marked unsaved');
+        assert.deepStrictEqual(warnings.map(w => w.msg), []);
+    });
+
     // An extension renamed a file twice a few milliseconds apart. The second
     // rename came after VS Code opened the file under its second name but
     // before it gave it its grid. The edits stayed with that document in a
@@ -4003,6 +4372,38 @@ async function main() {
         provider.onDidChangeCustomDocument(e => { if (e.document === middle) marked.push(e); });
         await attach(provider, middle);
         assert.deepStrictEqual(marked, [], 'the tab of the vanished name was marked unsaved');
+    });
+
+    // The same with the second rename told of while VS Code still read the
+    // file under its second name for the edits. VS Code gave that document
+    // its grid right after. The tab of the vanished name came up unsaved with
+    // the edits and Save wrote that file again.
+    await test('a second rename while the file under its second name is read leaves no unsaved tab of that name', async () => {
+        const provider = registerProvider();
+        const p = file('ren-race-read.csv', 'h\n1\n');
+        const t = await open(p, {}, uriFile(p), provider);
+        await t.edit('h\nTWICE\n');
+        const second = path.join(tmpDir, 'ren-race-read-2.csv');
+        const third = path.join(tmpDir, 'ren-race-read-3.csv');
+        await willRenameFiles([[p, second]]);
+        await t.backUpLikeVsCode();
+        fs.renameSync(p, second);
+        t.close();
+        duringNextRead = async () => {
+            didRenameFiles([[p, second]]);
+            await willRenameFiles([[second, third]]);
+            fs.renameSync(second, third);
+        };
+        const middle = await provider.openCustomDocument(uriFile(second), {}, {});
+        assert.strictEqual(duringNextRead, null, 'the test did not reach the read');
+        const marked = [];
+        provider.onDidChangeCustomDocument(e => { if (e.document === middle) marked.push(e); });
+        await attach(provider, middle);
+        assert.deepStrictEqual(marked, [], 'the tab of the vanished name was marked unsaved');
+        const last = await open(third, {}, uriFile(third), provider, () => didRenameFiles([[second, third]]));
+        assert.strictEqual(last.doc.content, 'h\nTWICE\n', 'the edits stayed behind under the vanished name');
+        assert.strictEqual(last.tab.isDirty, true);
+        assert.deepStrictEqual(warnings.map(w => w.msg), [], 'the file nobody changed was reported as changed on disk');
     });
 
     // The same with Ctrl+Z in the Explorer right after the rename, which

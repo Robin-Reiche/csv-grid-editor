@@ -42,6 +42,9 @@ const FLUSH_CHARS_PER_MS     = 1000;
 // it does not wait for ever either.
 const BACKUP_TIMEOUT_MS      = 5000;
 const NO_ANSWER              = Symbol('no answer');
+// What a wait for the value being typed gets from an editor that closed
+// before it answered (see flushTyping).
+const CLOSED                 = Symbol('editor closed');
 // What a save says that did not get the value being typed in time (see
 // saveCustomDocument).
 const TYPED_NOT_SAVED        = 'The value being typed in a cell was not saved yet. Save again in a moment.';
@@ -106,6 +109,12 @@ function fingerprint(text: string, encoding: FileEncoding): string {
 // FLUSH_TIMEOUT_MS).
 function saveWait(document: CsvDocument): number {
     return FLUSH_TIMEOUT_MS + document.content.length / FLUSH_CHARS_PER_MS;
+}
+
+// What is under `uri` now, a file or a folder. Undefined when there is
+// nothing.
+function statOf(uri: vscode.Uri): Promise<vscode.FileStat | undefined> {
+    return Promise.resolve(vscode.workspace.fs.stat(uri)).catch(() => undefined);
 }
 
 // Told after a save that could not keep the file in Windows-1252, see
@@ -202,6 +211,13 @@ interface Renaming {
     // The edits renameFailed gave back to their document, should VS Code
     // tell of the rename after all (see renamed).
     failed: Map<string, Carried>;
+    // What each new name in `files` held as VS Code told of the rename and
+    // at the last look since, undefined for a name nothing was under (see
+    // copying).
+    targets: (vscode.FileStat | undefined)[];
+    looked: (vscode.FileStat | undefined)[];
+    // When the edits handed on for it are given up (see renameFailed).
+    until: number;
 }
 
 // Whether a grid tab of the file `key` is open, shown or not.
@@ -306,6 +322,9 @@ class CsvDocument implements vscode.CustomDocument {
     // that event is ours. diskText only takes the text once the write has
     // landed, because a write that fails leaves the old file on disk.
     public pendingSave: { text: string; encoding: FileEncoding } | null = null;
+    // A save under way, from its wait for the value being typed to its
+    // write (see carryEdits).
+    public saving: Promise<void> | undefined;
     // Set while another program's change to the file waits for the user to
     // choose Overwrite or Reload from Disk on the warning about it (see
     // warnChangedOnDisk). No save is made until then. With auto-save after a
@@ -418,13 +437,14 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
     // The documents that took the edits of a renamed file and wait for their
     // first editor to mark the tab unsaved (see takeEdits).
     private readonly _unsaved = new WeakSet<CsvDocument>();
-    // The documents that took the edits of a renamed file when they were
-    // opened and have no editor yet, by URI, with the edits they took. An
+    // The documents that take the edits of a renamed file as they are
+    // opened and have no editor yet, by URI, with the edits they take and
+    // whether the file was read for them yet (see openCarried). An
     // extension renamed the file again a few milliseconds after the first
     // rename. Neither in _carried nor in _documents, the document was not
     // found and its edits stayed in a tab of the vanished name (see
     // followCarried).
-    private readonly _taking = new Map<string, { document: CsvDocument; from: Carried }>();
+    private readonly _taking = new Map<string, { document: CsvDocument; from: Carried; read: boolean }>();
     // The renames VS Code told of beforehand and not yet afterwards (see
     // carryEdits).
     private readonly _renaming = new Set<Renaming>();
@@ -464,24 +484,39 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
     // the new name here, a value being typed in a cell included. The new
     // name takes them when it opens (see openCustomDocument). A tab behind
     // another opens only once it is shown. A preview has no edits. The value
-    // being typed is waited for as long as a backup of a small file waits
-    // for it. The grid writes out the whole file for its answer, which took
-    // over a second at 90 MB. A rename by an extension leaves the cell open,
-    // so the answer came after the edits had gone on without it and the
-    // value was lost with the grid VS Code closed.
+    // being typed is waited for as long as a save of the file waits for it,
+    // five seconds at least. The grid writes out the whole file for its
+    // answer, which took over a second at 90 MB. A rename by an extension
+    // leaves the cell open, so the answer came after the edits had gone on
+    // without it and the value was lost with the grid VS Code closed. Enter
+    // in a large file right before the rename kept the grid busy with the
+    // commit for 15 s at 88 MB, so five seconds lost the value too. VS Code
+    // shows the rename's progress meanwhile and goes on without the answer
+    // after files.participants.timeout or Cancel. It then closes the grid,
+    // which ends the wait (see flushTyping). A save under way writes the file
+    // first. Auto-save waited for the same answer. Moved while that save
+    // wrote it, the file under the new name came up half written and was
+    // reported as changed on disk.
     private async carryEdits(files: readonly { readonly oldUri: vscode.Uri; readonly newUri: vscode.Uri }[]): Promise<void> {
-        const renaming: Renaming = { files, carried: new Map(), from: new Map(), failed: new Map() };
+        const renaming: Renaming = { files, carried: new Map(), from: new Map(), failed: new Map(), targets: [], looked: [], until: 0 };
         this.followCarried(files, renaming);
+        // Looked at before the wait below, after which VS Code moves the
+        // files (see copying).
+        const targets = Promise.all(files.map(({ newUri }) => statOf(newUri)));
         await Promise.all([...this._documents].map(async ([key, document]) => {
             const to = renamedTo(key, files);
             if (to === undefined || document.isPreview) return;
-            if (document.typing.size > 0) await this.flushTyping(document, BACKUP_TIMEOUT_MS);
+            if (document.typing.size > 0) await this.flushTyping(document, Math.max(BACKUP_TIMEOUT_MS, saveWait(document)));
+            await document.saving?.catch(() => undefined);
             if (!document.hasUnsavedEdits()) return;
             const edits: Carried = { ...carried(document), diffOnly: !hasGridTab(key) };
             this.carry(to, edits);
             renaming.carried.set(to, edits);
         }));
         if (renaming.carried.size === 0) return;
+        renaming.targets = await targets;
+        renaming.looked = [...renaming.targets];
+        renaming.until = Date.now() + CARRY_MS;
         this._renaming.add(renaming);
         setTimeout(() => void this.renameFailed(renaming), FAILED_MS);
         setTimeout(() => this._renaming.delete(renaming), CARRY_MS);
@@ -590,9 +625,21 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
     // of that tab. Left under the name of the failed move, they were lost to
     // that tab, which showed the file saved from disk. They go back after
     // the others: in a swap the edits of another file can wait under that
-    // name for the failed rename.
+    // name for the failed rename. A move to another drive copies the files
+    // and deletes them only then, which took longer than FAILED_MS for a
+    // large file or a slow drive. Taken for failed, the tab was marked
+    // unsaved again and auto-save wrote the file while VS Code copied it.
+    // The move then never finished and left a damaged copy. For a folder
+    // the file was copied already and its edits were lost. So a rename is
+    // looked at again later while VS Code copies for it. Shortly before its
+    // edits are given up (CARRY_MS) it counts as failed all the same: a
+    // folder under the new name counts as a copy under way until then.
     private async renameFailed(renaming: Renaming): Promise<void> {
         if (!this._renaming.has(renaming)) return;
+        if (await this.copying(renaming, true) && Date.now() + 2 * FAILED_MS < renaming.until) {
+            setTimeout(() => void this.renameFailed(renaming), FAILED_MS);
+            return;
+        }
         for (const [key, edits] of [...renaming.carried]) {
             const { document } = edits;
             if (renaming.from.has(key) || document.panels.size === 0 || !document.hasUnsavedEdits()) continue;
@@ -620,6 +667,30 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             this._carried.delete(key);
             if (!this._carried.has(from)) this.carry(from, edits);
         }
+    }
+
+    // Whether VS Code still copies files for `renaming`: the old name of one
+    // is still there and its new name holds something that was not there
+    // when VS Code told of the rename. A file there is still copied while it
+    // changed since the last look or is smaller than the old one. VS Code
+    // copied a file, could not delete the old one and gave up: a folder
+    // without write access, a file another program holds open on Windows.
+    // Taken for a copy under way for good, the tab stayed marked saved and
+    // closing it lost the edits. A folder's own date does not change while a
+    // large file in it is copied, so a folder there counts as a copy under
+    // way until renameFailed gives up on it. A file that was under the new
+    // name before is no copy. A rename onto it that failed left it as it
+    // was. With `look` what the new names hold now is kept for the next look.
+    private async copying(renaming: Renaming, look = false): Promise<boolean> {
+        const copies = await Promise.all(renaming.files.map(async ({ oldUri, newUri }, i) => {
+            const [source, target] = await Promise.all([statOf(oldUri), statOf(newUri)]);
+            const last = renaming.looked[i];
+            if (look) renaming.looked[i] = target;
+            if (!source || !target) return false;
+            const was = (stat: vscode.FileStat | undefined) => stat?.size === target.size && stat?.mtime === target.mtime;
+            return !was(renaming.targets[i]) && (!was(last) || target.type !== vscode.FileType.File || target.size < source.size);
+        }));
+        return copies.includes(true);
     }
 
     private carry(key: string, edits: Carried): void {
@@ -675,10 +746,16 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
     // file under its old name again, which waits for them (see
     // openCustomDocument). The edits `renaming` handed on wait under the
     // name they end up with already. Moved once more, the edits of a swap
-    // through a third name went back to the name they came from.
+    // through a third name went back to the name they came from. An undo
+    // leaves a grid still open under the name it brings back with its own
+    // edits, the same as carryOpen. Cancel at a folder rename left it open.
+    // The edits of a tab of the new name not shown before the undo went
+    // there all the same and waited as long as that grid stayed open. The
+    // next rename brought them back over a save made since. A rename told of
+    // beforehand closes a grid of a file it writes over only afterwards.
     private followCarried(files: readonly { readonly oldUri: vscode.Uri; readonly newUri: vscode.Uri }[], renaming?: Renaming): void {
         const move = (to: string, edits: Carried, from?: string) => {
-            if (this._carried.has(to)) return;
+            if (this._carried.has(to) || (!renaming && this._documents.has(to))) return;
             this.carry(to, edits);
             renaming?.carried.set(to, edits);
             if (from !== undefined) renaming?.from.set(to, from);
@@ -691,14 +768,17 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
                 move(to, edits, kept === this._carried ? key : undefined);
             }
         }
-        for (const [key, { document, from }] of [...this._taking]) {
+        for (const [key, taking] of [...this._taking]) {
+            const { document, from } = taking;
             const to = renaming?.carried.get(key) === from ? undefined : renamedTo(key, files);
             if (to === undefined) continue;
             this._taking.delete(key);
             // The edits went on, so should VS Code still give it an editor,
-            // its tab of the vanished name does not ask to save them.
+            // its tab of the vanished name does not ask to save them. While
+            // the file is still read for them, the document does not know
+            // yet what the file holds (see takeEdits).
             this._unsaved.delete(document);
-            move(to, carried(document));
+            move(to, taking.read ? carried(document) : { ...from, document });
         }
     }
 
@@ -812,6 +892,8 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         // The unsaved edits of a file VS Code renamed or moved to this one
         // (see carryEdits). They are taken once, whatever this open does.
         let from = this.takeCarried(uri);
+        const back = from ? undefined : this.takeBack(uri);
+        if (back) from = await back;
 
         // Hot exit: VS Code saved the unsaved edits with backupCustomDocument
         // and now hands them back. Reading the file instead brought the tab
@@ -971,11 +1053,46 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         return from;
     }
 
-    // All of the file's text, so the size question is not asked.
+    // A tab VS Code had not shown since an earlier rename is shown while a
+    // later move of its file runs. The move handed its edits on to the new
+    // name already (see followCarried) and one that fails gives them back
+    // only FAILED_MS later (see renameFailed). The tab showed the file from
+    // disk and looked saved. The edits went back under its name after it had
+    // opened and closing it lost them. So it takes them back. Should the move
+    // go through after all, they go along with the grid VS Code closes for it
+    // (see keepClosed). While VS Code copies the file to another drive they
+    // stay where they are: the tab marked unsaved had auto-save write the
+    // file during the copy (see renameFailed). Undefined without such edits.
+    private takeBack(uri: vscode.Uri): Promise<Carried | undefined> | undefined {
+        const key = uri.toString();
+        for (const renaming of this._renaming) {
+            for (const [to, was] of renaming.from) {
+                const edits = renaming.carried.get(to);
+                if (was !== key || !edits || this._carried.get(to) !== edits) continue;
+                return this.copying(renaming).then(copying => {
+                    if (copying || !this._renaming.has(renaming) || this._carried.get(to) !== edits) return this.takeCarried(uri);
+                    renaming.carried.delete(to);
+                    this._carried.delete(to);
+                    return edits;
+                });
+            }
+        }
+        return undefined;
+    }
+
+    // All of the file's text, so the size question is not asked. The
+    // document takes the edits from the moment it is made. An extension
+    // renamed the file again while it was still read for them. That rename
+    // did not find the document, whose tab of the vanished name then came up
+    // unsaved with the edits. Save there wrote that file again.
     private async openCarried(uri: vscode.Uri, from: Carried): Promise<CsvDocument> {
         const doc = new CsvDocument(uri, from.content, from.document.delimiter, false, 'full', 0, false);
+        const taking = { document: doc, from, read: false };
+        this._taking.set(uri.toString(), taking);
         await this.takeEdits(doc, from);
-        this._taking.set(uri.toString(), { document: doc, from });
+        taking.read = true;
+        // A rename took the edits on meanwhile (see followCarried).
+        if (this._taking.get(uri.toString()) !== taking) this._unsaved.delete(doc);
         return doc;
     }
 
@@ -1077,7 +1194,12 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             document.focused.delete(webviewPanel);
             const typed = document.typing.delete(webviewPanel) ? document.typed.get(webviewPanel) : undefined;
             document.typed.delete(webviewPanel);
-            document.flushes.get(webviewPanel)?.take(undefined);
+            // A wait for the value being typed in this editor ends. The
+            // value handed on to the other editors below counts as its
+            // answer. Without it the value went with the editor. Ended like
+            // an answer that brought nothing, the wait let a save write the
+            // file as if nothing was missing (see saveCustomDocument).
+            document.flushes.get(webviewPanel)?.take(typed !== undefined && document.panels.size > 0 ? typed : CLOSED);
             if (document.panels.size > 0) {
                 // VS Code closes a Source Control diff without asking while
                 // the file's grid tab is open. Neither Ctrl+W nor the close
@@ -1345,9 +1467,10 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
     // asked for the file with the value in it, which leaves the cell open.
     // Messages from one editor arrive in order, so an edit it sent before its
     // answer is already in the document. An editor that does not answer
-    // within `waitMs` is not waited for. Its value is then missing from the
-    // file. The result says whether that happened. The other editors get the
-    // text as they would an edit (takeText). The commit that follows brings
+    // within `waitMs` or closes first is not waited for. Its value is then
+    // missing from the file. The result says whether that happened and
+    // whether an editor closed. The other editors get the text as they
+    // would an edit (takeText). The commit that follows brings
     // nothing new. Without the text they kept the old one and their next
     // edit wrote it back over the value. The result also holds the count of
     // changes when the first answer came. A change counted after that is not
@@ -1355,7 +1478,7 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
     // can come in the same read of a remote connection as the answer itself.
     // The extension then handles both before the wait here is over. Counted
     // afterwards, that key looked saved and closing the tab lost it.
-    private async flushTyping(document: CsvDocument, waitMs = saveWait(document)): Promise<{ missed: boolean; changes: number }> {
+    private async flushTyping(document: CsvDocument, waitMs = saveWait(document)): Promise<{ missed: boolean; closed: boolean; changes: number }> {
         const asking = [...document.typing];
         const entries: { changes?: number }[] = [];
         const answers = asking.map(panel => {
@@ -1389,8 +1512,9 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
             });
         });
         // The answers went into the document as they came ('flushed').
-        const missed = (await Promise.all(answers)).some(text => text === NO_ANSWER);
-        return { missed, changes: Math.min(document.changes, ...entries.map(entry => entry.changes ?? Infinity)) };
+        const texts = await Promise.all(answers);
+        const closed = texts.includes(CLOSED);
+        return { missed: closed || texts.includes(NO_ANSWER), closed, changes: Math.min(document.changes, ...entries.map(entry => entry.changes ?? Infinity)) };
     }
 
     // Re-reads the file and hands it to every editor of the document. The
@@ -1647,7 +1771,17 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
 
     // ── Save / Revert / Backup ──
 
-    async saveCustomDocument(document: CsvDocument, _cancellation: vscode.CancellationToken): Promise<void> {
+    async saveCustomDocument(document: CsvDocument, cancellation: vscode.CancellationToken): Promise<void> {
+        const saving = this.writeDocument(document, cancellation);
+        document.saving = saving;
+        try {
+            await saving;
+        } finally {
+            if (document.saving === saving) document.saving = undefined;
+        }
+    }
+
+    private async writeDocument(document: CsvDocument, _cancellation: vscode.CancellationToken): Promise<void> {
         if (document.isPreview) {
             vscode.window.showWarningMessage('Cannot save in preview mode. Open the full file to edit.');
             return;
@@ -1657,6 +1791,15 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
         const waited = !document.conflict && document.typing.size > 0;
         const flushed = waited ? await this.flushTyping(document) : undefined;
         const missed = !!flushed?.missed;
+        // The grid closed before it answered: VS Code renamed or moved the
+        // file (see carryEdits). The save wrote the text without the value
+        // to the old name after the move. The file the user renamed away came
+        // back next to the new one, which the edits had gone on to. So no
+        // save writes to a name no editor shows the document under any more
+        // or whose file is gone.
+        if (flushed?.closed && (this._documents.get(document.uri.toString()) !== document || await statOf(document.uri) === undefined)) {
+            throw new Error(TYPED_NOT_SAVED);
+        }
         // The changes are counted as they were when the answer came (see
         // flushTyping). Anything that comes in after it, during the read
         // below or during the write, marks the tab again once the save is
