@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { createHash } from 'crypto';
 import { getWebviewContent } from './webview';
+import { KOFI_URL } from './updateNote';
 import { delimiterOfFile } from './webview/utils/csv';
 import { SETTING_DEFAULTS, isSettingKey, type Settings, type SettingKey } from './webview/settings';
 import {
@@ -1329,6 +1330,11 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
                 if (isSettingKey(msg.key) && typeof msg.value === 'boolean') {
                     this.context.globalState.update('csvGridEditor.' + msg.key, msg.value);
                 }
+
+            // The Ko-fi link at the bottom of the settings menu. The address is
+            // fixed here, the webview only asks for it to be opened.
+            } else if (msg.type === 'openSupport') {
+                void vscode.env.openExternal(vscode.Uri.parse(KOFI_URL));
 
             // "First row is the header", for this file only. The file is the
             // document this webview belongs to, never one the message names,

@@ -136,6 +136,7 @@ export function getWebviewContent(
             <span class="goto-label" style="margin:0;">Settings</span>
         </div>
         <div id="settings-list" class="settings-list"></div>
+        <button id="settings-support" class="settings-support" type="button" title="Opens ko-fi.com/robinreiche in the browser"><i class="codicon codicon-coffee"></i> Buy me a coffee on Ko-fi</button>
     </div>
 
     <!-- Delimiter dropdown [F2] -->

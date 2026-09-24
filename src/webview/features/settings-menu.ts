@@ -223,6 +223,10 @@ export function setupSettingsMenu(): void {
         if (!wasOpen) openMenu();
     });
 
+    document.getElementById('settings-support')?.addEventListener('click', () => {
+        vscodeApi.postMessage({ type: 'openSupport' });
+    });
+
     document.addEventListener('mousedown', (evt) => {
         const pop = document.getElementById('settings-popover');
         if (!pop || pop.classList.contains('hidden')) return;
