@@ -33,10 +33,11 @@ const CANCELLED_PREVIEW_MODE = '__cancelled__';
 const FLUSH_TIMEOUT_MS       = 1000;
 const FLUSH_CHARS_PER_MS     = 1000;
 // How long a hot exit backup waits for it. The grid writes out the whole
-// file for its answer. On a large file or a busy machine that took longer
-// than the second a save waits. The backup then went without the value and
-// the restart lost it. Nobody waits for a backup while typing, but quitting
-// does, so it does not wait for ever either.
+// file for its answer. A backup once waited the one second a save of a small
+// file waits. On a large file or a busy machine that was not enough. The
+// backup then went without the value and the restart lost it. Nobody waits
+// for a backup while typing, but quitting does, so it does not wait for ever
+// either.
 const BACKUP_TIMEOUT_MS      = 5000;
 const NO_ANSWER              = Symbol('no answer');
 // What a save says that did not get the value being typed in time (see
