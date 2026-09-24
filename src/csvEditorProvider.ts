@@ -1242,9 +1242,18 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
                 // between them. The save takes the first of them, so a key
                 // after it is not in the file. Counted again at the second
                 // answer, that key looked saved.
+                // The text is taken into the document right here, in the
+                // order this editor's messages come. Taken once the save's
+                // wait was over, it went in after a commit the editor sent
+                // right behind its answer and wrote the older text over it.
+                // Only the first answer counts, see above.
                 const flush = document.flushes.get(webviewPanel);
-                if (flush) {
-                    if (flush.changes === undefined) flush.changes = document.changes;
+                if (flush && flush.changes === undefined) {
+                    flush.changes = document.changes;
+                    if (typeof msg.text === 'string' && msg.text !== document.content) {
+                        document.content = msg.text;
+                        document.post({ type: 'update', text: msg.text, delimiter: document.delimiter }, webviewPanel);
+                    }
                     flush.take(msg.text);
                 }
                 // The value the save took replaces an older one kept from
@@ -1379,14 +1388,8 @@ export class CsvEditorProvider implements vscode.CustomEditorProvider<CsvDocumen
                 });
             });
         });
-        let missed = false;
-        (await Promise.all(answers)).forEach((text, i) => {
-            if (typeof text === 'string' && text !== document.content) {
-                document.content = text;
-                document.post({ type: 'update', text, delimiter: document.delimiter }, asking[i]);
-            }
-            if (text === NO_ANSWER) missed = true;
-        });
+        // The answers went into the document as they came ('flushed').
+        const missed = (await Promise.all(answers)).some(text => text === NO_ANSWER);
         return { missed, changes: Math.min(document.changes, ...entries.map(entry => entry.changes ?? Infinity)) };
     }
 

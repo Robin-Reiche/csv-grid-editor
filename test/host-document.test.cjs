@@ -2241,6 +2241,26 @@ async function main() {
         assert.strictEqual(t.tab.isDirty, true, 'the key typed after the answer sits behind a tab that looks saved');
     });
 
+    // The grid commits the cell right behind its answer and both come in one
+    // read. The answer went into the document only once the save's wait was
+    // over, so it wrote the older text over the commit. The grid showed the
+    // committed value, the file got the one before it.
+    await test('a commit that comes right behind the answer to a save is kept', async () => {
+        const p = file('typing-commit-behind.csv', 'h\n1\n');
+        const t = await open(p);
+        await t.typing();
+        const saving = t.save();
+        await tick();
+        t.flushed('h\nTYP\n');
+        t.edit('h\nTYPX\n');
+        t.typingEnded();
+        await saving;
+        await tick();
+        assert.strictEqual(t.doc.content, 'h\nTYPX\n', 'the committed value was replaced by the older answer');
+        await t.save();
+        assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\nTYPX\n');
+    });
+
     // A save that gave up on the grid's answer is followed by one that asks
     // again. The late answer to the first question, a key and the answer to
     // the second can then come in that one read. The save takes the first
