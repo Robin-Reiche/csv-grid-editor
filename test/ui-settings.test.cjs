@@ -89,6 +89,11 @@ runSuite('settings menu (browser)', [
             await t.init(csv);
             t.check(!!document.getElementById('btn-settings'), 'the toolbar has a gear');
             t.check(!document.getElementById('btn-colormode'), 'the color button left the toolbar for the menu');
+            const support = document.querySelector('#settings-popover #settings-support');
+            support.click();
+            t.check(t.sent('openSupport').length === 1, 'the Ko-fi entry in the menu asks the extension to open Ko-fi');
+            t.check(!support.closest('a') && !support.querySelector('a'),
+                'it is no link, which would take the grid page itself to Ko-fi');
             t.check(!document.getElementById('btn-settings').classList.contains('btn-active'),
                 'the gear is unmarked while everything is at its default');
             const c = t.container().classList;
