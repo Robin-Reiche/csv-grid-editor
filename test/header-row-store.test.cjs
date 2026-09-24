@@ -37,6 +37,7 @@ const vscodeStub = {
         createFileSystemWatcher: () => ({ onDidChange() {}, onDidCreate() {}, dispose() {} }),
     },
     window: {}, commands: {}, Disposable: { from() {} },
+    env: {},
 };
 
 const load = Module._load;

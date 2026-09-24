@@ -188,6 +188,9 @@ const vscodeStub = {
     commands: {},
     Disposable: { from() {} },
     CancellationTokenSource: class { constructor() { this.token = { isCancellationRequested: false }; } },
+    // A test names a remote to act as a window whose extensions run on
+    // another machine.
+    env: { remoteName: undefined },
 };
 
 // VS Code's tabs, as far as the provider looks at them: one editor group with
@@ -336,6 +339,7 @@ let failures = 0;
 async function test(name, fn) {
     vscodeStub.workspace.save = workspaceSave;
     vscodeStub.workspace.workspaceFolders = undefined;
+    vscodeStub.env.remoteName = undefined;
     warnings.length = 0;
     errors.length = 0;
     fakeSize = null;
@@ -1863,6 +1867,20 @@ async function main() {
         assert.deepStrictEqual(t.shared(), [true, false], 'the editor left alone was not told');
     });
 
+    // With the extension on another machine (Remote-SSH, WSL, a dev
+    // container) every message from the grid goes over the network. The
+    // grid sent the whole file with every key while another editor showed
+    // it. On a slow upload a save waited seconds behind those copies. So
+    // the grid is told where the extension runs.
+    await test('an editor is told whether the extension runs on another machine', async () => {
+        for (const [remoteName, remote] of [[undefined, false], ['ssh-remote', true]]) {
+            vscodeStub.env.remoteName = remoteName;
+            const t = await open(file('typed-remote.csv', 'h\n1\n'));
+            await t.ready();
+            assert.strictEqual(t.posted.find(m => m.type === 'init').remote, remote, 'told wrong with remoteName ' + remoteName);
+        }
+    });
+
     await test('a value given up with Escape is not handed over when the editor closes', async () => {
         const t = await open(file('typed-escape.csv', 'h\n1\n'));
         const diff = await t.openSecondEditor();
@@ -2205,6 +2223,24 @@ async function main() {
         assert.strictEqual(t.tab.isDirty, true, 'the rest of the value sits behind a tab that looks saved');
     });
 
+    // Over a remote connection without compression the grid's answer and the
+    // key typed right after it can come in one read, which the extension
+    // handles in one go. The key was counted as saved before the save looked
+    // at the count. The tab looked saved and closing it lost the key.
+    await test('a key typed right after the grid answered a save leaves the tab unsaved', async () => {
+        const p = file('typing-same-task.csv', 'h\n1\n');
+        const t = await open(p);
+        await t.typing();
+        const saving = t.save();
+        await tick();
+        t.flushed('h\nTYP\n');
+        t.typing();
+        await saving;
+        await tick();
+        assert.strictEqual(fs.readFileSync(p, 'utf8'), 'h\nTYP\n');
+        assert.strictEqual(t.tab.isDirty, true, 'the key typed after the answer sits behind a tab that looks saved');
+    });
+
     await test('a save with nothing new leaves the tab saved', async () => {
         const t = await open(file('typing-clean.csv', 'h\n1\n'));
         await t.edit('h\n2\n');
@@ -2348,6 +2384,22 @@ async function main() {
         await t.flushed('h\nTYPED\n');
         await backingUp;
         assert.strictEqual(fs.readFileSync(backupPath, 'utf8'), 'h\nTYPED\n', 'the backup gave up on the value');
+    });
+
+    // A save of a file of several MB waits longer than five seconds for the
+    // value. A backup of it gave up after five. It went without a value a
+    // save would still have taken and the restart lost it.
+    await test('a hot exit backup of a file of several MB waits as long as a save', async () => {
+        const text = 'h\n' + '1234567890\n'.repeat(500000);
+        const p = file('typing-backup-mb.csv', text);
+        const t = await open(p);
+        await t.typing();
+        const backupPath = path.join(tmpDir, 'typing-backup-mb.backup');
+        const backingUp = t.backup(backupPath);
+        await new Promise(r => setTimeout(r, 5500));
+        await t.flushed(text + 'TYPED\n');
+        await backingUp;
+        assert.ok(fs.readFileSync(backupPath, 'utf8') === text + 'TYPED\n', 'the backup gave up on the value');
     });
 
     await test('a save while a backup waits for the value still gives up after its own time', async () => {
@@ -3422,6 +3474,73 @@ async function main() {
         assert.strictEqual(fs.readFileSync(moved, 'utf8'), 'h\nAAA\n', 'the save was refused');
         assert.strictEqual(fs.readFileSync(path.join(dir, 'a.csv'), 'utf8'), 'h\nAAA\n');
     });
+
+    // Ctrl+Z in the Explorer undoes a folder rename without telling the
+    // extension beforehand. VS Code tells of it while the grids of the files
+    // in the folder are still open under the name the undo took away (1.138,
+    // 1.128 and 1.80.2). It asks about each one with unsaved edits and only
+    // then closes it and opens the file under the old folder name. Don't
+    // Save lost the edits. Save wrote them into a copy of the renamed folder
+    // and the tab of the old name came up saved. Cancel left them in a tab
+    // of a name that no longer exists. The rename itself keeps them in the
+    // new tabs whatever the answer.
+    for (const answer of ["Don't Save", 'Save', 'Cancel']) {
+        await test(`an undone folder rename keeps the unsaved edits (${answer})`, async () => {
+            const provider = registerProvider();
+            const n = `ren-dir-undo-${answer.length}`;
+            const dir = path.join(tmpDir, n);
+            const dir2 = path.join(tmpDir, n + '-2');
+            fs.mkdirSync(dir);
+            const a = await open(file(`${n}/a.csv`, 'h\na\n'), {}, undefined, provider);
+            await a.edit('h\nAAA\n');
+            const c = await open(file(`${n}/c.csv`, 'h\nc\n'), {}, undefined, provider);
+            const b = await open(file(`${n}/b.csv`, 'h\nb\n'), {}, undefined, provider);
+            await b.edit('h\nBBB\n');
+            const [ra, rc, rb] = await renameFiles(provider, [[dir, dir2]], [a, c, b]);
+            const sa = await ra.show();
+            assert.ok(sa.tab.isDirty && rb.tab.isDirty, 'the test did not reach the renamed tabs with the edits');
+            // The undo. VS Code opens a tab of a.csv under the old folder
+            // name at once, behind the others. It closes that of c.csv.
+            fs.renameSync(dir2, dir);
+            didRenameFiles([[dir2, dir]]);
+            const ua = unshownTab(provider, path.join(dir, 'a.csv'));
+            rc.close();
+            const answerFor = async old => {
+                if (answer === "Don't Save") {
+                    await old.closeTab({ revert: true });
+                } else if (answer === 'Save') {
+                    // VS Code makes the folder again to write the file into it.
+                    fs.mkdirSync(dir2, { recursive: true });
+                    await old.save();
+                    await old.closeTab();
+                }
+            };
+            // Cancel ends the questions. The tab of b.csv under the old
+            // folder name then opens only when the user opens the file.
+            await answerFor(sa);
+            const nb = await open(path.join(dir, 'b.csv'), {}, undefined, provider);
+            await answerFor(rb);
+            const na = await ua.show();
+            assert.strictEqual(na.doc.content, 'h\nAAA\n', 'a.csv lost its edits');
+            assert.strictEqual(na.tab.isDirty, true, 'a.csv looks saved and closes without asking');
+            assert.strictEqual(nb.doc.content, 'h\nBBB\n', 'b.csv lost its edits');
+            assert.strictEqual(nb.tab.isDirty, true, 'b.csv looks saved and closes without asking');
+            assert.deepStrictEqual(warnings.map(w => w.msg), [], 'a file nobody changed was reported as changed on disk');
+            assert.strictEqual(fs.readFileSync(path.join(dir, 'a.csv'), 'utf8'), 'h\na\n');
+            if (answer === 'Save') assert.strictEqual(fs.readFileSync(path.join(dir2, 'a.csv'), 'utf8'), 'h\nAAA\n');
+            if (answer === 'Cancel') assert.ok(sa.tab.isDirty && sa.doc.content === 'h\nAAA\n', 'the tab of the vanished name lost the edits');
+            await nb.save();
+            assert.strictEqual(fs.readFileSync(path.join(dir, 'b.csv'), 'utf8'), 'h\nBBB\n', 'the save was refused');
+            if (answer !== "Don't Save") return;
+            // Edits thrown away with Don't Save on the tab they came to do
+            // not come back when the folder is renamed once more.
+            await na.closeTab({ revert: true });
+            const again = await open(path.join(dir, 'a.csv'), {}, undefined, provider);
+            const [later] = await renameFiles(provider, [[dir, path.join(tmpDir, n + '-3')]], [again]);
+            assert.strictEqual(later.doc.content, 'h\na\n', 'the edits thrown away came back');
+            assert.strictEqual(later.changes(), 0, 'the tab was marked unsaved');
+        });
+    }
 
     await test('edits carried to a tab closed before it was shown are dropped', async () => {
         const provider = registerProvider();

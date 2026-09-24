@@ -507,6 +507,35 @@ runSuite('typing (browser)', [
             t.check(t.sent('typedText').length === 1, 'and not again after the pause (' + t.sent('typedText').length + ')');
         }`,
     },
+    // With the extension on another machine every message goes over the
+    // network. The whole file sent with every key queued up there and a
+    // save waited seconds behind it on a slow upload. So the grid waits for
+    // the pause then, whatever the size of the file.
+    {
+        name: 'with another editor and the extension on another machine a small file is sent once the typing pauses',
+        csv: 'name,city\nAnna,Berlin\nBen,Oslo\n',
+        steps: `async (t, csv) => { ${HELPERS}
+            window.postMessage({ type: 'init', text: csv, delimiter: ',', shared: true, remote: true }, '*');
+            await t.wait(900);
+            const ta = await t.open(0, 1);
+            if (!ta) return;
+            t.input(ta, 'T');
+            await t.wait(100);
+            t.input(ta, 'TY');
+            await t.wait(100);
+            t.check(t.sent('typedText').length === 0, 'the file was sent with every key (' + t.sent('typedText').length + ')');
+            await t.wait(500);
+            const sent = t.sent('typedText');
+            t.check(sent.length === 1 && sent[0].text === 'name,city\\nAnna,TY\\nBen,Oslo\\n', 'the file with the value is sent once ('
+                + JSON.stringify(sent) + ')');
+            // Ctrl+W closes the diff right away, before any pause.
+            t.input(ta, 'TYX');
+            ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'w', code: 'KeyW', keyCode: 87, ctrlKey: true, bubbles: true, cancelable: true }));
+            const now = t.sent('typedText');
+            t.check(now.length === 2 && now[1].text === 'name,city\\nAnna,TYX\\nBen,Oslo\\n', 'a key with Ctrl does not send the value at once ('
+                + JSON.stringify(now) + ')');
+        }`,
+    },
     {
         name: 'a value typed back to the cell\'s own is sent without a text',
         csv: 'name,city\nAnna,Berlin\nBen,Oslo\n',
