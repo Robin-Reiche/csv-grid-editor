@@ -49,6 +49,18 @@ const HELPERS = `
         t.header(col).querySelector('.ag-header-cell-label').dispatchEvent(new MouseEvent('click', { bubbles: true }));
         await t.wait(400);
     };
+    // A letter pressed on the keyboard: it goes to whatever has the focus
+    // and types into a text box unless the page stops it.
+    t.typeKey = (ch) => {
+        const el = document.activeElement;
+        const ev = new KeyboardEvent('keydown', { key: ch, code: 'Key' + ch.toUpperCase(), keyCode: ch.toUpperCase().charCodeAt(0), bubbles: true, cancelable: true });
+        el.dispatchEvent(ev);
+        if (!ev.defaultPrevented && el.tagName === 'TEXTAREA') {
+            el.setRangeText(ch, el.selectionStart, el.selectionEnd, 'end');
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        return el;
+    };
 `;
 
 const steps = (body) => `async (t, csv) => { ${HELPERS} await t.init(csv); ${body} }`;
@@ -214,6 +226,98 @@ runSuite('typing (browser)', [
             window.postMessage({ type: 'flush' }, '*');
             await t.wait(300);
             t.check(t.order() === 'typing,edit,typingEnded,flushed', 'the edit comes before the answer (' + t.order() + ')');
+        `),
+    },
+    // The grid reports that a cell closed a moment after Enter or Tab. A key
+    // pressed within those few milliseconds opened the next cell and told
+    // the extension of its value first. The late report of the first cell
+    // then took the mark off. Auto-save saved the file without the letter
+    // and marked the tab saved. Ctrl+W threw the letter away.
+    {
+        name: 'a letter typed right after Enter keeps the tab marked',
+        csv: 'name,city\nAnna,Berlin\nBen,Oslo\n',
+        steps: steps(`
+            const ta = await t.open(0, 1);
+            if (!ta) return;
+            t.input(ta, 'ab');
+            ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }));
+            document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'x', code: 'KeyX', keyCode: 88, bubbles: true, cancelable: true }));
+            await t.wait(300);
+            const tb = t.editor();
+            if (!tb || tb.value !== 'x') { t.check(false, 'the letter opens the cell below (' + (tb && JSON.stringify(tb.value)) + ')'); return; }
+            const order = t.order().split(',');
+            t.check(order.lastIndexOf('typing') > order.lastIndexOf('typingEnded'), 'the extension still knows of the letter (' + t.order() + ')');
+            const f = await t.flush();
+            t.check(!!f && f.text === 'name,city\\nAnna,ab\\nBen,x\\n', 'a save takes the letter (' + JSON.stringify(f) + ')');
+            // The save took the letter, so Escape brings the text the grid holds.
+            await t.key(tb, 'Escape');
+            const ended = t.ended();
+            t.check(t.order().endsWith(',typingEnded') && ended[ended.length - 1].text === 'name,city\\nAnna,ab\\nBen,Oslo\\n',
+                'Escape in the cell below ends the report and gives the letter up (' + t.order() + ')');
+        `),
+    },
+    {
+        name: 'a value typed right after Tab keeps the tab marked',
+        csv: 'name,city\nAnna,Berlin\nBen,Oslo\n',
+        steps: steps(`
+            const ta = await t.open(0, 0);
+            if (!ta) return;
+            t.input(ta, 'ab');
+            ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', code: 'Tab', keyCode: 9, bubbles: true, cancelable: true }));
+            const tb = t.editor();
+            if (!tb || tb === ta) { t.check(false, 'Tab opens the next cell'); return; }
+            t.input(tb, 'x');
+            await t.wait(300);
+            const order = t.order().split(',');
+            t.check(order.lastIndexOf('typing') > order.lastIndexOf('typingEnded'), 'the extension still knows of the value (' + t.order() + ')');
+            const f = await t.flush();
+            t.check(!!f && f.text === 'name,city\\nab,x\\nBen,Oslo\\n', 'a save takes the value (' + JSON.stringify(f) + ')');
+        `),
+    },
+    {
+        name: 'with another editor a letter typed right after Enter is sent',
+        csv: 'name,city\nAnna,Berlin\nBen,Oslo\n',
+        steps: steps(`
+            window.postMessage({ type: 'shared', value: true }, '*');
+            await t.wait(50);
+            const ta = await t.open(0, 1);
+            if (!ta) return;
+            t.input(ta, 'ab');
+            ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }));
+            document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'x', code: 'KeyX', keyCode: 88, bubbles: true, cancelable: true }));
+            await t.wait(300);
+            if (!t.editor() || t.editor().value !== 'x') { t.check(false, 'the letter opens the cell below'); return; }
+            const sent = t.sent('typedText');
+            t.check(sent.length > 0 && sent[sent.length - 1].text === 'name,city\\nAnna,ab\\nBen,x\\n', 'the file with the letter is sent ('
+                + JSON.stringify(sent) + ')');
+        `),
+    },
+    // Tab opens the next cell with its value selected. A moment later the
+    // grid puts the focus back on that cell, beside the editor. The editor
+    // took it back only after another moment. A key pressed in between went
+    // nowhere and the editor kept the old value selected.
+    {
+        name: 'a letter typed while the grid puts the focus on the cell after Tab is typed',
+        csv: 'name,city\nAnna,Berlin\nBen,Oslo\n',
+        steps: steps(`
+            const ta = await t.open(0, 0);
+            if (!ta) return;
+            t.input(ta, 'ab');
+            // The key comes right after the focus left the next cell's
+            // editor for the cell, the earliest a key can come.
+            let typedInto = null;
+            document.addEventListener('blur', e => {
+                if (typedInto || e.target === ta || !(e.target instanceof HTMLTextAreaElement)) return;
+                typedInto = 'pending';
+                setTimeout(() => { typedInto = t.typeKey('x'); });
+            }, true);
+            ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', code: 'Tab', keyCode: 9, bubbles: true, cancelable: true }));
+            await t.wait(300);
+            if (!typedInto) { t.check(false, 'the grid did not move the focus to the cell'); return; }
+            const tb = t.editor();
+            t.check(!!tb && tb.value === 'x', 'the letter replaces the value (' + (tb && JSON.stringify(tb.value)) + ', typed into '
+                + (typedInto.tagName || typedInto) + ')');
+            t.check(document.activeElement === tb, 'the editor has the keyboard');
         `),
     },
     {

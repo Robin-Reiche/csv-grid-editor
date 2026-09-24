@@ -148,10 +148,10 @@ export function stepHistory(h: TextHistory, delta: -1 | 1): string | null {
 // whole file, a pause on a large one. Told of every change, VS Code waits
 // until the typing pauses, as it does for its own editor.
 //
-// Whether the extension was told about the editor that is open now. Kept here
-// and not in the editor: the editor is gone by the time the grid reports it
-// closed (editorClosed).
-let typingReported = false;
+// The editor that told the extension of a change and has not been reported
+// closed yet. Kept here and not in the editor: the editor is gone by the time
+// the grid reports it closed (editorClosed).
+let typingEditor: MultilineCellEditor | null = null;
 // The text the last save took from the open editor, see flushOpenEditor.
 let handedOver: string | null = null;
 
@@ -160,12 +160,20 @@ let handedOver: string | null = null;
 // When a save took the file with the value in it and the cell was then left
 // with Escape, the grid holds another text than the one the save took. The
 // extension is given that text so it drops the value as well.
+//
+// The grid reports it a moment after Enter or Tab. A key pressed within those
+// few milliseconds opened the next cell first. That cell told the extension
+// of its value before this came, which then took the mark off. Auto-save
+// saved the file without the value and marked the tab saved. Ctrl+W threw
+// the value away. So while the editor that told of a change is still open,
+// the report of the one before it changes nothing.
 export function editorClosed(): void {
+    if (typingEditor !== null && state.gridApi?.getCellEditorInstances().includes(typingEditor)) return;
     stopSending();
     const handed = handedOver;
     handedOver = null;
-    if (!typingReported) return;
-    typingReported = false;
+    if (typingEditor === null) return;
+    typingEditor = null;
     vscodeApi.postMessage(handed !== null && handed !== state.rawCsvText
         ? { type: 'typingEnded', text: state.rawCsvText }
         : { type: 'typingEnded' });
@@ -210,7 +218,7 @@ let sendTimer: ReturnType<typeof setTimeout> | null = null;
 export function setShared(value: boolean): void {
     shared = value;
     if (!shared) stopSending();
-    else if (typingReported) sendSoon();
+    else if (typingEditor !== null) sendSoon();
 }
 
 // Right after the key rather than in it: a letter that opens the editor
@@ -280,10 +288,10 @@ export class MultilineCellEditor {
         this.eGui.appendChild(this.eTextArea);
 
         this.eGridCell = params.eGridCell ?? null;
+        this.eGridCell?.addEventListener('focusin', this.onCellFocus);
 
         this.eTextArea.addEventListener('keydown', this.onKeyDown);
         this.eTextArea.addEventListener('input', this.onInput);
-        this.eTextArea.addEventListener('blur', this.onBlur);
 
         // A letter, Backspace or Delete opens the editor changed already.
         this.reportFrom(value);
@@ -300,7 +308,7 @@ export class MultilineCellEditor {
         const value = this.getValue();
         if (value === this.reported) return;
         this.reported = value;
-        typingReported = true;
+        typingEditor = this;
         vscodeApi.postMessage({ type: 'typing' });
         if (shared) sendSoon();
     }
@@ -322,14 +330,23 @@ export class MultilineCellEditor {
         }
     }
 
-    // Deferred by a timeout on purpose: AG Grid's own restore runs off one too,
-    // so answering synchronously here would just be overwritten by it.
-    private onBlur = (): void => {
-        setTimeout(() => {
+    // The grid put the focus on the cell (see "Getting the focus back after a
+    // Tab"). The editor takes it back before a key can come. It used to wait
+    // for a timeout after the textarea lost the focus. A letter typed in that
+    // moment right after Tab landed on the cell and went nowhere. It lets the
+    // grid finish what it is doing first: Tab puts the focus on the cell it
+    // leaves right before it closes that cell's editor. The focus must not go
+    // back into an editor about to close.
+    private onCellFocus = (): void => {
+        queueMicrotask(() => {
             if (!shouldReclaimFocus(this.eTextArea.isConnected, document.activeElement, this.eGridCell)) return;
             this.eTextArea.focus();
         });
     };
+
+    destroy(): void {
+        this.eGridCell?.removeEventListener('focusin', this.onCellFocus);
+    }
 
     // Called when focus returns to a cell that is already editing (Tab-back).
     focusIn(): void {
