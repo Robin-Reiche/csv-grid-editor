@@ -200,6 +200,14 @@ runSuite('spaces around values (browser)', [
             t.check(JSON.stringify(order.slice(0, 3)) === JSON.stringify(['c', 'd', 'a'])
                 && order.slice(3).sort().join() === 'b,e',
                 'ascending puts -2, 0, 5 first and both blank cells after them (' + JSON.stringify(order) + ')');
+            // AG Grid turns the order around for a descending sort, which put
+            // the blank cells above the largest number (#42).
+            t.header(0).querySelector('.ag-header-cell-label').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await t.wait(250);
+            const desc = t.shownCol(1);
+            t.check(JSON.stringify(desc.slice(0, 3)) === JSON.stringify(['a', 'd', 'c'])
+                && desc.slice(3).sort().join() === 'b,e',
+                'descending puts 5, 0, -2 first and both blank cells still after them (' + JSON.stringify(desc) + ')');
         `),
     },
     {
