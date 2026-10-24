@@ -67,9 +67,10 @@ const GRID_ICONS = {
 // ── Type-aware sort comparators ───────────────────────────────────────────────
 // AG Grid's default comparator compares raw string values, which sorts dates,
 // times and numbers-stored-as-text incorrectly. Every column gets an explicit
-// comparator matching its detected type. Excel-style ordering: ascending sorts
-// the valid typed values first, then any value that doesn't parse as that type
-// (stray text, blanks) afterwards, compared as natural-order text.
+// comparator matching its detected type. Excel-style ordering: a sort puts the
+// valid typed values first, then any value that doesn't parse as that type
+// (stray text, blanks) afterwards, compared as natural-order text. Ascending
+// and descending alike.
 
 function parseTimeToSeconds(s: string): number {
     const m = s.trim().match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?/);
@@ -103,23 +104,29 @@ export function reapplySortAndFilter(): void {
     if (api.isAnyFilterPresent()) api.onFilterChanged();
 }
 
+// AG Grid hands a comparator the sort direction as its fifth argument.
+type SortComparator = (a: string, b: string, nodeA?: unknown, nodeB?: unknown, desc?: boolean) => number;
+
 // Builds a comparator that parses each value to a number via `parse`. Parseable
-// values sort numerically and come first; unparseable ones sort as text after.
-function typedComparator(parse: (s: string) => number): (a: string, b: string) => number {
+// values sort numerically and come first, unparseable ones sort as text after.
+function typedComparator(parse: (s: string) => number): SortComparator {
     // A cell of only spaces is blank, not a value. Number('   ') is 0, which put
     // such a cell in among the zeros instead of after the numbers.
     const read = (s: string) => s == null || String(s).trim() === '' ? NaN : parse(String(s));
-    return (a, b) => {
+    return (a, b, _nodeA, _nodeB, desc) => {
         const va = read(a);
         const vb = read(b);
         const aOk = !isNaN(va), bOk = !isNaN(vb);
         if (aOk && bOk) return va - vb;
-        if (aOk !== bOk) return aOk ? -1 : 1;
+        // AG Grid turns the whole result around for a descending sort, which
+        // put the blanks above the largest number (#42). Turning this one
+        // around first keeps them after the values in both directions.
+        if (aOk !== bOk) return (aOk ? -1 : 1) * (desc ? -1 : 1);
         return textCompare(a, b);
     };
 }
 
-export function makeComparator(colType: string): (a: string, b: string) => number {
+export function makeComparator(colType: string): SortComparator {
     if (colType === 'integer' || colType === 'float') return typedComparator(s => Number(s));
     if (colType === 'date' || colType === 'datetime') return typedComparator(s => Date.parse(s.trim()));
     if (colType === 'time') return typedComparator(parseTimeToSeconds);
