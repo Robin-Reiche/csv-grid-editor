@@ -2,6 +2,11 @@
 
 All notable changes to CSV Grid Editor are documented here.
 
+## [1.23.1] - 2026-10-24
+
+### Fixed
+- **Blank cells stay at the bottom of a descending sort** - In a number, date or time column the blank cells sorted after the values going up, but jumped to the top going down and sat above the largest value ([#42](https://github.com/Robin-Reiche/csv-grid-editor/issues/42)). They stay at the bottom in both directions now, the way a spreadsheet keeps them. The same goes for stray text in such a column, like `n/a` among the numbers.
+
 ## [1.23.0] - 2026-09-24
 
 ### Added
