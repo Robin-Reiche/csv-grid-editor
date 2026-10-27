@@ -162,7 +162,9 @@ export function createCombinedFilter(colType: ColType): any {
                     { id: 'eq',          label: 'Equals' },
                     { id: 'neq',         label: 'Does not equal' },
                     { id: 'startswith',  label: 'Begins with' },
+                    { id: 'notstartswith', label: 'Does not begin with' },
                     { id: 'endswith',    label: 'Ends with' },
+                    { id: 'notendswith', label: 'Does not end with' },
                     { id: 'blank',       label: 'Is blank' },
                     { id: 'notblank',    label: 'Is not blank' },
                 ];
@@ -257,7 +259,9 @@ export function createCombinedFilter(colType: ColType): any {
                 if (ct === 'eq')          return lo === lc;
                 if (ct === 'neq')         return lo !== lc;
                 if (ct === 'startswith')  return lo.startsWith(lc);
+                if (ct === 'notstartswith') return !lo.startsWith(lc);
                 if (ct === 'endswith')    return lo.endsWith(lc);
+                if (ct === 'notendswith') return !lo.endsWith(lc);
             }
             return true;
         }
