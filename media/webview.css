@@ -913,7 +913,7 @@ body.spaces-shown .csv-filter-value-label {
     font-size: 12px;
     color: var(--vscode-menu-foreground, var(--vscode-editor-foreground, #d4d4d4));
     min-width: 230px;
-    max-width: 280px;
+    max-width: 320px;
 }
 .csv-filter-section { padding: 8px 10px; }
 .csv-filter-section + .csv-filter-section { border-top: 1px solid var(--vscode-panel-border, #3c3c3c); }
@@ -1009,7 +1009,10 @@ body.spaces-shown .csv-filter-value-label {
 /* ── Multi-condition rows ── */
 .csv-filter-cond-rows { display: flex; flex-direction: column; gap: 0; }
 .csv-filter-cond-row { display: flex; align-items: center; gap: 4px; margin-bottom: 4px; }
-.csv-filter-cond-row .csv-filter-select { flex: 1; min-width: 0; }
+/* The condition list is as wide as its longest entry, so "Does not begin with"
+   or "≥ Greater than or equal" is read in full. Half the row cut them off. The
+   value box takes what is left. */
+.csv-filter-cond-row .csv-filter-select { flex: 0 0 auto; width: auto; }
 .csv-filter-cond-input { flex: 1; min-width: 0; margin-top: 0 !important; }
 /* AND/OR join toggle between condition rows — click to flip the operator. */
 .csv-filter-join-toggle {

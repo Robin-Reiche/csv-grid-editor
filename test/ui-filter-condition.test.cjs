@@ -123,4 +123,26 @@ runSuite('filter condition typing (browser)', [
             t.check(listed() === '(Blank)|abc1|Abc2|foo', 'the value list follows (' + listed() + ')');
         `),
     },
+    // The list took half the row and cut its longer entries off, "Does not
+    // begin" for "Does not begin with". A copy laid out on its own is as wide
+    // as the longest entry needs. Each column on a page of its own, so the
+    // panel measured is the one just opened.
+    ...[[0, 'notstartswith', 'text'], [1, 'gte', 'number']].map(([col, cond, kind]) => ({
+        name: 'the condition list of a ' + kind + ' column is wide enough for its longest entry',
+        csv: 'name,n\nabc,1\nfoo,2',
+        steps: steps(`
+            await t.init(csv);
+            window.agGrid = real;
+            await openFilter(${col});
+            // With a value box next to it, the list no longer has the row to itself.
+            await choose('${cond}');
+            const sel = document.querySelector('.csv-filter-panel .csv-filter-select');
+            const free = sel.cloneNode(true);
+            free.style.cssText = 'position: absolute; width: auto; flex: none;';
+            sel.parentElement.appendChild(free);
+            const needed = free.offsetWidth;
+            free.remove();
+            t.check(sel.offsetWidth >= needed, 'every entry shows in full (' + sel.offsetWidth + ' of ' + needed + ' px)');
+        `),
+    })),
 ]);
