@@ -2,6 +2,11 @@
 
 All notable changes to CSV Grid Editor are documented here.
 
+## [1.24.1] - 2026-10-27
+
+### Fixed
+- **Filter conditions are shown in full** - The condition list in a column filter took half the row and cut its longer entries off, so **Does not begin with** read as "Does not begin" and **Does not contain** as "Does not contai". The list is now as wide as its longest entry. The filter panel grows a little to leave room for the value.
+
 ## [1.24.0] - 2026-10-27
 
 ### Added
