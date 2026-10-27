@@ -2,6 +2,11 @@
 
 All notable changes to CSV Grid Editor are documented here.
 
+## [1.24.0] - 2026-10-27
+
+### Added
+- **Does not begin with and Does not end with in the column filter** - A text column could be filtered for values that begin or end with something, but not for the ones that do not ([#43](https://github.com/Robin-Reiche/csv-grid-editor/issues/43)). Both conditions sit next to the ones they turn around. Like **Does not contain** they ignore case and keep blank cells in view.
+
 ## [1.23.1] - 2026-10-24
 
 ### Fixed

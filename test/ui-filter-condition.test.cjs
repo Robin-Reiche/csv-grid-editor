@@ -7,6 +7,10 @@
 // the typing pauses instead of on each key. The key typed last is always the
 // one that applies.
 //
+// A text column offers "Does not begin with" and "Does not end with" next to
+// the conditions they turn around (#43). Like "Does not contain" they let
+// blank cells through.
+//
 // Run after `tsc -p ./`:  node test/ui-filter-condition.test.cjs
 
 const { runSuite } = require('./ui/harness.cjs');
@@ -97,6 +101,26 @@ runSuite('filter condition typing (browser)', [
             await t.wait(400);
             t.check(shown() === 20, 'a key typed right before the panel closes still applies (' + shown() + ' rows)');
             t.check(document.getElementById('btn-clear-filters').style.display !== 'none', 'and the column shows as filtered');
+        `),
+    },
+    {
+        name: 'does not begin with and does not end with',
+        csv: 'name,n\nabc1,1\nAbc2,2\nxabc,3\n,4\nfoo,5',
+        steps: steps(`
+            await t.init(csv);
+            window.agGrid = real;
+            const listed = () => [...document.querySelectorAll('.csv-filter-panel .csv-filter-value-label')].map(s => s.textContent).join('|');
+            await openFilter(0);
+            await choose('notstartswith');
+            type('ABC');
+            await t.wait(400);
+            t.check(shown() === 3, 'the rows that begin with abc in any case are hidden (' + shown() + ' rows)');
+            t.check(listed() === '(Blank)|foo|xabc', 'the value list keeps the blank and the rest (' + listed() + ')');
+            await choose('notendswith');
+            type('abc');
+            await t.wait(400);
+            t.check(shown() === 4, 'the rows that end with abc are hidden (' + shown() + ' rows)');
+            t.check(listed() === '(Blank)|abc1|Abc2|foo', 'the value list follows (' + listed() + ')');
         `),
     },
 ]);
